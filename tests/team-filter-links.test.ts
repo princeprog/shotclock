@@ -1,0 +1,24 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readTeamFilters, teamListHref } from '../lib/team-filter-links.ts'
+
+const leagueId = 'd28c0d55-601a-4b4b-9eb5-6107bf8b4308'
+const seasonId = 'e5287e1a-e071-4609-8a5c-d3de2a694542'
+
+test('team filters round trip safely through a local return link', () => {
+  const href = teamListHref({ search: 'City & Hawks', leagueId, seasonId })
+  const url = new URL(href, 'http://localhost')
+  assert.equal(url.pathname, '/manage/teams')
+  assert.deepEqual(readTeamFilters(Object.fromEntries(url.searchParams)), { search: 'City & Hawks', leagueId, seasonId })
+})
+
+test('invalid filter values are ignored and all filters default to empty', () => {
+  assert.deepEqual(readTeamFilters({ leagueId: '//example.com', seasonId: 'invalid', search: 'a'.repeat(121) }), { search: '', leagueId: '', seasonId: '' })
+  assert.equal(teamListHref(readTeamFilters({})), '/manage/teams')
+})
+
+test('the all-teams view survives a roster return link', () => {
+  const href = teamListHref({ search: 'hawks', leagueId: '', seasonId: '', all: true })
+  const url = new URL(href, 'http://localhost')
+  assert.deepEqual(readTeamFilters(Object.fromEntries(url.searchParams)), { search: 'hawks', leagueId: '', seasonId: '', all: true })
+})

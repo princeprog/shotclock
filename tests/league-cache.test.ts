@@ -1,0 +1,104 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { QueryObserver } from '@tanstack/react-query'
+import { makeQueryClient } from '../lib/query-client.ts'
+import { applyLeagueMutation, invalidateLeagueChange, leagueChangeForMutation, subscribeToCacheChanges } from '../lib/league-cache.ts'
+
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+test('a league query is reused on remount and refetches only when invalidated', async () => {
+  const client = makeQueryClient()
+  let requests = 0
+  const options = { queryKey: ['league', 'seasons/s1/standings'], queryFn: async () => ++requests }
+  const first = new QueryObserver(client, options)
+  const stopFirst = first.subscribe(() => {})
+  await first.refetch()
+  assert.equal(requests, 1)
+  stopFirst()
+  const second = new QueryObserver(client, options)
+  const stopSecond = second.subscribe(() => {})
+  await tick()
+  assert.equal(requests, 1)
+  await applyLeagueMutation(client, 'games/game1/score', 'POST', { homeScore: 90, awayScore: 80 }, { season_id: 's1' })
+  assert.equal(requests, 2)
+  stopSecond()
+  client.clear()
+})
+
+test('a score change invalidates only the affected season games, standings and dashboard', async () => {
+  const client = makeQueryClient()
+  const paths = ['organizations', 'organizations/o1/leagues', 'organizations/o1/teams', 'leagues/l1/venues', 'seasons/s1/games?status=scheduled&page=1', 'seasons/s1/standings', 'seasons/s1/dashboard', 'seasons/s1/teams', 'seasons/s2/games?status=completed', 'seasons/s2/standings']
+  for (const path of paths) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'games/g1/score', 'POST', {}, { season_id: 's1' })
+  const invalidated = paths.filter((path) => client.getQueryState(['league', path])?.isInvalidated)
+  assert.deepEqual(invalidated, ['seasons/s1/games?status=scheduled&page=1', 'seasons/s1/standings', 'seasons/s1/dashboard'])
+  client.clear()
+})
+
+test('roster, team and venue changes affect their related cached views', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'organizations/o1/leagues'], [{ id: 'l1' }])
+  client.setQueryData(['league', 'organizations/o1/teams?search=hawks'], [{ id: 't1', season_id: 's1' }, { id: 't1', season_id: 's2' }])
+  for (const path of ['season-teams/st1/roster', 'season-teams/st1/roster?search=lee', 'season-teams/st2/roster', 'seasons/s1/standings', 'seasons/s2/games?status=scheduled', 'seasons/s3/standings', 'leagues/l1/venues', 'organizations/o1/venues']) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'rosters/r1', 'PATCH', {}, { season_team_id: 'st1' })
+  assert.equal(client.getQueryState(['league', 'season-teams/st1/roster'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'season-teams/st1/roster?search=lee'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'season-teams/st2/roster'])?.isInvalidated, false)
+  const team = leagueChangeForMutation(client, 'teams/t1', 'PATCH', {}, { id: 't1', league_id: 'l1' })
+  assert.deepEqual(team.seasonIds, ['s1', 's2'])
+  await invalidateLeagueChange(client, team)
+  assert.equal(client.getQueryState(['league', 'seasons/s1/standings'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/games?status=scheduled'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s3/standings'])?.isInvalidated, false)
+  assert.equal(client.getQueryState(['league', 'leagues/l1/venues'])?.isInvalidated, false)
+  await applyLeagueMutation(client, 'leagues/l1/venues', 'POST', {}, { id: 'v1', league_id: 'l1' })
+  assert.equal(client.getQueryState(['league', 'leagues/l1/venues'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'organizations/o1/venues'])?.isInvalidated, true)
+  client.clear()
+})
+
+test('other-tab changes invalidate matching queries and session changes clear the cache', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { value: {}, configurable: true })
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'seasons/s1/standings'], [])
+  client.setQueryData(['league', 'seasons/s2/standings'], [])
+  let sessions = 0
+  const stop = subscribeToCacheChanges(client, () => { sessions++ })
+  const otherTab = new BroadcastChannel('shotclock-cache-v1')
+  try {
+    otherTab.postMessage({ senderId: 'another-tab', type: 'league-change', change: { kind: 'game', action: 'score', seasonId: 's1' } })
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    assert.equal(client.getQueryState(['league', 'seasons/s1/standings'])?.isInvalidated, true)
+    assert.equal(client.getQueryState(['league', 'seasons/s2/standings'])?.isInvalidated, false)
+    otherTab.postMessage({ senderId: 'another-tab', type: 'session-change' })
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    assert.equal(sessions, 1)
+    assert.equal(client.getQueryCache().getAll().length, 0)
+  } finally {
+    otherTab.close(); stop(); client.clear()
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
+    else Reflect.deleteProperty(globalThis, 'window')
+  }
+})
+
+test('season and venue edits invalidate dependent views without refreshing other leagues', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'organizations/o1/leagues'], [{ id: 'l1' }])
+  client.setQueryData(['league', 'leagues/l1/seasons'], [{ id: 's1' }, { id: 's2' }])
+  client.setQueryData(['league', 'season-teams/st1'], { season_id: 's1' })
+  client.setQueryData(['league', 'season-teams/st3'], { season_id: 's3' })
+  for (const path of ['organizations/o1/seasons?page=1', 'organizations/o1/teams', 'seasons/s1', 'seasons/s3', 'leagues/l1/venues', 'seasons/s1/games', 'seasons/s2/dashboard', 'seasons/s3/games']) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'venues/v1', 'PATCH', {}, { league_id: 'l1' })
+  assert.equal(client.getQueryState(['league', 'seasons/s1/games'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/dashboard'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s3/games'])?.isInvalidated, false)
+  await applyLeagueMutation(client, 'seasons/s1', 'PATCH', {}, { league_id: 'l1' })
+  assert.equal(client.getQueryState(['league', 'organizations/o1/seasons?page=1'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'organizations/o1/teams'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s1'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s3'])?.isInvalidated, false)
+  assert.equal(client.getQueryState(['league', 'season-teams/st1'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'season-teams/st3'])?.isInvalidated, false)
+  client.clear()
+})
