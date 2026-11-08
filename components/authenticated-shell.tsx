@@ -19,10 +19,12 @@ export async function AuthenticatedShell({ children, title = 'Dashboard' }: { ch
   return (
     <TooltipProvider>
       <AppSidebarProvider>
-        <AppSidebar user={session.user} variant="inset" />
-        <SidebarInset className="min-w-0">
-          <WorkspaceProvider><SiteHeader title={title} />{children}</WorkspaceProvider>
-        </SidebarInset>
+        <WorkspaceProvider>
+          <AppSidebar user={session.user} variant="inset" />
+          <SidebarInset className="min-w-0">
+            <SiteHeader title={title} />{children}
+          </SidebarInset>
+        </WorkspaceProvider>
       </AppSidebarProvider>
       <Toaster />
     </TooltipProvider>

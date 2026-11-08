@@ -39,7 +39,7 @@ export function RestoreSession() {
   return <main className="flex min-h-svh items-center justify-center p-6"><div role="status" className="flex flex-col items-center gap-4 text-center"><p>{error || 'Restoring your session…'}</p>{error && <Button onClick={() => window.location.reload()}>Try again</Button>}</div></main>
 }
 
-export function SignOut() {
+export function useSignOut() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const dispatch = useAppDispatch()
@@ -61,5 +61,10 @@ export function SignOut() {
     } catch { setError('Could not sign out. Please try again.') }
     finally { setPending(false) }
   }
+  return { signOut, pending, error }
+}
+
+export function SignOut() {
+  const { signOut, pending, error } = useSignOut()
   return <div className="flex items-center gap-3">{error && <span role="alert" className="text-sm text-destructive">{error}</span>}<Button variant="outline" onClick={signOut} disabled={pending}>{pending ? 'Signing out…' : 'Sign out'}</Button></div>
 }
