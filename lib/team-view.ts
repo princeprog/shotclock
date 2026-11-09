@@ -37,3 +37,7 @@ export function subscribeTeamView(callback: () => void): () => void {
 export function selectSeasonTeamRegistrations<T extends { season_id: string | null; division_id: string | null }>(rows: T[], seasonId: string, divisionId = ''): T[] {
   return seasonId ? rows.filter((row) => row.season_id === seasonId && (!divisionId || row.division_id === divisionId)) : []
 }
+
+export function availableTeamDivisions<T extends { id: string }>(divisions: T[], registrations: { id: string; season_id: string | null; division_id: string | null }[], teamId: string, seasonId: string): T[] {
+  return divisions.filter((division) => !registrations.some((row) => row.id === teamId && row.season_id === seasonId && row.division_id === division.id))
+}

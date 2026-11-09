@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState, useSyncExternalStore, type FormEvent } f
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, parseISO, startOfDay } from 'date-fns'
-import { CalendarDaysIcon, CircleCheckIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, TrophyIcon, UsersIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardPenLineIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
@@ -16,7 +16,7 @@ import { requirePaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { teamListHref, type TeamFilters } from '@/lib/team-filter-links'
-import { readTeamView, saveTeamView, subscribeTeamView, selectSeasonTeamRegistrations } from '@/lib/team-view'
+import { readTeamView, saveTeamView, subscribeTeamView, selectSeasonTeamRegistrations, availableTeamDivisions } from '@/lib/team-view'
 import { useWorkspace } from '@/components/workspace-context'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -28,9 +28,9 @@ import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { RegisterExistingTeamDialog, CorrectTeamRegistrationDialog } from '@/components/team-registration-dialogs'
+import { RegisterExistingTeamDialog, CorrectTeamRegistrationDialog, RemoveTeamRegistrationDialog } from '@/components/team-registration-dialogs'
 import { Separator } from '@/components/ui/separator'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -38,13 +38,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export type Section = 'dashboard' | 'leagues' | 'seasons' | 'divisions' | 'teams' | 'venues' | 'games' | 'standings'
 type Item = { id: string; name: string }
-type League = Item & { location: string | null }
 type Season = Item & { status: 'draft' | 'active' | 'completed'; start_date: string | null; end_date: string | null }
 type SeasonListItem = Season & { league_name: string }
 type Team = Item & { abbreviation: string | null }
 type OrganizationTeamRow = Team & { league_id: string; league_name: string; season_team_id: string | null; season_id: string | null; season_name: string | null; season_status: 'draft' | 'active' | 'completed' | null; division_id: string | null; division_name: string | null }
 type Division = Item & { season_id: string; max_age: number | null }
-type TeamSeasonOption = Item & { league_id: string; league_name: string; status: 'draft' | 'active' | 'completed' }
 type SeasonTeam = Item & { team_id: string; division_id: string }
 type Game = { id: string; home_name: string; away_name: string; home_season_team_id: string; away_season_team_id: string; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; status: string; home_score: number | null; away_score: number | null }
 type Standing = Item & { wins: number; losses: number; pointDifference: number }
@@ -177,44 +175,47 @@ function SeasonActions({ season, onEdit }: { season: Season; onEdit: () => void 
   </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
 }
 
-function TeamActions({ team, onEdit, onRegister, onCorrect, canRegister }: { team: Team; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; canRegister: boolean }) {
-  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${team.name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuGroup>
-    <DropdownMenuItem onClick={onEdit}><PencilIcon />Edit team</DropdownMenuItem>
-    {canRegister && <DropdownMenuItem onClick={onRegister}><PlusIcon />Register for season</DropdownMenuItem>}
-    {onCorrect && <DropdownMenuItem onClick={onCorrect}><PencilIcon />Correct registration</DropdownMenuItem>}
-  </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
+function TeamActions({ team, onEdit, onRegister, onCorrect, onRemove, canRegister }: { team: Team; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; onRemove?: () => void; canRegister: boolean }) {
+  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${team.name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+    <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit team</DropdownMenuItem>
+  </DropdownMenuGroup>{(canRegister || onCorrect) && <><DropdownMenuSeparator /><DropdownMenuGroup>
+    {canRegister && <DropdownMenuItem className="py-2" onClick={onRegister}><CalendarPlusIcon />Add to division</DropdownMenuItem>}
+    {onCorrect && <DropdownMenuItem className="py-2" onClick={onCorrect}><ClipboardPenLineIcon />Change division</DropdownMenuItem>}
+  </DropdownMenuGroup></>}{onRemove && <><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={onRemove}><Trash2Icon />Remove team</DropdownMenuItem></DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu>
 }
 
-function RegisterTeamForm({ team, organizationId, seasons, onClose }: { team: Team; organizationId: string; seasons: TeamSeasonOption[]; onClose: () => void }) {
+function RegisterTeamForm({ team, organizationId, seasonId, onClose }: { team: Team; organizationId: string; seasonId: string; onClose: () => void }) {
   const client = useQueryClient()
-  const [seasonId, setSeasonId] = useState('')
   const [divisionId, setDivisionId] = useState('')
   const divisions = useLeagueQuery<Division[]>(`seasons/${seasonId}/divisions`, !!seasonId)
   const registrations = useLeagueQuery<OrganizationTeamRow[]>(`organizations/${organizationId}/teams?seasonId=${seasonId}`, !!seasonId)
-  const available = (divisions.data ?? []).filter((division) => !registrations.data?.some((row) => row.id === team.id && row.season_id === seasonId && row.division_id === division.id))
+  const available = availableTeamDivisions(divisions.data ?? [], registrations.data ?? [], team.id, seasonId)
+  const ready = !divisions.isLoading && !registrations.isLoading && !divisions.isError && !registrations.isError
   const registration = useMutation({
     mutationFn: () => leagueRequest(`seasons/${seasonId}/teams`, client, 'POST', { teamId: team.id, divisionId }),
-    onSuccess: () => { toast.success(`${team.name} registered for the division.`); onClose() },
-    onError: (error) => toast.error(error.message),
+    onSuccess: () => { toast.success(`${team.name} added to the division.`); onClose() },
   })
-  return <form onSubmit={(event) => { event.preventDefault(); if (seasonId && available.some((item) => item.id === divisionId) && !registration.isPending) registration.mutate() }} className="flex flex-col gap-6">
-    <Choice label="Season" value={seasonId} options={seasons} emptyLabel="Select a season" onChange={(value) => { setSeasonId(value); setDivisionId('') }} />
-    {seasonId && <><Choice label="Division" value={divisionId} options={available} emptyLabel="Select a division" onChange={setDivisionId} />
-      {divisions.isLoading || registrations.isLoading ? <p role="status" className="text-sm text-muted-foreground">Loading divisions…</p> : divisions.isError || registrations.isError ? <p role="alert" className="text-sm text-destructive">Could not load divisions and registrations. Close and try again.</p> : !available.length ? <p className="text-sm text-muted-foreground">No divisions are available for registration in this season.</p> : null}</>}
-    <DialogFooter><Button type="button" variant="outline" disabled={registration.isPending} onClick={onClose}>Cancel</Button><Button type="submit" disabled={!seasonId || !available.some((item) => item.id === divisionId) || divisions.isLoading || registrations.isLoading || divisions.isError || registrations.isError || registration.isPending}>{registration.isPending ? 'Registering…' : 'Register team'}</Button></DialogFooter>
+  return <form onSubmit={(event) => { event.preventDefault(); if (ready && available.some((item) => item.id === divisionId) && !registration.isPending) registration.mutate() }} className="flex flex-col gap-6">
+    <Field className="gap-2"><FieldLabel htmlFor="registration-division">Division</FieldLabel>
+      <Select value={divisionId || null} onValueChange={(value) => { setDivisionId(value ?? ''); registration.reset() }} items={available.map((item) => ({ value: item.id, label: item.name }))} disabled={!ready || !available.length || registration.isPending}>
+        <SelectTrigger id="registration-division" className="w-full"><SelectValue placeholder="Select a division" /></SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}><SelectGroup>{available.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
+      </Select>
+      {divisions.isLoading || registrations.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : divisions.isError || registrations.isError ? <FieldDescription>Couldn’t load divisions. Close and try again.</FieldDescription> : !available.length ? <FieldDescription>This team is already registered in every division of this season.</FieldDescription> : null}
+    </Field>
+    {registration.isError && <p role="alert" className="text-sm text-destructive">{registration.error.message}</p>}
+    <DialogFooter><Button type="button" variant="outline" disabled={registration.isPending} onClick={onClose}>Cancel</Button><Button type="submit" disabled={!ready || !available.some((item) => item.id === divisionId) || registration.isPending}>{registration.isPending ? 'Adding…' : 'Add to division'}</Button></DialogFooter>
   </form>
 }
 
-function CreateTeamForm({ initialLeagueId, initialSeasonId, initialDivisionId, leagues, onClose, onCreated, onPendingChange }: { initialLeagueId: string; initialSeasonId: string; initialDivisionId: string; leagues: League[]; onClose: () => void; onCreated: (leagueId: string, seasonId: string, divisionId: string) => void; onPendingChange: (pending: boolean) => void }) {
+function CreateTeamForm({ leagueId, season, initialDivisionId, onClose, onCreated, onPendingChange }: { leagueId: string; season: Season; initialDivisionId: string; onClose: () => void; onCreated: (leagueId: string, seasonId: string, divisionId: string) => void; onPendingChange: (pending: boolean) => void }) {
   const client = useQueryClient()
-  const [leagueId, setLeagueId] = useState(initialLeagueId)
-  const [seasonId, setSeasonId] = useState(initialSeasonId)
+  const seasonId = season.id
   const [divisionId, setDivisionId] = useState(initialDivisionId)
   const availableDivisions = useLeagueQuery<Division[]>(`seasons/${seasonId}/divisions`, !!seasonId)
   const chosenDivision = availableDivisions.data?.find((item) => item.id === divisionId)
   const availableSeasons = useLeagueQuery<Season[]>(`leagues/${leagueId}/seasons`, !!leagueId)
-  const eligibleSeasons = (availableSeasons.data ?? []).filter((item) => item.status !== 'completed')
-  const chosenSeason = eligibleSeasons.find((item) => item.id === seasonId)
+  const chosenSeason = availableSeasons.data?.find((item) => item.id === seasonId && item.status !== 'completed')
   const mutation = useMutation({
     mutationFn: (body: { name: string; abbreviation: string | null; seasonId: string; divisionId: string }) => leagueRequest(`leagues/${leagueId}/teams`, client, 'POST', body),
     onSuccess: (_result, submitted) => { const registeredSeason = availableSeasons.data?.find((item) => item.id === submitted.seasonId); toast.success(`Team created and registered for ${registeredSeason?.name ?? 'the selected season'}.`); onCreated(leagueId, submitted.seasonId, submitted.divisionId) },
@@ -227,43 +228,20 @@ function CreateTeamForm({ initialLeagueId, initialSeasonId, initialDivisionId, l
     onPendingChange(true)
     mutation.mutate({ name: String(data.get('name') ?? '').trim(), abbreviation: optional(String(data.get('abbreviation') ?? '')), seasonId: chosenSeason.id, divisionId: chosenDivision.id })
   }
-  return <form onSubmit={submit} className="flex flex-col gap-6">
-    <FieldSet className="gap-3">
-      <FieldLegend variant="label" className="mb-1">League and season</FieldLegend>
-      <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field className="min-w-0 gap-2">
-          <FieldLabel htmlFor="create-team-league">League</FieldLabel>
-          <Select value={leagueId} onValueChange={(value) => { setLeagueId(value ?? ''); setSeasonId(''); setDivisionId('') }} items={leagues.map((item) => ({ value: item.id, label: item.name }))} disabled={mutation.isPending}>
-            <SelectTrigger id="create-team-league" className="w-full min-w-0"><SelectValue placeholder="Select a league" /></SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}><SelectGroup>{leagues.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
-          </Select>
-        </Field>
-        <Field className="min-w-0 gap-2">
-          <FieldLabel htmlFor="create-team-season">Season</FieldLabel>
-          <Select value={seasonId || null} onValueChange={(value) => { setSeasonId(value ?? ''); setDivisionId('') }} items={eligibleSeasons.map((item) => ({ value: item.id, label: item.name }))} disabled={!leagueId || availableSeasons.isLoading || availableSeasons.isError || eligibleSeasons.length === 0 || mutation.isPending}>
-            <SelectTrigger id="create-team-season" className="w-full min-w-0" aria-required="true" aria-describedby="create-team-season-description"><SelectValue placeholder="Select a season" /></SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}><SelectGroup>{eligibleSeasons.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
-          </Select>
-        </Field>
-        <Field className="min-w-0 gap-2 sm:col-span-2"><FieldLabel htmlFor="create-team-division">Division</FieldLabel><Select value={divisionId || null} onValueChange={(value) => setDivisionId(value ?? '')} items={(availableDivisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={!seasonId || availableDivisions.isLoading || availableDivisions.isError || mutation.isPending}><SelectTrigger id="create-team-division" className="w-full" aria-required="true"><SelectValue placeholder="Select a division" /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{availableDivisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select>{seasonId && (availableDivisions.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : availableDivisions.isError ? <FieldDescription>Could not load divisions. Try again.</FieldDescription> : !availableDivisions.data?.length ? <FieldDescription>No divisions are available in this season.</FieldDescription> : null)}{availableDivisions.isError && <Button type="button" size="sm" variant="outline" onClick={() => void availableDivisions.refetch()}>Try again</Button>}</Field>
-        <FieldDescription id="create-team-season-description" aria-live="polite" className="sm:col-span-2">{!leagueId ? 'Choose a league to see its seasons.' : availableSeasons.isLoading ? 'Loading seasons…' : availableSeasons.isError ? 'Could not load seasons. Try again before creating a team.' : eligibleSeasons.length === 0 ? <>No draft or active seasons are available in this league. <Link href="/manage/seasons">Create a season</Link> first.</> : chosenSeason ? `The team will be registered for ${chosenSeason.name}.` : 'Choose the season this team will play in.'}</FieldDescription>
-        {availableSeasons.isError && <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => void availableSeasons.refetch()}>Try again</Button>}
-      </FieldGroup>
-    </FieldSet>
-    <Separator />
-    <FieldSet className="gap-3">
-      <FieldLegend variant="label" className="mb-1">Team details</FieldLegend>
-      <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_10rem]">
-        <Field className="min-w-0 gap-2">
+  return <form onSubmit={submit} className="flex flex-col gap-5">
+    <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field className="min-w-0 gap-2 sm:col-span-2">
           <FieldLabel htmlFor="create-team-name">Team name</FieldLabel>
           <Input id="create-team-name" name="name" placeholder="e.g. City Hawks" required maxLength={120} disabled={mutation.isPending} />
         </Field>
+        <Field className="min-w-0 gap-2"><FieldLabel htmlFor="create-team-division">Division</FieldLabel><Select value={divisionId || null} onValueChange={(value) => setDivisionId(value ?? '')} items={(availableDivisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={season.status === 'completed' || availableDivisions.isLoading || availableDivisions.isError || mutation.isPending}><SelectTrigger id="create-team-division" className="w-full" aria-required="true"><SelectValue placeholder="Select a division" /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{availableDivisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select>{seasonId && (availableDivisions.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : availableDivisions.isError ? <FieldDescription>Could not load divisions. Try again.</FieldDescription> : !availableDivisions.data?.length ? <FieldDescription>No divisions are available in this season.</FieldDescription> : null)}{availableDivisions.isError && <Button type="button" size="sm" variant="outline" onClick={() => void availableDivisions.refetch()}>Try again</Button>}</Field>
         <Field className="min-w-0 gap-2">
           <FieldLabel htmlFor="create-team-abbreviation">Abbreviation <span className="font-normal text-muted-foreground">(optional)</span></FieldLabel>
           <Input id="create-team-abbreviation" name="abbreviation" placeholder="e.g. CH" maxLength={12} disabled={mutation.isPending} />
         </Field>
-      </FieldGroup>
-    </FieldSet>
+        <FieldDescription id="create-team-season-description" aria-live="polite" className="empty:hidden sm:col-span-2">{availableSeasons.isLoading ? 'Checking season…' : availableSeasons.isError ? 'Could not load the season. Try again before creating a team.' : !chosenSeason ? 'Teams cannot be added to this season. Select a draft or active season in the header.' : null}</FieldDescription>
+        {availableSeasons.isError && <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => void availableSeasons.refetch()}>Try again</Button>}
+    </FieldGroup>
     {mutation.isError && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
     <Separator />
     <DialogFooter>
@@ -462,7 +440,6 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const queryClient = useQueryClient()
   const seasonPagePath = `organizations/${org}/seasons?${seasonQuery}`
   const seasonPage = useQuery({ queryKey: ['league', seasonPagePath], queryFn: async () => requirePaginatedResult<SeasonListItem>(await leagueRequest<unknown>(seasonPagePath, queryClient)), enabled: !!org && section === 'seasons' && !searchPending, retry: false })
-  const teamSeasons = useLeagueQuery<TeamSeasonOption[]>(`organizations/${org}/team-seasons`, !!org && section === 'teams')
   const teamFilters = new URLSearchParams()
   if (teamLeagueFilter) teamFilters.set('leagueId', teamLeagueFilter)
   if (teamSeasonFilter) teamFilters.set('seasonId', teamSeasonFilter)
@@ -470,7 +447,6 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const teamSearchPending = section === 'teams' && teamSearch.trim() !== debouncedTeamSearch
   const organizationTeams = useLeagueQuery<OrganizationTeamRow[]>(`organizations/${org}/teams?${teamFilters}`, !!org && section === 'teams' && !teamSearchPending && !!league && !!season)
   const teamRows = selectSeasonTeamRegistrations(organizationTeams.data ?? [], teamSeasonFilter, selectedTeamDivision)
-  const visibleTeamCount = teamRows.length
   const teamFiltersActive = !!teamSearch.trim() || !!selectedTeamDivision
   const teamReturnQuery = teamListHref({ search: teamSearch, leagueId: '', seasonId: '', divisionId: selectedTeamDivision }).slice('/manage/teams'.length)
   const seasonTeams = useLeagueQuery<SeasonTeam[]>(`seasons/${season?.id}/teams?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && ['dashboard', 'games'].includes(section))
@@ -487,7 +463,8 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const [teamToRegister, setTeamToRegister] = useState<OrganizationTeamRow | null>(null)
   const [registerExistingOpen, setRegisterExistingOpen] = useState(false)
   const [teamToCorrect, setTeamToCorrect] = useState<OrganizationTeamRow | null>(null)
-  const relevantQueries = [leagues, ...(section === 'seasons' ? [seasonPage] : ['dashboard', 'games', 'standings', 'teams', 'divisions'].includes(section) ? [seasons, divisions] : []), ...(section === 'teams' ? [organizationTeams, teamSeasons] : []), ...(section === 'games' ? [seasonTeams, venues] : []), ...(section === 'dashboard' ? [seasonTeams, venues, dashboard] : []), ...(section === 'standings' ? [standings] : [])]
+  const [teamToRemove, setTeamToRemove] = useState<OrganizationTeamRow | null>(null)
+  const relevantQueries = [leagues, ...(section === 'seasons' ? [seasonPage] : ['dashboard', 'games', 'standings', 'teams', 'divisions'].includes(section) ? [seasons, divisions] : []), ...(section === 'teams' ? [organizationTeams] : []), ...(section === 'games' ? [seasonTeams, venues] : []), ...(section === 'dashboard' ? [seasonTeams, venues, dashboard] : []), ...(section === 'standings' ? [standings] : [])]
   const failedQuery = searchPending || teamSearchPending ? undefined : relevantQueries.find((query) => query.isError)
   const loading = searchPending || teamSearchPending || relevantQueries.some((query) => query.isLoading)
   const nameField = (value?: string): InputField[] => [{ name: 'name', label: 'Name', required: true, value }]
@@ -502,7 +479,10 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
 
   return <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-8 p-4 md:p-8">
     <div className="flex flex-col gap-6 border-b pb-6">
-      <div className="flex flex-col gap-2"><h2 className="text-2xl font-semibold tracking-tight">{pageCopy[section].title}</h2><p className="text-sm text-muted-foreground">{pageCopy[section].description}</p></div>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-2"><h2 className="text-2xl font-semibold tracking-tight">{pageCopy[section].title}</h2><p className="text-sm text-muted-foreground">{pageCopy[section].description}</p></div>
+        {section === 'teams' && league && season && !loading && !failedQuery && <div className="flex flex-wrap gap-2">{season.status !== 'completed' && <Button variant="outline" onClick={() => setRegisterExistingOpen(true)}>Register existing team</Button>}<Button onClick={() => setCreateTeamOpen(true)}><PlusIcon data-icon="inline-start" />Create team</Button></div>}
+      </div>
       {section === 'seasons' ? <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <Field className="w-full sm:w-64"><FieldLabel htmlFor="season-search">Search seasons</FieldLabel><Input id="season-search" type="search" placeholder="Search by name" maxLength={120} value={seasonSearch} onChange={(event) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonSearch(event.target.value) }} /></Field>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
@@ -563,11 +543,10 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>)}
     {section === 'teams' && (!leagues.data?.length || !league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <>
       <Dialog open={createTeamOpen} onOpenChange={(open) => { if (!createTeamPending) setCreateTeamOpen(open) }}>
-        {teamRows.length ? <section aria-labelledby="teams-list-title" className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-4"><div className="flex flex-col gap-1"><h3 id="teams-list-title" className="font-medium">Your teams</h3><p className="text-sm text-muted-foreground">{visibleTeamCount} {visibleTeamCount === 1 ? 'team entry' : 'team entries'}{teamFiltersActive ? ' matching your filters' : ' in this season'} · One entry per division</p></div><div className="flex flex-wrap gap-2">{season.status !== 'completed' && <Button variant="outline" onClick={() => setRegisterExistingOpen(true)}>Register existing team</Button>}<DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create team</DialogTrigger></div></div>
+        {teamRows.length ? <section aria-label="Teams" className="flex flex-col gap-4">
           {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption><TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-28 text-muted-foreground">Roster</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
             <TableBody>{teamRows.map((team) => {
-              const canRegister = (teamSeasons.data ?? []).some((item) => item.league_id === team.league_id && item.status !== 'completed')
+              const canRegister = season.status !== 'completed' && team.season_id === season.id
               return <TableRow key={team.season_team_id ?? team.id}>
                 <TableCell className="max-w-0 py-3 pl-5 whitespace-normal">
                   <span className="break-words font-medium">{team.name}</span>
@@ -583,18 +562,18 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.season_name ?? '—'}</TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.division_name ?? '—'}</TableCell>
                 <TableCell className="hidden md:table-cell"><Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge></TableCell>
                 <TableCell>{team.season_team_id && team.season_id ? <Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/manage/rosters/${team.season_team_id}${teamReturnQuery}`} aria-label={`View ${team.name} roster for ${team.season_name}`} onClick={() => changeWorkspace(team.league_id, team.season_id!, team.division_id ?? undefined)} />}>View roster</Button> : <span className="text-sm text-muted-foreground">—</span>}</TableCell>
-                <TableCell className="pr-3 text-right"><TeamActions team={team} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} /></TableCell>
+                <TableCell className="pr-3 text-right"><TeamActions team={team} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} /></TableCell>
               </TableRow>
             })}</TableBody>
           </Table></CardContent></Card> : <ul aria-label="Teams and their season registrations" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {teamRows.map((team) => {
-              const canRegister = (teamSeasons.data ?? []).some((item) => item.league_id === team.league_id && item.status !== 'completed')
+              const canRegister = season.status !== 'completed' && team.season_id === season.id
               const initials = team.name.trim().split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0]).join('').toLocaleUpperCase()
               return <li key={team.season_team_id ?? team.id} className="flex min-w-0 flex-col rounded-xl border bg-card p-5 text-card-foreground">
                 <div className="flex items-start gap-3">
                   <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-[#E67145]/10 text-sm font-semibold text-[#A64320] dark:text-[#FFAE88]">{initials}</span>
                   <div className="min-w-0 flex-1"><h4 className="break-words font-semibold leading-snug">{team.name}</h4><p className="mt-1 break-words text-sm text-muted-foreground">{team.league_name}</p></div>
-                  <TeamActions team={team} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} />
+                  <TeamActions team={team} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} />
                 </div>
                 <div className="mt-5 flex flex-1 flex-col items-start gap-2 text-sm">
                   <Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge>
@@ -606,13 +585,14 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
               </li>
             })}
           </ul>}
-        </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{teamFiltersActive ? 'No matching teams' : 'No teams in this season'}</h3></EmptyTitle><EmptyDescription>{teamFiltersActive ? 'Try a different search or division.' : 'Register an existing team or create a team to start building rosters for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{teamFiltersActive && <Button variant="outline" onClick={() => { setTeamSearch(''); setDebouncedTeamSearch(''); setTeamDivisionSelection({ id: '', seasonId: teamSeasonFilter }) }}>Clear filters</Button>}{season.status !== 'completed' && <Button variant="outline" onClick={() => setRegisterExistingOpen(true)}>Register existing team</Button>}<DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create team</DialogTrigger></div></EmptyContent></Empty></CardContent></Card>}
-        <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="gap-2 pr-8"><DialogTitle className="text-base">Create a team</DialogTitle><DialogDescription>Add a team to a league and register it for a season.</DialogDescription></DialogHeader><CreateTeamForm initialLeagueId={league} initialSeasonId={season?.status === 'completed' ? '' : season?.id ?? ''} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} leagues={leagues.data ?? []} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivision) => { changeWorkspace(nextLeague, nextSeason, nextDivision); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivision !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
+        </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{teamFiltersActive ? 'No matching teams' : 'No teams in this season'}</h3></EmptyTitle><EmptyDescription>{teamFiltersActive ? 'Try a different search or division.' : 'Register an existing team or create a team to start building rosters for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{teamFiltersActive && <Button variant="outline" onClick={() => { setTeamSearch(''); setDebouncedTeamSearch(''); setTeamDivisionSelection({ id: '', seasonId: teamSeasonFilter }) }}>Clear filters</Button>}</div></EmptyContent></Empty></CardContent></Card>}
+        <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="pr-8"><DialogTitle className="text-base">Create a team</DialogTitle><DialogDescription className="sr-only">Enter team details and select a division in the current season.</DialogDescription></DialogHeader><CreateTeamForm key={`${league}-${season.id}`} leagueId={league} season={season} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivision) => { changeWorkspace(nextLeague, nextSeason, nextDivision); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivision !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
       </Dialog>
       {registerExistingOpen && <RegisterExistingTeamDialog open onOpenChange={setRegisterExistingOpen} leagueId={league} seasonId={season.id} divisions={divisions.data ?? []} initialDivisionId={selectedTeamDivision} />}
       {teamToCorrect?.season_team_id && teamToCorrect.division_id && <CorrectTeamRegistrationDialog key={teamToCorrect.season_team_id} team={{ id: teamToCorrect.season_team_id, name: teamToCorrect.name, divisionId: teamToCorrect.division_id }} divisions={divisions.data ?? []} onClose={() => setTeamToCorrect(null)} />}
+      {teamToRemove?.season_team_id && <RemoveTeamRegistrationDialog key={teamToRemove.season_team_id} team={{ id: teamToRemove.season_team_id, name: teamToRemove.name, divisionName: teamToRemove.division_name ?? 'the division' }} seasonName={season.name} onClose={() => setTeamToRemove(null)} />}
       <Dialog open={teamToEdit !== null} onOpenChange={(open) => { if (!open) setTeamToEdit(null) }}><DialogContent><DialogHeader><DialogTitle>Edit team</DialogTitle><DialogDescription>Update this team’s name and abbreviation.</DialogDescription></DialogHeader>{teamToEdit && <Editor key={teamToEdit.id} title="Team details" path={`teams/${teamToEdit.id}`} method="PATCH" fields={teamFields(teamToEdit)} transform={teamData} alignActions="end" onSaved={() => setTeamToEdit(null)} onCancel={() => setTeamToEdit(null)} />}</DialogContent></Dialog>
-      <Dialog open={teamToRegister !== null} onOpenChange={(open) => { if (!open) setTeamToRegister(null) }}><DialogContent><DialogHeader><DialogTitle>Register team for a season</DialogTitle><DialogDescription>Choose a season and an available division for {teamToRegister?.name}.</DialogDescription></DialogHeader>{teamToRegister && <RegisterTeamForm key={teamToRegister.id} team={teamToRegister} organizationId={org} seasons={(teamSeasons.data ?? []).filter((item) => item.league_id === teamToRegister.league_id && item.status !== 'completed')} onClose={() => setTeamToRegister(null)} />}</DialogContent></Dialog>
+      <Dialog open={!!teamToRegister && teamToRegister.season_id === season.id && season.status !== 'completed'} onOpenChange={(open) => { if (!open) setTeamToRegister(null) }}><DialogContent><DialogHeader><DialogTitle>Add to division</DialogTitle><DialogDescription>Choose another division for {teamToRegister?.name} in {season.name}.</DialogDescription></DialogHeader>{teamToRegister && teamToRegister.season_id === season.id && <RegisterTeamForm key={`${teamToRegister.id}-${season.id}`} team={teamToRegister} organizationId={org} seasonId={season.id} onClose={() => setTeamToRegister(null)} />}</DialogContent></Dialog>
     </>)}
     {section === 'divisions' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <DivisionsWorkspace key={season.id} season={season} divisions={divisions.data ?? []} />)}
     {section === 'venues' && <VenuesWorkspace key={org} organizationId={org} leagues={leagues.data ?? []} selectedLeagueId={league} />}

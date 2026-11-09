@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { QueryClient } from '@tanstack/react-query'
 import { isAffectedLeagueQuery } from '../lib/league-cache.ts'
-import { addRosterPlayer, correctionTeamsQueryKey, loadSeasonRegistrations, playerCorrections, updateOwnedPlayer, type PlayerUpdate } from '../lib/roster-player-flow.ts'
+import { savePlayerAndJersey, addRosterPlayer, correctionTeamsQueryKey, loadSeasonRegistrations, playerCorrections, updateOwnedPlayer, type PlayerUpdate } from '../lib/roster-player-flow.ts'
 
 test('registers a selected player without creating a new player', async () => {
   const calls: unknown[] = []
@@ -151,4 +151,34 @@ test('stops before editing when the fork fails', async () => {
     update: async () => { updated = true },
   }), /fork failed/)
   assert.equal(updated, false)
+})
+
+
+test('saves a jersey before player changes and skips unchanged fields', async () => {
+  const calls: string[] = []
+  const actions = { saveJersey: async () => { calls.push('jersey') }, savePlayer: async () => { calls.push('player') } }
+  await savePlayerAndJersey({ jerseyChanged: true, playerChanged: true }, actions)
+  assert.deepEqual(calls, ['jersey', 'player'])
+  calls.length = 0
+  await savePlayerAndJersey({ jerseyChanged: false, playerChanged: true }, actions)
+  assert.deepEqual(calls, ['player'])
+  calls.length = 0
+  await savePlayerAndJersey({ jerseyChanged: true, playerChanged: false }, actions)
+  assert.deepEqual(calls, ['jersey'])
+})
+
+test('does not update player details when jersey validation fails', async () => {
+  let playerSaved = false
+  await assert.rejects(savePlayerAndJersey({ jerseyChanged: true, playerChanged: true }, {
+    saveJersey: async () => { throw new Error('Jersey already in use') },
+    savePlayer: async () => { playerSaved = true },
+  }), /Jersey already in use/)
+  assert.equal(playerSaved, false)
+})
+
+test('explains when jersey saved but player details failed', async () => {
+  await assert.rejects(savePlayerAndJersey({ jerseyChanged: true, playerChanged: true }, {
+    saveJersey: async () => {},
+    savePlayer: async () => { throw new Error('Player is not eligible') },
+  }), /Jersey number was saved.*Player is not eligible/)
 })

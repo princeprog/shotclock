@@ -11,6 +11,17 @@ export function playerCorrections(saved: SavedPlayerDetails, corrected: SavedPla
   return Object.keys(update).length ? update : undefined
 }
 
+export async function savePlayerAndJersey(changes: { jerseyChanged: boolean; playerChanged: boolean }, actions: { saveJersey: () => Promise<unknown>; savePlayer: () => Promise<unknown> }) {
+  if (changes.jerseyChanged) await actions.saveJersey()
+  if (!changes.playerChanged) return
+  try { await actions.savePlayer() }
+  catch (error) {
+    if (!changes.jerseyChanged) throw error
+    const message = error instanceof Error ? error.message : 'Please try again.'
+    throw new Error(`Jersey number was saved, but player details could not be saved. ${message}`)
+  }
+}
+
 export const correctionTeamsQueryKey = (seasonId: string) => ['league', `seasons/${seasonId}/teams?correction=all`] as const
 
 export async function loadSeasonRegistrations<T>(loadDivisions: () => Promise<{ id: string }[]>, loadTeams: (divisionId: string) => Promise<T[]>): Promise<T[]> {

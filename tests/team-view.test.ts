@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { selectSeasonTeamRegistrations, readTeamView, saveTeamView } from '../lib/team-view.ts'
+import { availableTeamDivisions, selectSeasonTeamRegistrations, readTeamView, saveTeamView } from '../lib/team-view.ts'
 
 test('team view defaults to the table and remembers a valid choice', () => {
   const values = new Map<string, string>()
@@ -42,4 +42,16 @@ test('division filter narrows the selected season without mixing team entries', 
   ]
   assert.deepEqual(selectSeasonTeamRegistrations(rows, 's1', 'u18'), [rows[1]])
   assert.deepEqual(selectSeasonTeamRegistrations(rows, 's1', ''), rows.slice(0, 2))
+})
+
+
+test('available divisions exclude only this team’s entries in the current season', () => {
+  const divisions = [{ id: 'open' }, { id: 'youth' }, { id: 'senior' }]
+  const registrations = [
+    { id: 'team-a', season_id: 's1', division_id: 'open' },
+    { id: 'team-a', season_id: 's2', division_id: 'youth' },
+    { id: 'team-b', season_id: 's1', division_id: 'senior' },
+  ]
+  assert.deepEqual(availableTeamDivisions(divisions, registrations, 'team-a', 's1'), divisions.slice(1))
+  assert.deepEqual(availableTeamDivisions(divisions, registrations, 'team-a', 's2'), [divisions[0], divisions[2]])
 })

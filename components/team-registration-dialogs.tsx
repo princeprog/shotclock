@@ -6,8 +6,9 @@ import { toast } from 'sonner'
 import { leagueRequest } from '@/lib/league-client'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type Team = { id: string; name: string; abbreviation: string | null }
 type Division = { id: string; name: string }
@@ -38,15 +39,35 @@ export function RegisterExistingTeamDialog({ open, onOpenChange, leagueId, seaso
 export function CorrectTeamRegistrationDialog({ team, divisions, onClose }: { team: { id: string; name: string; divisionId: string }; divisions: Division[]; onClose: () => void }) {
   const client = useQueryClient()
   const [divisionId, setDivisionId] = useState('')
-  const [removing, setRemoving] = useState(false)
+  const availableDivisions = divisions.filter((division) => division.id !== team.divisionId)
   const mutation = useMutation({
-    mutationFn: () => leagueRequest(`season-teams/${team.id}`, client, removing ? 'DELETE' : 'PATCH', removing ? undefined : { divisionId }),
-    onSuccess: () => { toast.success(removing ? 'Team registration removed.' : 'Team registration moved.'); onClose() },
+    mutationFn: () => leagueRequest(`season-teams/${team.id}`, client, 'PATCH', { divisionId }),
+    onSuccess: () => { toast.success('Team division changed.'); onClose() },
   })
   return <Dialog open onOpenChange={(open) => { if (!open && !mutation.isPending) onClose() }}><DialogContent showCloseButton={!mutation.isPending}>
-    <DialogHeader><DialogTitle>{removing ? 'Remove team registration' : 'Correct team registration'}</DialogTitle><DialogDescription>{removing ? `Remove ${team.name} from this division? The team record will remain available.` : `Move ${team.name} to another division in this draft season.`}</DialogDescription></DialogHeader>
-    {removing ? <p className="text-sm text-muted-foreground">The registration must have no players or games. Move or remove its players and reschedule its games first.</p> : <><Field><FieldLabel htmlFor="team-correction-division">New division</FieldLabel><select id="team-correction-division" className={selectClass} value={divisionId} onChange={(event) => setDivisionId(event.target.value)} disabled={mutation.isPending}><option value="">Select a division</option>{divisions.filter((division) => division.id !== team.divisionId).map((division) => <option key={division.id} value={division.id}>{division.name}</option>)}</select></Field><p className="text-sm text-muted-foreground">Roster players must be eligible for the new division. Games must be rescheduled first.</p></>}
+    <DialogHeader className="pr-8"><DialogTitle>Change division</DialogTitle><DialogDescription>Choose a new division for {team.name}.</DialogDescription></DialogHeader>
+    <Field className="gap-2"><FieldLabel htmlFor="team-correction-division">New division</FieldLabel>
+      <Select value={divisionId || null} onValueChange={(value) => { setDivisionId(value ?? ''); mutation.reset() }} items={availableDivisions.map((division) => ({ value: division.id, label: division.name }))} disabled={mutation.isPending || !availableDivisions.length}>
+        <SelectTrigger id="team-correction-division" className="w-full"><SelectValue placeholder="Select a division" /></SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}><SelectGroup>{availableDivisions.map((division) => <SelectItem key={division.id} value={division.id}>{division.name}</SelectItem>)}</SelectGroup></SelectContent>
+      </Select>
+      <FieldDescription>{availableDivisions.length ? 'Players must be eligible, and games must be rescheduled first.' : 'There are no other divisions in this season.'}</FieldDescription>
+    </Field>
     {mutation.isError && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
-    <DialogFooter>{removing ? <Button variant="outline" disabled={mutation.isPending} onClick={() => { setRemoving(false); mutation.reset() }}>Back</Button> : <Button variant="outline" disabled={mutation.isPending} onClick={() => { setRemoving(true); mutation.reset() }}>Remove registration</Button>}<Button variant={removing ? 'destructive' : 'default'} disabled={mutation.isPending || (!removing && !divisionId)} onClick={() => mutation.mutate()}>{mutation.isPending ? 'Saving…' : removing ? 'Remove registration' : 'Move team'}</Button></DialogFooter>
+    <DialogFooter><Button variant="outline" disabled={mutation.isPending} onClick={onClose}>Cancel</Button><Button disabled={mutation.isPending || !availableDivisions.some((division) => division.id === divisionId)} onClick={() => mutation.mutate()}>{mutation.isPending ? 'Saving…' : 'Change division'}</Button></DialogFooter>
+  </DialogContent></Dialog>
+}
+
+export function RemoveTeamRegistrationDialog({ team, seasonName, onClose }: { team: { id: string; name: string; divisionName: string }; seasonName: string; onClose: () => void }) {
+  const client = useQueryClient()
+  const mutation = useMutation({
+    mutationFn: () => leagueRequest(`season-teams/${team.id}`, client, 'DELETE'),
+    onSuccess: () => { toast.success('Team removed from the division.'); onClose() },
+  })
+  return <Dialog open onOpenChange={(open) => { if (!open && !mutation.isPending) onClose() }}><DialogContent showCloseButton={!mutation.isPending}>
+    <DialogHeader><DialogTitle>Remove team</DialogTitle><DialogDescription>Remove {team.name} from {team.divisionName} in {seasonName}? The team will remain available for other registrations.</DialogDescription></DialogHeader>
+    <p className="text-sm text-muted-foreground">This registration must have no players or games. Remove its players and reschedule its games first.</p>
+    {mutation.isError && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
+    <DialogFooter><Button variant="outline" disabled={mutation.isPending} onClick={onClose}>Cancel</Button><Button variant="destructive" disabled={mutation.isPending} onClick={() => mutation.mutate()}>{mutation.isPending ? 'Removing…' : 'Remove team'}</Button></DialogFooter>
   </DialogContent></Dialog>
 }
