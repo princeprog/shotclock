@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseWorkspaceSelection, readWorkspaceSelection, resolveWorkspaceLeague, resolveWorkspaceSeason, saveWorkspaceSelection } from '../lib/workspace-selection.ts'
+import { parseWorkspaceSelection, readWorkspaceSelection, resolveWorkspaceDivision, resolveWorkspaceLeague, resolveWorkspaceSeason, saveWorkspaceSelection } from '../lib/workspace-selection.ts'
 
 test('workspace choices are isolated per organization and survive reloads', () => {
   const values = new Map<string, string>()
@@ -22,4 +22,14 @@ test('only unambiguous or previously selected contexts are selected', () => {
   assert.equal(resolveWorkspaceSeason(seasons, 's1')?.id, 's1')
   assert.equal(resolveWorkspaceSeason([...seasons, { id: 's4', status: 'active' }], ''), undefined)
   assert.equal(resolveWorkspaceSeason([{ id: 's3', status: 'draft' }], '')?.id, 's3')
+})
+
+test('division selection is stored per season and never guesses between divisions', () => {
+  const values = new Map<string, string>()
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value) } }
+  saveWorkspaceSelection('org', { leagueId: 'l', seasons: { l: 's' }, divisions: { s: 'd2' } }, storage)
+  assert.equal(parseWorkspaceSelection(readWorkspaceSelection('org', storage)).divisions?.s, 'd2')
+  assert.equal(resolveWorkspaceDivision([{ id: 'd1' }, { id: 'd2' }], '')?.id, undefined)
+  assert.equal(resolveWorkspaceDivision([{ id: 'd1' }, { id: 'd2' }], 'd2')?.id, 'd2')
+  assert.equal(resolveWorkspaceDivision([{ id: 'd1' }], '')?.id, 'd1')
 })

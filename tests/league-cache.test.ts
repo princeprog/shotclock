@@ -6,6 +6,26 @@ import { applyLeagueMutation, invalidateLeagueChange, leagueChangeForMutation, s
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve))
 
+test('moving a roster entry invalidates both its previous and new team rosters', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'season-teams/old/roster'], [])
+  client.setQueryData(['league', 'season-teams/new/roster'], [])
+  await applyLeagueMutation(client, 'rosters/r1', 'PATCH', { seasonTeamId: 'new' }, { season_team_id: 'new' })
+  assert.equal(client.getQueryState(['league', 'season-teams/old/roster'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'season-teams/new/roster'])?.isInvalidated, true)
+  client.clear()
+})
+
+test('team registration invalidates roster correction destinations', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'seasons/s1/teams?correction=all'], [])
+  client.setQueryData(['league', 'seasons/s2/teams?correction=all'], [])
+  await applyLeagueMutation(client, 'seasons/s1/teams', 'POST', { teamId: 't1' }, { season_id: 's1', team_id: 't1' })
+  assert.equal(client.getQueryState(['league', 'seasons/s1/teams?correction=all'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/teams?correction=all'])?.isInvalidated, false)
+  client.clear()
+})
+
 test('a league query is reused on remount and refetches only when invalidated', async () => {
   const client = makeQueryClient()
   let requests = 0
@@ -100,5 +120,17 @@ test('season and venue edits invalidate dependent views without refreshing other
   assert.equal(client.getQueryState(['league', 'seasons/s3'])?.isInvalidated, false)
   assert.equal(client.getQueryState(['league', 'season-teams/st1'])?.isInvalidated, true)
   assert.equal(client.getQueryState(['league', 'season-teams/st3'])?.isInvalidated, false)
+  client.clear()
+})
+
+
+test('draft registration corrections refresh affected team and roster views', async () => {
+  const client = makeQueryClient()
+  for (const path of ['organizations/o1/teams', 'leagues/l1/teams', 'seasons/s1/teams', 'seasons/s1/standings', 'seasons/s1/dashboard', 'season-teams/st1', 'season-teams/st1/roster', 'seasons/s2/standings']) client.setQueryData(['league', path], {})
+  await applyLeagueMutation(client, 'season-teams/st1', 'PATCH', { divisionId: 'd2' }, { id: 'st1', season_id: 's1', league_id: 'l1', team_id: 't1' })
+  for (const path of ['organizations/o1/teams', 'leagues/l1/teams', 'seasons/s1/teams', 'seasons/s1/standings', 'seasons/s1/dashboard', 'season-teams/st1']) assert.equal(client.getQueryState(['league', path])?.isInvalidated, true, path)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/standings'])?.isInvalidated, false)
+  await applyLeagueMutation(client, 'rosters/r1', 'DELETE', undefined, { season_team_id: 'st1' })
+  assert.equal(client.getQueryState(['league', 'season-teams/st1/roster'])?.isInvalidated, true)
   client.clear()
 })

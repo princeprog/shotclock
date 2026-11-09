@@ -1,5 +1,5 @@
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>
-export type WorkspaceSelection = { leagueId: string; seasons: Record<string, string> }
+export type WorkspaceSelection = { leagueId: string; seasons: Record<string, string>; divisions?: Record<string, string> }
 const prefix = 'shotclock:workspace:'
 const eventName = 'shotclock:workspace-change'
 
@@ -18,7 +18,9 @@ export function parseWorkspaceSelection(raw: string): WorkspaceSelection {
     const record = value as Record<string, unknown>
     const seasons = record.seasons && typeof record.seasons === 'object' && !Array.isArray(record.seasons)
       ? Object.fromEntries(Object.entries(record.seasons).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {}
-    return { leagueId: typeof record.leagueId === 'string' ? record.leagueId : '', seasons }
+    const divisions = record.divisions && typeof record.divisions === 'object' && !Array.isArray(record.divisions)
+      ? Object.fromEntries(Object.entries(record.divisions).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : undefined
+    return { leagueId: typeof record.leagueId === 'string' ? record.leagueId : '', seasons, ...(divisions ? { divisions } : {}) }
   } catch { return { leagueId: '', seasons: {} } }
 }
 
@@ -35,6 +37,10 @@ export function subscribeWorkspaceSelection(callback: () => void): () => void {
 }
 
 export function resolveWorkspaceLeague<T extends { id: string }>(items: T[], preferred: string): T | undefined {
+  return items.find((item) => item.id === preferred) ?? (items.length === 1 ? items[0] : undefined)
+}
+
+export function resolveWorkspaceDivision<T extends { id: string }>(items: T[], preferred: string): T | undefined {
   return items.find((item) => item.id === preferred) ?? (items.length === 1 ? items[0] : undefined)
 }
 

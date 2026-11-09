@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { makeStore } from '../lib/store.ts'
-import { resetUi, selectLeague, selectOrganization, selectSeason, setSidebarOpen } from '../lib/ui-slice.ts'
+import { resetUi, selectDivision, selectLeague, selectOrganization, selectSeason, setSidebarOpen } from '../lib/ui-slice.ts'
 
 test('sidebar state changes and resets without affecting another store', () => {
   const first = makeStore()
@@ -18,8 +18,10 @@ test('changing organization or league clears dependent selection', () => {
   store.dispatch(selectOrganization('org-a'))
   store.dispatch(selectLeague('league-a'))
   store.dispatch(selectSeason('season-a'))
+  store.dispatch(selectDivision('division-a'))
   store.dispatch(selectLeague('league-b'))
   assert.equal(store.getState().ui.seasonId, '')
+  assert.equal(store.getState().ui.divisionId, '')
   store.dispatch(selectSeason('season-b'))
   store.dispatch(selectOrganization('org-b'))
   assert.equal(store.getState().ui.leagueId, '')

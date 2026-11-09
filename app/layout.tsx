@@ -11,6 +11,13 @@ export const metadata: Metadata = {
   title: "Shotclock",
   description: "Keep your game moving.",
   referrer: "no-referrer",
+  icons: {
+    icon: [
+      { url: "/shotclock-mark.svg", type: "image/svg+xml" },
+      { url: "/shotclock-icon-32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: [{ url: "/shotclock-apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({

@@ -17,8 +17,16 @@ test('invalid filter values are ignored and all filters default to empty', () =>
   assert.equal(teamListHref(readTeamFilters({})), '/manage/teams')
 })
 
-test('the all-teams view survives a roster return link', () => {
-  const href = teamListHref({ search: 'hawks', leagueId: '', seasonId: '', all: true })
-  const url = new URL(href, 'http://localhost')
-  assert.deepEqual(readTeamFilters(Object.fromEntries(url.searchParams)), { search: 'hawks', leagueId: '', seasonId: '', all: true })
+test('legacy all-teams links return to the selected division', () => {
+  const filters = readTeamFilters({ search: 'hawks', scope: 'all' })
+  assert.deepEqual(filters, { search: 'hawks', leagueId: '', seasonId: '' })
+  assert.equal(teamListHref(filters), '/manage/teams?search=hawks')
+})
+
+
+test('division filter survives roster return links and rejects invalid IDs', () => {
+  const divisionId = 'ab9c0d55-601a-4b4b-9eb5-6107bf8b4308'
+  const href = teamListHref({ search: 'Hawks', leagueId: '', seasonId: '', divisionId })
+  assert.equal(readTeamFilters(Object.fromEntries(new URL(href, 'http://localhost').searchParams)).divisionId, divisionId)
+  assert.equal(readTeamFilters({ divisionId: 'invalid' }).divisionId, undefined)
 })

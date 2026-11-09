@@ -4,12 +4,13 @@ import { RestoreSession, SignOut } from '@/components/session-actions'
 import { ShotclockLogo } from '@/components/shotclock-logo'
 import { sessionState } from '@/lib/auth-server'
 
-export default async function OrganizationsPage() {
+export default async function OrganizationsPage({ searchParams }: { searchParams: Promise<{ returnTo?: string | string[] }> }) {
   const session = await sessionState()
   if (session.state === 'anonymous') redirect('/login')
   if (session.state === 'restore') return <RestoreSession />
   if (session.state === 'unavailable') return <main className="flex min-h-svh items-center justify-center p-6">Authentication is temporarily unavailable. Please try again later.</main>
 
+  const { returnTo } = await searchParams
   return (
     <div className="flex min-h-svh flex-col">
       <header className="border-b">
@@ -21,7 +22,7 @@ export default async function OrganizationsPage() {
           </div>
         </div>
       </header>
-      <OrganizationPicker />
+      <OrganizationPicker returnTo={typeof returnTo === 'string' ? returnTo : undefined} />
     </div>
   )
 }

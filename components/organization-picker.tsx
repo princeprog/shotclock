@@ -11,13 +11,14 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { leagueRequest } from '@/lib/league-client'
+import { organizationReturnPath } from '@/lib/organization-navigation'
 import { saveOrganizationSelection } from '@/lib/organization-selection'
 import { useAppDispatch } from '@/lib/store-hooks'
 import { selectOrganization } from '@/lib/ui-slice'
 
 type Organization = { id: string; name: string }
 
-export function OrganizationPicker() {
+export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
   const router = useRouter()
   const client = useQueryClient()
   const dispatch = useAppDispatch()
@@ -36,7 +37,8 @@ export function OrganizationPicker() {
   function enterOrganization(organization: Organization) {
     saveOrganizationSelection(organization.id)
     dispatch(selectOrganization(organization.id))
-    router.push('/')
+    if (returnTo) router.replace(organizationReturnPath(returnTo))
+    else router.push('/')
   }
 
   const createOrganization = useMutation({
@@ -72,7 +74,7 @@ export function OrganizationPicker() {
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 pt-12 pb-16 sm:px-8 sm:pt-20">
       <div className="flex flex-col gap-3">
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Choose an organization</h1>
-        <p className="max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">Select an organization to manage its leagues and seasons, or create a new one to get started.</p>
+        <p className="max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">{returnTo ? 'Select an organization to return to the page you were viewing, or create a new one to get started.' : 'Select an organization to manage its leagues and seasons, or create a new one to get started.'}</p>
       </div>
 
       <section aria-labelledby="organizations-heading" className="mt-10 flex flex-col gap-4">

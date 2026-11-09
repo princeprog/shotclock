@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect } from "react"
 import { usePathname } from "next/navigation"
-import { ArrowLeftRightIcon, Building2Icon, CalendarDaysIcon, LayoutDashboardIcon, ListOrderedIcon, LogOutIcon, MapPinIcon, MoreVerticalIcon, TrophyIcon, UsersIcon, CalendarRangeIcon } from "lucide-react"
+import { ArrowLeftRightIcon, Building2Icon, CalendarDaysIcon, LayoutDashboardIcon, ListOrderedIcon, LayersIcon, LogOutIcon, MapPinIcon, MoreVerticalIcon, TrophyIcon, UsersIcon, CalendarRangeIcon } from "lucide-react"
 import { useSignOut } from "@/components/session-actions"
 import { ShotclockLogo } from "@/components/shotclock-logo"
 import { useWorkspace } from "@/components/workspace-context"
@@ -29,6 +29,7 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
     { href: '/', label: 'Dashboard', icon: LayoutDashboardIcon },
     { href: '/manage/leagues', label: 'Leagues', icon: TrophyIcon },
     { href: '/manage/seasons', label: 'Seasons', icon: CalendarRangeIcon },
+    { href: '/manage/divisions', label: 'Divisions', icon: LayersIcon },
     { href: '/manage/teams', label: 'Teams & rosters', icon: UsersIcon },
     { href: '/manage/venues', label: 'Venues', icon: MapPinIcon },
     { href: '/manage/games', label: 'Games', icon: CalendarDaysIcon },
