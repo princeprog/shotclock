@@ -39,7 +39,7 @@ function seasonsForLeague(client: QueryClient, leagueId?: string) {
 function seasonForDivision(client: QueryClient, divisionId: string) {
   for (const [key, data] of client.getQueriesData({ queryKey: ['league'] })) {
     const match = typeof key[1] === 'string' ? /^seasons\/([^/]+)\/divisions$/.exec(key[1]) : null
-    if (match && Array.isArray(data) && data.some((item: unknown) => record(item).id === divisionId)) return match[1]
+    if (match && !client.getQueryState(key)?.isInvalidated && Array.isArray(data) && data.some((item: unknown) => record(item).id === divisionId)) return match[1]
   }
   return undefined
 }
@@ -64,6 +64,7 @@ export function leagueChangeForMutation(client: QueryClient, path: string, metho
   else if (resource === 'leagues' && child === 'venues') change = { kind: 'venue', action: 'create', leagueId: id, entityId: stringValue(value.id) }
   else if (resource === 'venues' && !child) change = { kind: 'venue', action: 'edit', leagueId: stringValue(value.league_id), entityId: id }
   else if (resource === 'seasons' && child === 'games') change = { kind: 'game', action: 'create', seasonId: id }
+  else if (resource === 'seasons' && (child === 'schedule' || child === 'playoffs')) change = { kind: 'game', action: 'create', seasonId: id }
   else if (resource === 'divisions' && (child === 'schedule' || child === 'playoffs')) change = { kind: 'game', action: 'create', divisionId: id, seasonId: seasonForDivision(client, id) }
   else if (resource === 'games' && (!child || child === 'score' || child === 'forfeit')) change = { kind: 'game', action: child ? 'score' : 'edit', seasonId: stringValue(value.season_id), divisionId: stringValue(value.division_id), entityId: id }
   if (!change.organizationId) change.organizationId = organizationForLeague(client, change.leagueId)
@@ -87,11 +88,15 @@ export function isAffectedLeagueQuery(query: Query, change: LeagueChange, client
   const season = /^seasons\/([^/]+)(?:\/(teams|games|standings|dashboard))?$/.exec(path)
   const roster = /^season-teams\/([^/]+)(\/roster)?$/.exec(path)
   const scheduleStatus = /^divisions\/([^/]+)\/schedule\/status$/.exec(path)
+  const seasonScheduleStatus = /^seasons\/([^/]+)\/schedule\/status$/.exec(path)
   const inOrg = !!org && (!change.organizationId || org[1] === change.organizationId)
   const inLeague = !!league && (!change.leagueId || league[1] === change.leagueId)
   const inSeason = !!season && (!change.seasonId || season[1] === change.seasonId)
   const relatedSeasonIds = change.seasonIds ?? (change.kind === 'venue' && client ? seasonsForLeague(client, change.leagueId) : undefined)
   const relatedSeason = !!season && (!relatedSeasonIds || relatedSeasonIds.includes(season[1]))
+  if (seasonScheduleStatus && ((change.kind === 'team' && (change.action === 'create' || change.action === 'register')) || (change.kind === 'season' && change.action === 'edit'))) {
+    return !change.seasonId || seasonScheduleStatus[1] === change.seasonId
+  }
   switch (change.kind) {
     case 'organization': return path === 'organizations' || (!!change.organizationId && path === `organizations/${change.organizationId}`)
     case 'league': return (inOrg && (org[2] === 'leagues' || (change.action === 'edit' && ['seasons', 'teams', 'team-seasons', 'venues'].includes(org[2])))) || (!!change.leagueId && path === `leagues/${change.leagueId}`) || (change.action === 'edit' && !!roster && !roster[2] && contextMatches(query, 'league_id', change.leagueId))
@@ -99,7 +104,7 @@ export function isAffectedLeagueQuery(query: Query, change: LeagueChange, client
     case 'team': return (inOrg && org[2] === 'teams') || (inLeague && league[2] === 'teams') || (change.action === 'edit' && !!change.entityId && path === `teams/${change.entityId}`) || (!!season && (change.action === 'edit' ? relatedSeason : inSeason) && ['teams', 'standings', 'dashboard', ...(change.action === 'edit' ? ['games'] : [])].includes(season[2] ?? '')) || (!!roster && !roster[2] && (change.seasonTeamId === roster[1] || (change.action === 'edit' && contextMatches(query, 'team_id', change.entityId))))
     case 'roster': return !!roster && !!roster[2] && (!change.seasonTeamId || roster[1] === change.seasonTeamId)
     case 'venue': return (inOrg && org[2] === 'venues') || (inLeague && league[2] === 'venues') || (change.action === 'edit' && relatedSeason && !!season && ['games', 'dashboard'].includes(season[2] ?? ''))
-    case 'game': return (change.action === 'edit' && !!change.entityId && path === `games/${change.entityId}/schedule-history`) || (!!scheduleStatus && (!change.divisionId || scheduleStatus[1] === change.divisionId)) || (!!season && inSeason && ['games', 'dashboard', 'standings'].includes(season[2] ?? ''))
+    case 'game': return (change.action === 'edit' && !!change.entityId && path === `games/${change.entityId}/schedule-history`) || (!!scheduleStatus && (change.divisionId ? scheduleStatus[1] === change.divisionId : !change.seasonId || !client || (seasonForDivision(client, scheduleStatus[1]) ?? change.seasonId) === change.seasonId)) || (!!seasonScheduleStatus && (!change.seasonId || seasonScheduleStatus[1] === change.seasonId)) || (!!season && inSeason && ['games', 'dashboard', 'standings'].includes(season[2] ?? ''))
     case 'unknown': return true
   }
 }
@@ -115,7 +120,7 @@ function publish(message: CacheMessage) {
 }
 export function publishSessionChange() { publish({ type: 'session-change' }) }
 export async function applyLeagueMutation(client: QueryClient, path: string, method: string, body: unknown, result: unknown) {
-  if (method === 'POST' && /^divisions\/[^/]+\/(schedule|playoffs)\/preview(?:\?|$)/.test(path)) return
+  if (method === 'POST' && /^(divisions|seasons)\/[^/]+\/(schedule|playoffs)\/preview(?:\?|$)/.test(path)) return
   const change = leagueChangeForMutation(client, path, method, body, result)
   publish({ type: 'league-change', change })
   await invalidateLeagueChange(client, change)

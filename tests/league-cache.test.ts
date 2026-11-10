@@ -187,3 +187,115 @@ test('editing a game refreshes only its own schedule history', async () => {
   assert.equal(client.getQueryState(['league', 'games/g2/schedule-history'])?.isInvalidated, false)
   client.clear()
 })
+
+
+test('season previews leave every cached query untouched', async () => {
+  const client = makeQueryClient()
+  const paths = ['divisions/d1/schedule/status', 'seasons/s1/schedule/status', 'seasons/s1/games', 'seasons/s2/games']
+  for (const path of paths) client.setQueryData(['league', path], [])
+  for (const kind of ['schedule', 'playoffs']) await applyLeagueMutation(client, `seasons/s1/${kind}/preview?scope=season`, 'POST', {}, {})
+  for (const path of paths) assert.equal(client.getQueryState(['league', path])?.isInvalidated, false, path)
+  client.clear()
+})
+
+test('season saves refresh all their division statuses and related season views', async () => {
+  for (const kind of ['schedule', 'playoffs']) {
+    const client = makeQueryClient()
+    client.setQueryData(['league', 'seasons/s1/divisions'], [{ id: 'd1' }, { id: 'd2' }])
+    client.setQueryData(['league', 'seasons/s2/divisions'], [{ id: 'd3' }])
+    const affected = ['divisions/d1/schedule/status', 'divisions/d2/schedule/status', 'divisions/unknown/schedule/status', 'seasons/s1/schedule/status', 'seasons/s1/games?scope=season', 'seasons/s1/standings', 'seasons/s1/dashboard']
+    const unaffected = ['divisions/d3/schedule/status', 'seasons/s2/schedule/status', 'seasons/s2/games', 'seasons/s2/standings', 'seasons/s2/dashboard']
+    for (const path of [...affected, ...unaffected]) client.setQueryData(['league', path], [])
+    await applyLeagueMutation(client, `seasons/s1/${kind}`, 'POST', {}, {})
+    for (const path of affected) assert.equal(client.getQueryState(['league', path])?.isInvalidated, true, `${kind}: ${path}`)
+    for (const path of unaffected) assert.equal(client.getQueryState(['league', path])?.isInvalidated, false, `${kind}: ${path}`)
+    client.clear()
+  }
+})
+
+test('division saves and game results also refresh the affected season schedule status', async () => {
+  for (const [path, result] of [['divisions/d1/schedule', {}], ['games/g1/score', { season_id: 's1', division_id: 'd1' }], ['seasons/s1/games', {}]] as const) {
+    const client = makeQueryClient()
+    client.setQueryData(['league', 'seasons/s1/divisions'], [{ id: 'd1' }])
+    for (const status of ['seasons/s1/schedule/status', 'seasons/s2/schedule/status']) client.setQueryData(['league', status], {})
+    await applyLeagueMutation(client, path, 'POST', {}, result)
+    assert.equal(client.getQueryState(['league', 'seasons/s1/schedule/status'])?.isInvalidated, true, path)
+    assert.equal(client.getQueryState(['league', 'seasons/s2/schedule/status'])?.isInvalidated, false, path)
+    client.clear()
+  }
+})
+
+
+test('season saves conservatively refresh division status when cached membership is stale', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'seasons/s2/divisions'], [{ id: 'd1' }])
+  client.setQueryData(['league', 'divisions/d1/schedule/status'], {})
+  await client.invalidateQueries({ queryKey: ['league', 'seasons/s2/divisions'] })
+  await applyLeagueMutation(client, 'seasons/s1/schedule', 'POST', {}, {})
+  assert.equal(client.getQueryState(['league', 'divisions/d1/schedule/status'])?.isInvalidated, true)
+  client.clear()
+})
+
+test('season saves refresh another tab using its own division membership', async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  Object.defineProperty(globalThis, 'window', { value: {}, configurable: true })
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'seasons/s1/divisions'], [{ id: 'd1' }])
+  client.setQueryData(['league', 'seasons/s2/divisions'], [{ id: 'd2' }])
+  for (const path of ['divisions/d1/schedule/status', 'divisions/d2/schedule/status', 'seasons/s1/schedule/status']) client.setQueryData(['league', path], {})
+  const stop = subscribeToCacheChanges(client, () => {})
+  const otherTab = new BroadcastChannel('shotclock-cache-v1')
+  try {
+    otherTab.postMessage({ senderId: 'another-tab', type: 'league-change', change: { kind: 'game', action: 'create', seasonId: 's1' } })
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    assert.equal(client.getQueryState(['league', 'divisions/d1/schedule/status'])?.isInvalidated, true)
+    assert.equal(client.getQueryState(['league', 'divisions/d2/schedule/status'])?.isInvalidated, false)
+    assert.equal(client.getQueryState(['league', 'seasons/s1/schedule/status'])?.isInvalidated, true)
+  } finally {
+    otherTab.close(); stop(); client.clear()
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
+    else Reflect.deleteProperty(globalThis, 'window')
+  }
+})
+
+
+test('team creation, registration, correction and removal refresh the affected season schedule status', async () => {
+  const mutations = [
+    ['leagues/l1/teams', 'POST', { name: 'Tigers', seasonId: 's1' }, { id: 't1' }],
+    ['seasons/s1/teams', 'POST', { teamId: 't1' }, { season_id: 's1' }],
+    ['season-teams/st1', 'PATCH', { divisionId: 'd2' }, { season_id: 's1' }],
+    ['season-teams/st1', 'DELETE', undefined, { season_id: 's1' }],
+  ] as const
+  for (const [path, method, body, result] of mutations) {
+    const client = makeQueryClient()
+    for (const status of ['seasons/s1/schedule/status?view=all', 'seasons/s2/schedule/status']) client.setQueryData(['league', status], {})
+    await applyLeagueMutation(client, path, method, body, result)
+    assert.equal(client.getQueryState(['league', 'seasons/s1/schedule/status?view=all'])?.isInvalidated, true, `${method} ${path}`)
+    assert.equal(client.getQueryState(['league', 'seasons/s2/schedule/status'])?.isInvalidated, false, `${method} ${path}`)
+    client.clear()
+  }
+})
+
+test('team changes with unknown season scope refresh all season schedule statuses', async () => {
+  for (const [path, method, body, result] of [
+    ['leagues/l1/teams', 'POST', { name: 'Tigers' }, { id: 't1' }],
+    ['season-teams/st1', 'DELETE', undefined, {}],
+  ] as const) {
+    const client = makeQueryClient()
+    for (const status of ['seasons/s1/schedule/status', 'seasons/s2/schedule/status']) client.setQueryData(['league', status], {})
+    await applyLeagueMutation(client, path, method, body, result)
+    for (const status of ['seasons/s1/schedule/status', 'seasons/s2/schedule/status']) assert.equal(client.getQueryState(['league', status])?.isInvalidated, true, `${method} ${path}: ${status}`)
+    client.clear()
+  }
+})
+
+test('season status and season edits refresh only their season schedule status', async () => {
+  for (const [path, method] of [['seasons/s1/status', 'POST'], ['seasons/s1', 'PATCH']] as const) {
+    const client = makeQueryClient()
+    for (const status of ['seasons/s1/schedule/status', 'seasons/s2/schedule/status']) client.setQueryData(['league', status], {})
+    await applyLeagueMutation(client, path, method, {}, {})
+    assert.equal(client.getQueryState(['league', 'seasons/s1/schedule/status'])?.isInvalidated, true, path)
+    assert.equal(client.getQueryState(['league', 'seasons/s2/schedule/status'])?.isInvalidated, false, path)
+    client.clear()
+  }
+})

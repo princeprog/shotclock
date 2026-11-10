@@ -19,6 +19,8 @@ import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { leagueRequest } from '@/lib/league-client'
 
 type ScheduleGame = {
+  divisionId: string
+  divisionName: string
   homeTeamId: string
   awayTeamId: string
   homeName: string
@@ -45,18 +47,19 @@ type PlayingWindow = {
 }
 type WindowDraft = PlayingWindow & { id: number }
 type ScheduleInput = { availability: Availability; format: 'single' | 'double'; playoffs: boolean; thirdPlace: boolean }
-type Preview = { games: ScheduleGame[]; warnings: string[] }
-type SavedGame = Omit<ScheduleGame, 'homeName' | 'awayName'>
+type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; playoffs?: boolean; playoffStage?: string | null }
+type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[] }
+type SavedGame = Omit<ScheduleGame, 'homeName' | 'awayName' | 'divisionName'>
 type GameDraft = { game: ScheduleGame; localTime: string; originalLocalTime: string; venueId: string }
 type Props = {
   seasonId: string
-  divisionId: string
+  divisionId?: string
   seasonName: string
-  divisionName: string
+  divisionName?: string
   seasonStart: string | null
   seasonEnd: string | null
   venues: { id: string; name: string }[]
-  teamCount: number
+  teamCount?: number
   mode: 'preliminary' | 'playoffs'
   onClose: () => void
   onSaved: () => void
@@ -95,7 +98,7 @@ function resolveZonedTime(value: string, timeZone: string): string | null {
 }
 
 function gameForSave(game: ScheduleGame, scheduledAt: string, venueId: string): SavedGame {
-  return { homeTeamId: game.homeTeamId, awayTeamId: game.awayTeamId, round: game.round, stage: game.stage, scheduledAt, venueId, durationMinutes: game.durationMinutes }
+  return { divisionId: game.divisionId, homeTeamId: game.homeTeamId, awayTeamId: game.awayTeamId, round: game.round, stage: game.stage, scheduledAt, venueId, durationMinutes: game.durationMinutes }
 }
 
 function isOutsideSeason(localTime: string, seasonStart: string | null, seasonEnd: string | null): boolean {
@@ -164,7 +167,7 @@ function ScheduleTime({ id, label, value, disabled, onChange }: { id: string; la
   </FieldSet>
 }
 
-export function ScheduleGenerator({ divisionId, seasonName, divisionName, seasonStart, seasonEnd, venues, teamCount, mode, onClose, onSaved, onPendingChange }: Props) {
+export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd, venues, mode, onClose, onSaved, onPendingChange }: Props) {
   const client = useQueryClient()
   const defaultZone = useSyncExternalStore(subscribe, browserTimeZone, serverTimeZone)
   const [zoneOverride, setZoneOverride] = useState<string | null>(null)
@@ -179,30 +182,36 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
   const [format, setFormat] = useState<'single' | 'double'>('single')
   const [playoffs, setPlayoffs] = useState(false)
   const [thirdPlace, setThirdPlace] = useState(false)
-  const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; warnings: string[] } | null>(null)
+  const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; warnings: string[]; divisions: DivisionPreview[]; seasonId: string; mode: Props['mode'] } | null>(null)
   const [error, setError] = useState('')
   const previewHeading = useRef<HTMLHeadingElement>(null)
   const wasPreviewed = useRef(false)
-  const path = `divisions/${divisionId}/${mode === 'preliminary' ? 'schedule' : 'playoffs'}`
+  const path = `seasons/${seasonId}/${mode === 'preliminary' ? 'schedule' : 'playoffs'}`
 
   const preview = useMutation({
     mutationFn: (input: ScheduleInput | { availability: Availability }) => leagueRequest<Preview>(`${path}/preview`, client, 'POST', input),
     onSuccess: (result, input) => {
       try {
-        if (!Array.isArray(result.games) || !Array.isArray(result.warnings)) throw new Error()
+        if (!Array.isArray(result.games) || !Array.isArray(result.warnings) || !Array.isArray(result.divisions)) throw new Error()
+        const ids = new Set<string>()
+        for (const division of result.divisions) {
+          if (!division.id || !division.name || !Number.isInteger(division.teamCount) || division.teamCount < 0 || ids.has(division.id) || (division.reason !== undefined && typeof division.reason !== 'string')) throw new Error()
+          ids.add(division.id)
+        }
+        const includedIds = new Set(result.divisions.filter((division) => division.reason === undefined).map((division) => division.id))
         const games = result.games.map((game) => {
-          if (!game.homeTeamId || !game.awayTeamId || !game.homeName || !game.awayName || !game.venueId || !Number.isFinite(Date.parse(game.scheduledAt))) throw new Error()
+          if (!game.divisionId || !game.divisionName || !includedIds.has(game.divisionId) || !game.homeTeamId || !game.awayTeamId || !game.homeName || !game.awayName || !game.venueId || !Number.isFinite(Date.parse(game.scheduledAt))) throw new Error()
           const localTime = formatInZone(game.scheduledAt, input.availability.timeZone)
           return { game, localTime, originalLocalTime: localTime, venueId: game.venueId }
         })
-        setDraft({ input, games, warnings: result.warnings })
+        setDraft({ input, games, warnings: result.warnings, divisions: result.divisions, seasonId, mode })
       } catch {
         setError('The preview contained incomplete game details. Please try again.')
       }
     },
   })
   const save = useMutation({
-    mutationFn: (body: (ScheduleInput | { availability: Availability }) & { games: SavedGame[] }) => leagueRequest(path, client, 'POST', body),
+    mutationFn: (body: (ScheduleInput | { availability: Availability }) & { games: SavedGame[]; divisionIds: string[] }) => leagueRequest(path, client, 'POST', body),
     onSuccess: onSaved,
   })
   const pending = preview.isPending || save.isPending
@@ -231,12 +240,12 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
     try { new Intl.DateTimeFormat('en', { timeZone }).format() } catch { setError('Enter a valid IANA time zone, such as Asia/Manila.'); return }
     if (!timeZone.trim()) { setError('Enter a valid IANA time zone.'); return }
     const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest) }
-    const input = mode === 'preliminary' ? { availability, format, playoffs: playoffs && teamCount >= 4, thirdPlace: playoffs && teamCount >= 4 && thirdPlace } : { availability }
+    const input = mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability }
     preview.mutate(input)
   }
 
   function saveSchedule() {
-    if (!draft || !draft.games.length || pending) return
+    if (!draft || draft.seasonId !== seasonId || draft.mode !== mode || !draft.games.length || pending) return
     setError('')
     const games: SavedGame[] = []
     for (const [index, item] of draft.games.entries()) {
@@ -245,16 +254,17 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
       if (!draft.input.availability.venueIds.includes(item.venueId)) { setError(`Choose an available venue for game ${index + 1}.`); return }
       games.push(gameForSave(item.game, scheduledAt, item.venueId))
     }
-    save.mutate({ ...draft.input, games })
+    save.mutate({ ...draft.input, games, divisionIds: draft.divisions.filter((division) => division.reason === undefined).map((division) => division.id) })
   }
 
+  const hasPreview = draft?.seasonId === seasonId && draft.mode === mode
   const outsideSeason = draft?.games.some((item) => isOutsideSeason(item.localTime, seasonStart, seasonEnd)) ?? false
   const otherWarnings = draft?.warnings.filter((warning) => !/^some games are outside the season dates\.?$/i.test(warning.trim())) ?? []
 
   return <>
     <DialogHeader className="border-b px-6 py-5 pr-14">
       <DialogTitle>{mode === 'preliminary' ? 'Generate preliminary schedule' : 'Schedule playoff games'}</DialogTitle>
-      <DialogDescription>{seasonName} · {divisionName} <span aria-hidden="true">—</span> Set your availability, then review each game.</DialogDescription>
+      <DialogDescription>{seasonName} <span aria-hidden="true">—</span> Set shared availability, then review each division’s games.</DialogDescription>
     </DialogHeader>
     <form onSubmit={requestPreview} className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-6 py-6">
@@ -268,9 +278,9 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
             <FieldDescription>{format === 'single' ? 'Each team plays every other team once.' : 'Each team plays every other team twice, switching home and away.'}</FieldDescription>
           </Field>
           <div className="flex flex-col gap-3 rounded-lg border p-4">
-            <label className="flex items-center gap-3 text-sm font-medium"><Checkbox checked={playoffs && teamCount >= 4} disabled={pending || teamCount < 4} onCheckedChange={(checked) => { setPlayoffs(checked); if (!checked) setThirdPlace(false); changed() }} />Include playoffs</label>
-            <p className="pl-7 text-sm text-muted-foreground">{teamCount < 4 ? 'Playoffs require at least four teams.' : 'The top four teams advance to single-elimination semifinals.'}</p>
-            {playoffs && teamCount >= 4 && <label className="flex items-center gap-3 pl-7 text-sm"><Checkbox checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} />Include a third-place game</label>}
+            <label className="flex items-center gap-3 text-sm font-medium"><Checkbox checked={playoffs} disabled={pending} onCheckedChange={(checked) => { setPlayoffs(checked); if (!checked) setThirdPlace(false); changed() }} />Include playoffs</label>
+            <p className="pl-7 text-sm text-muted-foreground">In eligible divisions, the top four teams advance to single-elimination semifinals. Playoffs require at least four teams.</p>
+            {playoffs && <label className="flex items-center gap-3 pl-7 text-sm"><Checkbox checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} />Include a third-place game</label>}
           </div>
         </section>}
 
@@ -307,11 +317,24 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
           </div>
         </section>
 
-        {draft && <section aria-labelledby="schedule-preview-heading" className="flex flex-col gap-4 border-t pt-6">
+        {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className="flex flex-col gap-4 border-t pt-6">
           <div><h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 font-medium">Review schedule · {draft.games.length} {draft.games.length === 1 ? 'game' : 'games'}</h3><p className="text-sm text-muted-foreground">Select a game to adjust its date, time or venue. Times are in {draft.input.availability.timeZone}.</p></div>
           {(outsideSeason || otherWarnings.length > 0) && <Alert role="status"><AlertTitle>Please review</AlertTitle><AlertDescription><ul className="list-disc pl-4">{outsideSeason && <li>Some games are outside the season dates.</li>}{otherWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></AlertDescription></Alert>}
           {!draft.games.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
-          <Accordion className="overflow-hidden rounded-lg border">{draft.games.map((item, index) => <AccordionItem key={index} value={String(index)}>
+          <div className="flex flex-col gap-5">{draft.divisions.map((division) => {
+            const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
+            const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
+            return <section key={division.id} className="flex flex-col gap-3" aria-labelledby={`schedule-division-${division.id}`}>
+              <div><h4 id={`schedule-division-${division.id}`} className="font-medium">{division.name}</h4>
+                <p className="text-sm text-muted-foreground">{division.teamCount} {division.teamCount === 1 ? 'team' : 'teams'} · {divisionGames.length} {divisionGames.length === 1 ? 'game' : 'games'}</p>
+                {division.reason !== undefined && <p className="text-sm text-muted-foreground">Skipped: {division.reason}</p>}
+                {division.reason === undefined && mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount < 4 && <p className="text-sm text-muted-foreground">Playoffs require at least four teams in this division.</p>}
+                {division.reason === undefined && mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount >= 4 && division.playoffs === false && <p className="text-sm text-muted-foreground">Playoffs are not included for this division.</p>}
+                {division.reason === undefined && mode === 'playoffs' && division.playoffStage && <p className="text-sm text-muted-foreground">Playoff stage: {division.playoffStage.replace('_', ' ')}</p>}
+              </div>
+              {rounds.map((round) => <div key={round} className="flex flex-col gap-2">
+                <h5 className="text-sm font-medium">Round {round}</h5>
+                <Accordion className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).map(({ item, index }) => <AccordionItem key={index} value={String(index)}>
             <AccordionTrigger className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="font-medium">{item.game.homeName} vs {item.game.awayName}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span></span></AccordionTrigger>
             <AccordionContent className="flex flex-col gap-4 px-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -326,13 +349,16 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
             </Field>
             </AccordionContent>
           </AccordionItem>)}</Accordion>
+              </div>)}
+            </section>
+          })}</div>
         </section>}
       </div>
       {(preview.isError || error || save.isError) && <div className="border-t px-6 py-3"><Alert variant="destructive" role="alert"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error || (preview.isError ? preview.error.message : save.error?.message)}</AlertDescription></Alert></div>}
       <DialogFooter className="border-t px-6 py-4">
         <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
-        <Button type="submit" variant={draft ? 'outline' : 'default'} disabled={pending || !venues.length}>{preview.isPending ? 'Generating preview…' : draft ? 'Update preview' : 'Preview schedule'}</Button>
-        {draft && <Button type="button" disabled={pending || !draft.games.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
+        <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending || !venues.length}>{preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>
+        {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
       </DialogFooter>
     </form>
   </>

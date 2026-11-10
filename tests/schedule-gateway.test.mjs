@@ -21,7 +21,7 @@ async function request(method, path, body, headers = {}) {
   const value = new Request(`https://app.test/api/league/${path}`, { method, headers: { origin: 'https://app.test', 'x-requested-with': 'Shotclock', 'content-type': 'application/json', ...headers }, body })
   value.nextUrl = new URL(value.url)
   value.cookies = { get: () => ({ value: 'test-access' }) }
-  return route[method](value, { params: Promise.resolve({ path: path.split('/') }) })
+  return route[method](value, { params: Promise.resolve({ path: path.split('?')[0].split('/') }) })
 }
 
 test('schedule routes and game deletion are allowlisted while other routes remain blocked', async () => {
@@ -57,4 +57,31 @@ test('forfeit and schedule history routes preserve gateway checks', async () => 
   assert.equal((await request('POST', `games/${id}/forfeit`, JSON.stringify({ value: 'x'.repeat(8192) }))).status, 413)
   assert.equal((await request('GET', `games/not-a-uuid/schedule-history`)).status, 404)
   assert.equal((await request('GET', `games/${id}/forfeit`)).status, 404)
+})
+
+
+test('season scheduling routes are allowlisted and reject unsupported paths', async () => {
+  for (const [method, path] of [['GET', `seasons/${id}/schedule/status`], ...['schedule', 'playoffs'].flatMap((kind) => [['POST', `seasons/${id}/${kind}`], ['POST', `seasons/${id}/${kind}/preview`]])]) {
+    assert.equal((await request(method, path, method === 'POST' ? '{}' : undefined)).status, 200, `${method} ${path}`)
+  }
+  assert.equal((await request('GET', `seasons/${id}/schedule`)).status, 404)
+  assert.equal((await request('POST', `seasons/${id}/schedule/other`, '{}')).status, 404)
+  assert.equal((await request('POST', `seasons/${id}/playoffs`, '{}', { origin: 'https://evil.test' })).status, 403)
+})
+
+test('season saves accept at most 2 MiB while previews keep the 8192-byte limit', async () => {
+  const sizedBody = (size) => `{"value":"${'x'.repeat(size - 12)}"}`
+  for (const kind of ['schedule', 'playoffs']) {
+    assert.equal((await request('POST', `seasons/${id}/${kind}`, sizedBody(2 * 1024 * 1024))).status, 200)
+    assert.equal((await request('POST', `seasons/${id}/${kind}`, sizedBody(2 * 1024 * 1024 + 1))).status, 413)
+    assert.equal((await request('POST', `seasons/${id}/${kind}/preview`, sizedBody(8192))).status, 200)
+    assert.equal((await request('POST', `seasons/${id}/${kind}/preview`, sizedBody(8193))).status, 413)
+  }
+})
+
+test('season-scoped query parameters are forwarded on existing GET routes', async () => {
+  for (const kind of ['games', 'teams', 'standings', 'dashboard']) {
+    assert.equal((await request('GET', `seasons/${id}/${kind}?scope=season&page=2`)).status, 200)
+    assert.equal(calls.at(-1).path, `/league/seasons/${id}/${kind}?scope=season&page=2`)
+  }
 })
