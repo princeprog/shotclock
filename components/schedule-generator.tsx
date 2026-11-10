@@ -198,8 +198,10 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [thirdPlace, setThirdPlace] = useState(false)
   const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; warnings: string[]; divisions: DivisionPreview[]; seasonId: string; mode: Props['mode'] } | null>(null)
   const [error, setError] = useState('')
+  const [showCapacity, setShowCapacity] = useState(false)
   const [expandedGame, setExpandedGame] = useState<string | null>(null)
   const previewHeading = useRef<HTMLHeadingElement>(null)
+  const capacityHeading = useRef<HTMLHeadingElement>(null)
   const wasPreviewed = useRef(false)
   const path = `seasons/${seasonId}/${mode === 'preliminary' ? 'schedule' : 'playoffs'}`
 
@@ -211,9 +213,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       settingsKey = JSON.stringify(mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability })
     } catch { /* Wait until the time zone is valid. */ }
   }
-  const settledSettings = useDebouncedValue(settingsKey)
-  const estimate = useQuery({ queryKey: ['schedule-estimate', path, settledSettings], enabled: !!settingsKey && settledSettings === settingsKey, retry: false,
-    queryFn: () => leagueRequest<Estimate>(`${path}/estimate`, client, 'POST', JSON.parse(settledSettings)) })
+  const estimate = useQuery({ queryKey: ['schedule-estimate', path, settingsKey], enabled: false, retry: false,
+    queryFn: () => leagueRequest<Estimate>(`${path}/estimate`, client, 'POST', JSON.parse(settingsKey)) })
 
   let validationKey = ''
   const invalidGameIndexes: number[] = []
@@ -231,7 +232,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const calendarKey = draft && draft.seasonId === seasonId && draft.mode === mode ? JSON.stringify({ availability: draft.input.availability }) : ''
   const calendar = useQuery({ queryKey: ['schedule-calendar', seasonId, calendarKey], enabled: !!calendarKey, retry: false,
     queryFn: () => leagueRequest<{ games: CalendarBooking[] }>(`seasons/${seasonId}/schedule/calendar`, client, 'POST', JSON.parse(calendarKey)) })
-  const estimateReady = !!settingsKey && settledSettings === settingsKey && !estimate.isFetching && !!estimate.data && !estimate.isError
+  const estimateReady = !!settingsKey && !estimate.isFetching && !!estimate.data && !estimate.isError
   const validationReady = !!validationKey && settledValidation === validationKey && !validation.isFetching && !!validation.data && !validation.isError
 
   const preview = useMutation({
@@ -260,7 +261,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     mutationFn: (body: (ScheduleInput | { availability: Availability }) & { games: SavedGame[]; divisionIds: string[] }) => leagueRequest(path, client, 'POST', body),
     onSuccess: onSaved,
   })
-  const pending = preview.isPending || save.isPending
+  const pending = estimate.isFetching || preview.isPending || save.isPending
   useEffect(() => { onPendingChange?.(pending) }, [pending, onPendingChange])
   useEffect(() => {
     if (draft && !wasPreviewed.current) previewHeading.current?.scrollIntoView({ block: 'start' })
@@ -270,11 +271,12 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   function changed() {
     setDraft(null)
     setError('')
+    setShowCapacity(false)
     preview.reset()
     save.reset()
   }
 
-  function requestPreview(event: FormEvent<HTMLFormElement>) {
+  async function requestPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
     setDraft(null)
@@ -282,12 +284,16 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     const windowError = validateWindows(windows)
     if (windowError) { setError(windowError); return }
     if (!venueIds.length) { setError('Choose at least one venue.'); return }
-    if (!Number.isInteger(Number(duration)) || Number(duration) <= 0 || !duration || !Number.isInteger(Number(rest)) || Number(rest) < 0 || !rest) { setError('Enter a positive game duration and a nonnegative rest time in whole minutes.'); return }
+    if (!Number.isInteger(Number(duration)) || Number(duration) <= 0 || Number(duration) > 1440 || !duration || !Number.isInteger(Number(rest)) || Number(rest) < 0 || Number(rest) > 10080 || !rest) { setError('Enter a game duration from 1 to 1,440 minutes and a rest time from 0 to 10,080 minutes.'); return }
     try { new Intl.DateTimeFormat('en', { timeZone }).format() } catch { setError('Enter a valid IANA time zone, such as Asia/Manila.'); return }
     if (!timeZone.trim()) { setError('Enter a valid IANA time zone.'); return }
-    if (!estimateReady || !estimate.data) { setError('Wait for the capacity check or retry it before generating a preview.'); return }
-    if (!estimate.data.required) { setError('No divisions are ready to generate games.'); return }
-    if (estimate.data.capacity < estimate.data.required) { setError('Add more playing time or venues before generating a preview.'); return }
+    if (!settingsKey) { setError('Check the scheduling settings and try again.'); return }
+    setShowCapacity(true)
+    const result = await estimate.refetch()
+    if (result.error || !result.data || !result.data.required || result.data.capacity < result.data.required) {
+      capacityHeading.current?.scrollIntoView({ block: 'start' })
+      return
+    }
     const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest) }
     const input = mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability }
     preview.mutate(input)
@@ -366,11 +372,10 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
           </div>
         </section>
 
-        <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
-          <div><h3 id="schedule-capacity-heading" className="font-medium">Schedule capacity</h3><p className="text-sm text-muted-foreground">Check the number of games and available court slots before generating.</p></div>
-          {!settingsKey && <p className="text-sm text-muted-foreground">Complete the dates, playing windows, venues and game settings to check capacity.</p>}
-          {settingsKey && !estimateReady && (settledSettings !== settingsKey || !estimate.isError) && <p className="text-sm text-muted-foreground" role="status">Checking capacity…</p>}
-          {settingsKey && settledSettings === settingsKey && estimate.isError && <Alert variant="destructive"><AlertTitle>Capacity check unavailable</AlertTitle><AlertDescription>{estimate.error.message} <Button type="button" variant="link" size="sm" onClick={() => void estimate.refetch()}>Retry</Button></AlertDescription></Alert>}
+        {showCapacity && <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
+          <div><h3 ref={capacityHeading} id="schedule-capacity-heading" className="scroll-mt-2 font-medium">Schedule capacity</h3><p className="text-sm text-muted-foreground">Check the number of games and available court slots before generating.</p></div>
+          {estimate.isFetching && <p className="text-sm text-muted-foreground" role="status">Checking capacity…</p>}
+          {!estimate.isFetching && estimate.isError && <Alert variant="destructive"><AlertTitle>Capacity check unavailable</AlertTitle><AlertDescription>{estimate.error.message} Try previewing again.</AlertDescription></Alert>}
           {estimateReady && estimate.data && <div className="overflow-hidden rounded-lg border text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
               <p className="font-medium">Capacity overview</p>
@@ -388,7 +393,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               <ul className="flex flex-col gap-2">{estimate.data.divisions.map((division) => <li key={division.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5"><span className="min-w-0 font-medium">{division.name}</span><span className="text-muted-foreground">{division.reason ? `Skipped — ${division.reason}` : `${division.gameCount} ${division.gameCount === 1 ? 'game' : 'games'}${mode === 'preliminary' && playoffs && division.teamCount < 4 ? ' · round robin only' : ''}`}</span></li>)}</ul>
             </div>}
           </div>}
-        </section>
+        </section>}
 
         {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className="flex flex-col gap-4 border-t pt-6">
           <div><h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 font-medium">Review schedule · {draft.games.length} {draft.games.length === 1 ? 'game' : 'games'}</h3><p className="text-sm text-muted-foreground">Select a game to adjust its date, time or venue. Times are in {draft.input.availability.timeZone}.</p></div>
@@ -440,7 +445,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       {(preview.isError || error || save.isError) && <div className="border-t px-6 py-3"><Alert variant="destructive" role="alert"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error || (preview.isError ? preview.error.message : save.error?.message)}</AlertDescription></Alert></div>}
       <DialogFooter className="border-t px-6 py-4">
         <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
-        <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending || !venues.length || !estimateReady || !estimate.data?.required || !!(estimate.data && estimate.data.capacity < estimate.data.required)}>{preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>
+        <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending}>{estimate.isFetching ? 'Checking capacity…' : preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>
         {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
       </DialogFooter>
     </form>

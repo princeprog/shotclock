@@ -17,14 +17,14 @@ function nodes(element) {
   return [element, ...nodes(element.props?.children)]
 }
 function harness(mode = 'preliminary', result = response, diagnostics = {}) {
-  const state = []; let cursor = 0; const calls = []
+  const state = []; let cursor = 0; const calls = []; let estimateData; let estimateError
   const context = { exports: {}, window: { setTimeout: (callback) => { callback(); return 1 }, clearTimeout() {} }, require(name) {
     if (name === 'react') return {
       useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (value) => { state[i] = typeof value === 'function' ? value(state[i]) : value }] },
       useRef(initial) { const i = cursor++; return state[i] ??= { current: initial } },
       useEffect(effect) { effect() }, useSyncExternalStore() { return 'Asia/Manila' },
     }
-    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: false, data: enabled ? queryKey[0] === 'schedule-estimate' ? { capacity: diagnostics.capacity ?? 100, required: 3, divisions: [] } : queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [] } : { games: [] } : undefined, refetch() {} }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
+    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [] }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
@@ -118,12 +118,32 @@ test('rejects a preview that assigns a game to a skipped division', async () => 
   assert.equal(tree.some((n) => n.type === 'Button' && nodes(n).includes('Save schedule')), false)
 })
 
-test('a proven shortfall blocks preview and explains how many slots are missing', async () => {
+test('capacity is shown only after requesting a preview and explains a shortfall', async () => {
   const h = harness('preliminary', response, { capacity: 1 }); h.setup()
-  const tree = h.render()
-  assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Preview schedule')).props.disabled, true)
-  assert.match(tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' '), /2\s+more court slots/)
+  let tree = h.render()
+  assert.equal(tree.some((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-capacity-heading'), false)
+  assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Preview schedule')).props.disabled, false)
   await h.preview()
+  tree = h.render()
+  assert.match(tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' '), /2\s+more court slots/)
+  assert.equal(h.calls.length, 0)
+  tree.find((n) => n.type === 'Input' && n.props.id === 'schedule-duration').props.onChange({ target: { value: '90' } })
+  assert.equal(h.render().some((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-capacity-heading'), false)
+})
+
+test('explains when no division can be scheduled', async () => {
+  const h = harness('preliminary', response, { required: 0, divisions: [{ id: 'c', name: 'Junior', teamCount: 1, reason: 'At least two teams are required.' }] }); h.setup(); await h.preview()
+  const text = h.render().filter((n) => typeof n === 'string').join(' ')
+  assert.match(text, /No divisions are ready/)
+  assert.match(text, /At least two teams are required/)
+  assert.equal(h.calls.length, 0)
+})
+
+test('reports a failed capacity check and lets the organizer retry', async () => {
+  const h = harness('preliminary', response, { error: 'Service unavailable' }); h.setup(); await h.preview()
+  const tree = h.render()
+  assert.match(tree.filter((n) => typeof n === 'string').join(' '), /Capacity check unavailable.*Service unavailable.*Try previewing again/)
+  assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Preview schedule')).props.disabled, false)
   assert.equal(h.calls.length, 0)
 })
 
