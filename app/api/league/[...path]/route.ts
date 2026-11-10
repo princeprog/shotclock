@@ -4,8 +4,8 @@ import { isTrustedMutation } from '@/lib/auth-security'
 
 const uuid = '[0-9a-fA-F-]{36}'
 const routes: Record<string, RegExp[]> = {
-  GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions)|teams/${uuid}|season-teams/${uuid}(/roster)?|divisions/${uuid}/schedule/status)$`)],
-  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/score|divisions/${uuid}/(schedule|playoffs)(/preview)?)$`)],
+  GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions)|teams/${uuid}|season-teams/${uuid}(/roster)?|games/${uuid}/schedule-history|divisions/${uuid}/schedule/status)$`)],
+  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/(score|forfeit)|divisions/${uuid}/(schedule|playoffs)(/preview)?)$`)],
   PATCH: [new RegExp(`^(organizations|leagues|seasons|teams|season-teams|rosters|games|venues|divisions|players)/${uuid}$`)],
   DELETE: [new RegExp(`^(divisions|season-teams|rosters|games)/${uuid}$`)],
 }

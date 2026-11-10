@@ -49,3 +49,12 @@ test('only schedule saves receive the 256 KiB byte limit', async () => {
   assert.equal((await request('POST', `divisions/${id}/schedule`, sizedBody(256 * 1024))).status, 200)
   assert.equal((await request('POST', `divisions/${id}/schedule`, sizedBody(256 * 1024 + 1))).status, 413)
 })
+
+test('forfeit and schedule history routes preserve gateway checks', async () => {
+  assert.equal((await request('GET', `games/${id}/schedule-history`)).status, 200)
+  assert.equal((await request('POST', `games/${id}/forfeit`, '{}')).status, 200)
+  assert.equal((await request('POST', `games/${id}/forfeit`, '{}', { origin: 'https://evil.test' })).status, 403)
+  assert.equal((await request('POST', `games/${id}/forfeit`, JSON.stringify({ value: 'x'.repeat(8192) }))).status, 413)
+  assert.equal((await request('GET', `games/not-a-uuid/schedule-history`)).status, 404)
+  assert.equal((await request('GET', `games/${id}/forfeit`)).status, 404)
+})

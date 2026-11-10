@@ -65,7 +65,7 @@ export function leagueChangeForMutation(client: QueryClient, path: string, metho
   else if (resource === 'venues' && !child) change = { kind: 'venue', action: 'edit', leagueId: stringValue(value.league_id), entityId: id }
   else if (resource === 'seasons' && child === 'games') change = { kind: 'game', action: 'create', seasonId: id }
   else if (resource === 'divisions' && (child === 'schedule' || child === 'playoffs')) change = { kind: 'game', action: 'create', divisionId: id, seasonId: seasonForDivision(client, id) }
-  else if (resource === 'games' && (!child || child === 'score')) change = { kind: 'game', action: child === 'score' ? 'score' : 'edit', seasonId: stringValue(value.season_id), divisionId: stringValue(value.division_id), entityId: id }
+  else if (resource === 'games' && (!child || child === 'score' || child === 'forfeit')) change = { kind: 'game', action: child ? 'score' : 'edit', seasonId: stringValue(value.season_id), divisionId: stringValue(value.division_id), entityId: id }
   if (!change.organizationId) change.organizationId = organizationForLeague(client, change.leagueId)
   if (change.kind === 'team' && change.action === 'edit') change.seasonIds = seasonsForTeam(client, change.entityId)
   if (change.kind === 'venue' && change.action === 'edit') change.seasonIds = seasonsForLeague(client, change.leagueId)
@@ -99,7 +99,7 @@ export function isAffectedLeagueQuery(query: Query, change: LeagueChange, client
     case 'team': return (inOrg && org[2] === 'teams') || (inLeague && league[2] === 'teams') || (change.action === 'edit' && !!change.entityId && path === `teams/${change.entityId}`) || (!!season && (change.action === 'edit' ? relatedSeason : inSeason) && ['teams', 'standings', 'dashboard', ...(change.action === 'edit' ? ['games'] : [])].includes(season[2] ?? '')) || (!!roster && !roster[2] && (change.seasonTeamId === roster[1] || (change.action === 'edit' && contextMatches(query, 'team_id', change.entityId))))
     case 'roster': return !!roster && !!roster[2] && (!change.seasonTeamId || roster[1] === change.seasonTeamId)
     case 'venue': return (inOrg && org[2] === 'venues') || (inLeague && league[2] === 'venues') || (change.action === 'edit' && relatedSeason && !!season && ['games', 'dashboard'].includes(season[2] ?? ''))
-    case 'game': return (!!scheduleStatus && (!change.divisionId || scheduleStatus[1] === change.divisionId)) || (!!season && inSeason && ['games', 'dashboard', 'standings'].includes(season[2] ?? ''))
+    case 'game': return (change.action === 'edit' && !!change.entityId && path === `games/${change.entityId}/schedule-history`) || (!!scheduleStatus && (!change.divisionId || scheduleStatus[1] === change.divisionId)) || (!!season && inSeason && ['games', 'dashboard', 'standings'].includes(season[2] ?? ''))
     case 'unknown': return true
   }
 }

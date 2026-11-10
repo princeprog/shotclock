@@ -169,3 +169,21 @@ test('playoff saves and final scores invalidate the affected division status', a
   assert.equal(client.getQueryState(['league', 'seasons/s1/standings'])?.isInvalidated, true)
   client.clear()
 })
+
+test('forfeits refresh the same scoped queries as scores', async () => {
+  const client = makeQueryClient()
+  const paths = ['divisions/d1/schedule/status', 'divisions/d2/schedule/status', 'seasons/s1/games', 'seasons/s1/standings', 'seasons/s1/dashboard', 'seasons/s2/games', 'organizations/o1/leagues']
+  for (const path of paths) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'games/g1/forfeit', 'POST', { forfeitingTeamId: 't1' }, { season_id: 's1', division_id: 'd1' })
+  assert.deepEqual(paths.filter((path) => client.getQueryState(['league', path])?.isInvalidated), ['divisions/d1/schedule/status', 'seasons/s1/games', 'seasons/s1/standings', 'seasons/s1/dashboard'])
+  client.clear()
+})
+
+test('editing a game refreshes only its own schedule history', async () => {
+  const client = makeQueryClient()
+  for (const path of ['games/g1/schedule-history', 'games/g2/schedule-history']) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'games/g1', 'PATCH', {}, { season_id: 's1' })
+  assert.equal(client.getQueryState(['league', 'games/g1/schedule-history'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'games/g2/schedule-history'])?.isInvalidated, false)
+  client.clear()
+})
