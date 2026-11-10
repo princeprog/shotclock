@@ -6,12 +6,23 @@ import ts from 'typescript'
 
 const source = readFileSync(new URL('../components/schedule-generator.tsx', import.meta.url), 'utf8')
 const file = ts.createSourceFile('schedule-generator.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-const names = new Set(['formatInZone', 'resolveZonedTime', 'gameForSave', 'isOutsideSeason', 'validateWindows'])
+const names = new Set(['formatInZone', 'resolveZonedTime', 'gameForSave', 'isOutsideSeason', 'formatWallTime', 'validateWindows'])
 const helpers = file.statements.filter((statement) => ts.isFunctionDeclaration(statement) && statement.name && names.has(statement.name.text)).map((statement) => statement.getText(file)).join('\n')
-const code = ts.transpileModule(`${helpers}\nglobalThis.helpers = { formatInZone, resolveZonedTime, gameForSave, isOutsideSeason, validateWindows }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const code = ts.transpileModule(`${helpers}\nglobalThis.helpers = { formatInZone, resolveZonedTime, gameForSave, isOutsideSeason, formatWallTime, validateWindows }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const context = vm.createContext({ Intl, Date, Set })
 vm.runInContext(code, context)
-const { formatInZone, resolveZonedTime, gameForSave, isOutsideSeason, validateWindows } = context.helpers
+const { formatInZone, resolveZonedTime, gameForSave, isOutsideSeason, formatWallTime, validateWindows } = context.helpers
+
+test('preview summaries retain wall time across the browser daylight-saving transition', () => {
+  const previous = process.env.TZ
+  try {
+    process.env.TZ = 'America/New_York'
+    assert.equal(formatWallTime('2026-03-08T02:30'), 'Mar 8, 2026, 2:30 AM')
+  } finally {
+    if (previous === undefined) delete process.env.TZ
+    else process.env.TZ = previous
+  }
+})
 
 test('converts wall times in the selected zone, independently of the browser zone', () => {
   assert.equal(formatInZone('2026-01-01T12:30:00.000Z', 'Asia/Manila'), '2026-01-01T20:30')

@@ -2,11 +2,20 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { format as formatDate, isValid, parseISO } from 'date-fns'
+import { CalendarDaysIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Calendar } from '@/components/ui/calendar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { leagueRequest } from '@/lib/league-client'
 
 type ScheduleGame = {
@@ -95,6 +104,12 @@ function isOutsideSeason(localTime: string, seasonStart: string | null, seasonEn
   return (!!seasonStart && date < seasonStart.slice(0, 10)) || (!!seasonEnd && date > seasonEnd.slice(0, 10))
 }
 
+function formatWallTime(value: string): string {
+  const date = new Date(`${value}:00Z`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
+}
+
 function validateWindows(windows: PlayingWindow[]): string {
   if (!windows.length || windows.length > 20) return 'Add between 1 and 20 playing windows.'
   const validTime = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -106,10 +121,48 @@ function validateWindows(windows: PlayingWindow[]): string {
 }
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const selectClass = 'border-input bg-transparent h-9 w-full rounded-md border px-3 text-sm shadow-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50'
+const hours = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, '0'))
+const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'))
 const subscribe = () => () => {}
 const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const serverTimeZone = () => ''
+
+function ScheduleDate({ id, label, value, disabled, onChange }: { id: string; label: string; value: string; disabled: boolean; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const parsed = value ? parseISO(value) : undefined
+  const selected = parsed && isValid(parsed) ? parsed : undefined
+  return <Field>
+    <FieldLabel htmlFor={id} required>{label}</FieldLabel>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button id={id} type="button" variant="outline" disabled={disabled} aria-required="true" aria-label={`${label}: ${selected ? formatDate(selected, 'PPP') : 'Choose a date'}`} className="w-full justify-start font-normal" />}>
+        <CalendarDaysIcon data-icon="inline-start" />{selected ? formatDate(selected, 'MMM d, yyyy') : 'Choose a date'}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <Calendar mode="single" selected={selected} defaultMonth={selected} onSelect={(date) => { if (date) { onChange(formatDate(date, 'yyyy-MM-dd')); setOpen(false) } }} autoFocus />
+      </PopoverContent>
+    </Popover>
+  </Field>
+}
+
+function ScheduleTime({ id, label, value, disabled, onChange }: { id: string; label: string; value: string; disabled: boolean; onChange: (value: string) => void }) {
+  const time = splitGameTime(value)
+  const parts = [
+    { key: 'hour', label: 'hour', value: time.hour, options: hours },
+    { key: 'minute', label: 'minute', value: time.minute, options: minutes },
+    { key: 'period', label: 'AM or PM', value: time.period, options: ['AM', 'PM'] },
+  ] as const
+  return <FieldSet className="gap-2">
+    <FieldLegend variant="label" className="mb-0" required>{label}</FieldLegend>
+    <div className="grid grid-cols-3 gap-2">
+      {parts.map((part) => <Select key={part.key} value={part.value || null} disabled={disabled} items={part.options.map((option) => ({ value: option, label: option }))} onValueChange={(next) => {
+        if (next) onChange(joinGameTime(part.key === 'hour' ? next : time.hour, part.key === 'minute' ? next : time.minute, part.key === 'period' ? next : time.period))
+      }}>
+        <SelectTrigger id={`${id}-${part.key}`} aria-label={`${label} ${part.label}`} aria-required="true" className="w-full"><SelectValue placeholder={part.label} /></SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}><SelectGroup>{part.options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectGroup></SelectContent>
+      </Select>)}
+    </div>
+  </FieldSet>
+}
 
 export function ScheduleGenerator({ divisionId, seasonName, divisionName, seasonStart, seasonEnd, venues, teamCount, mode, onClose, onSaved, onPendingChange }: Props) {
   const client = useQueryClient()
@@ -128,6 +181,8 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
   const [thirdPlace, setThirdPlace] = useState(false)
   const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; warnings: string[] } | null>(null)
   const [error, setError] = useState('')
+  const previewHeading = useRef<HTMLHeadingElement>(null)
+  const wasPreviewed = useRef(false)
   const path = `divisions/${divisionId}/${mode === 'preliminary' ? 'schedule' : 'playoffs'}`
 
   const preview = useMutation({
@@ -152,6 +207,10 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
   })
   const pending = preview.isPending || save.isPending
   useEffect(() => { onPendingChange?.(pending) }, [pending, onPendingChange])
+  useEffect(() => {
+    if (draft && !wasPreviewed.current) previewHeading.current?.scrollIntoView({ block: 'start' })
+    wasPreviewed.current = !!draft
+  }, [draft])
 
   function changed() {
     setDraft(null)
@@ -193,53 +252,88 @@ export function ScheduleGenerator({ divisionId, seasonName, divisionName, season
   const otherWarnings = draft?.warnings.filter((warning) => !/^some games are outside the season dates\.?$/i.test(warning.trim())) ?? []
 
   return <>
-    <DialogHeader className="pr-8">
+    <DialogHeader className="border-b px-6 py-5 pr-14">
       <DialogTitle>{mode === 'preliminary' ? 'Generate preliminary schedule' : 'Schedule playoff games'}</DialogTitle>
-      <DialogDescription>{seasonName} · {divisionName}. Review the proposed games before saving.</DialogDescription>
+      <DialogDescription>{seasonName} · {divisionName} <span aria-hidden="true">—</span> Set your availability, then review each game.</DialogDescription>
     </DialogHeader>
-    <form onSubmit={requestPreview} className="flex flex-col gap-5">
-      {mode === 'preliminary' && <p className="rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">A preliminary schedule can only be generated when this division has no existing preliminary games. Existing games will not be replaced.</p>}
-      <fieldset disabled={pending} className="flex min-w-0 flex-col gap-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field><FieldLabel htmlFor="schedule-start-date" required>Start date</FieldLabel><Input id="schedule-start-date" type="date" required value={startDate} onChange={(e) => { setStartDate(e.target.value); changed() }} /></Field>
-          <Field><FieldLabel htmlFor="schedule-end-date" required>End date</FieldLabel><Input id="schedule-end-date" type="date" required value={endDate} onChange={(e) => { setEndDate(e.target.value); changed() }} /></Field>
-        </div>
-        <div className="space-y-3"><div><h3 className="text-sm font-medium">Recurring playing windows</h3><p className="text-sm text-muted-foreground">Choose the days and hours when games can be played.</p></div>
-          {windows.map((window, position) => <fieldset key={window.id} className="space-y-3 rounded-md border p-3"><legend className="px-1 text-sm font-medium">Window {position + 1}</legend>
-            <fieldset className="space-y-2"><legend className="text-sm font-medium">Weekdays <span aria-hidden="true" className="text-destructive">*</span></legend><div className="flex flex-wrap gap-x-4 gap-y-3">{weekdays.map((day, index) => <label key={day} className="flex items-center gap-2 text-sm"><Checkbox checked={window.weekdays.includes(index)} onCheckedChange={(checked) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, weekdays: checked ? [...item.weekdays, index] : item.weekdays.filter((value) => value !== index) } : item)); changed() }} />{day}</label>)}</div></fieldset>
-            <div className="grid gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`schedule-window-${window.id}-start`} required>Start time</FieldLabel><Input id={`schedule-window-${window.id}-start`} type="time" required value={window.startTime} onChange={(e) => { const value = e.target.value; setWindows((current) => current.map((item) => item.id === window.id ? { ...item, startTime: value } : item)); changed() }} /></Field><Field><FieldLabel htmlFor={`schedule-window-${window.id}-end`} required>End time</FieldLabel><Input id={`schedule-window-${window.id}-end`} type="time" required value={window.endTime} onChange={(e) => { const value = e.target.value; setWindows((current) => current.map((item) => item.id === window.id ? { ...item, endTime: value } : item)); changed() }} /></Field></div>
-            {windows.length > 1 && <Button type="button" variant="outline" size="sm" onClick={() => { setWindows((current) => current.filter((item) => item.id !== window.id)); changed() }}>Remove window {position + 1}</Button>}
-          </fieldset>)}
-          <Button type="button" variant="outline" size="sm" disabled={windows.length >= 20} onClick={() => { const id = nextWindowId.current++; setWindows((current) => [...current, { id, weekdays: [], startTime: '09:00', endTime: '17:00' }]); changed() }}>Add playing window</Button>
-        </div>
-        <Field><FieldLabel htmlFor="schedule-zone" required>Time zone</FieldLabel><Input id="schedule-zone" required value={timeZone} onChange={(e) => { setZoneOverride(e.target.value); changed() }} placeholder="Asia/Manila" /><FieldDescription>Use an IANA time zone. All times below use this zone, including daylight-saving changes.</FieldDescription></Field>
-        <fieldset className="space-y-2"><legend className="text-sm font-medium">Venues <span aria-hidden="true" className="text-destructive">*</span></legend>{venues.length ? <div className="flex flex-wrap gap-x-5 gap-y-3">{venues.map((venue) => <label key={venue.id} className="flex items-center gap-2 text-sm"><Checkbox checked={venueIds.includes(venue.id)} onCheckedChange={(checked) => { setVenueIds((current) => checked ? [...current, venue.id] : current.filter((id) => id !== venue.id)); changed() }} />{venue.name}</label>)}</div> : <p className="text-sm text-muted-foreground">Add a venue before generating a schedule.</p>}</fieldset>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field><FieldLabel htmlFor="schedule-duration" required>Game duration (minutes)</FieldLabel><Input id="schedule-duration" type="number" min="1" step="1" required value={duration} onChange={(e) => { setDuration(e.target.value); changed() }} /></Field>
-          <Field><FieldLabel htmlFor="schedule-rest" required>Rest between games (minutes)</FieldLabel><Input id="schedule-rest" type="number" min="0" step="1" required value={rest} onChange={(e) => { setRest(e.target.value); changed() }} /></Field>
-        </div>
-        {mode === 'preliminary' && <>
-          <Field><FieldLabel htmlFor="schedule-format" required>Round-robin format</FieldLabel><select id="schedule-format" required className={selectClass} value={format} onChange={(e) => { setFormat(e.target.value as 'single' | 'double'); changed() }}><option value="single">Single round robin</option><option value="double">Double round robin</option></select></Field>
-          <div className="space-y-3"><label className="flex items-center gap-2 text-sm"><Checkbox checked={playoffs && teamCount >= 4} disabled={teamCount < 4} onCheckedChange={(checked) => { setPlayoffs(checked); if (!checked) setThirdPlace(false); changed() }} />Include playoffs</label>{teamCount < 4 && <p className="text-sm text-muted-foreground">Playoffs require at least four teams.</p>}{playoffs && teamCount >= 4 && <label className="flex items-center gap-2 text-sm"><Checkbox checked={thirdPlace} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} />Include a third-place game</label>}</div>
-        </>}
-        <div><Button type="submit" variant="outline" disabled={pending || !venues.length}>{preview.isPending ? 'Generating preview…' : draft ? 'Generate preview again' : 'Preview schedule'}</Button></div>
-      </fieldset>
-      {preview.isError && <p role="alert" className="text-sm text-destructive">{preview.error.message}</p>}
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-      {draft && <section aria-labelledby="schedule-preview-heading" className="space-y-3">
-        <div><h3 id="schedule-preview-heading" className="font-medium">Preview · {draft.games.length} {draft.games.length === 1 ? 'game' : 'games'}</h3><p className="text-sm text-muted-foreground">Times are in {draft.input.availability.timeZone}. Repeated or skipped daylight-saving times cannot be entered when editing.</p></div>
-        {(outsideSeason || otherWarnings.length > 0) && <div role="status" className="rounded-md border p-3 text-sm"><p className="font-medium">Please review</p><ul className="mt-1 list-disc space-y-1 pl-5">{outsideSeason && <li>Some games are outside the season dates.</li>}{otherWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
-        {!draft.games.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
-        <div className="space-y-3">{draft.games.map((item, index) => <div key={index} className="space-y-3 rounded-md border p-3">
-          <div><p className="text-sm font-medium">{item.game.homeName} vs {item.game.awayName}</p><p className="text-xs text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round}</p></div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field><FieldLabel htmlFor={`schedule-game-time-${index}`} required>Date and time</FieldLabel><Input id={`schedule-game-time-${index}`} type="datetime-local" required value={item.localTime} disabled={pending} onChange={(e) => { const value = e.target.value; setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: value } : game) }); setError('') }} />{item.localTime === item.originalLocalTime && <FieldDescription>Preview offset: {new Intl.DateTimeFormat('en', { timeZone: draft.input.availability.timeZone, timeZoneName: 'longOffset' }).formatToParts(new Date(item.game.scheduledAt)).find((part) => part.type === 'timeZoneName')?.value}</FieldDescription>}</Field>
-            <Field><FieldLabel htmlFor={`schedule-game-venue-${index}`} required>Venue</FieldLabel><select id={`schedule-game-venue-${index}`} required className={selectClass} value={item.venueId} disabled={pending} onChange={(e) => { const value = e.target.value; setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, venueId: value } : game) }); setError('') }}><option value="">Choose a venue</option>{venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => <option key={venue.id} value={venue.id}>{venue.name}</option>)}</select></Field>
+    <form onSubmit={requestPreview} className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-6 py-6">
+        {mode === 'preliminary' && <section className="flex flex-col gap-4" aria-labelledby="schedule-format-heading">
+          <div><h3 id="schedule-format-heading" className="font-medium">Competition format</h3><p className="text-sm text-muted-foreground">Choose how teams play through the season.</p></div>
+          <Field><FieldLabel htmlFor="schedule-format" required>Round-robin format</FieldLabel>
+            <Select value={format} disabled={pending} items={[{ value: 'single', label: 'Single round robin' }, { value: 'double', label: 'Double round robin' }]} onValueChange={(value) => { if (value === 'single' || value === 'double') { setFormat(value); changed() } }}>
+              <SelectTrigger id="schedule-format" aria-required="true" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value="single">Single round robin</SelectItem><SelectItem value="double">Double round robin</SelectItem></SelectGroup></SelectContent>
+            </Select>
+            <FieldDescription>{format === 'single' ? 'Each team plays every other team once.' : 'Each team plays every other team twice, switching home and away.'}</FieldDescription>
+          </Field>
+          <div className="flex flex-col gap-3 rounded-lg border p-4">
+            <label className="flex items-center gap-3 text-sm font-medium"><Checkbox checked={playoffs && teamCount >= 4} disabled={pending || teamCount < 4} onCheckedChange={(checked) => { setPlayoffs(checked); if (!checked) setThirdPlace(false); changed() }} />Include playoffs</label>
+            <p className="pl-7 text-sm text-muted-foreground">{teamCount < 4 ? 'Playoffs require at least four teams.' : 'The top four teams advance to single-elimination semifinals.'}</p>
+            {playoffs && teamCount >= 4 && <label className="flex items-center gap-3 pl-7 text-sm"><Checkbox checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} />Include a third-place game</label>}
           </div>
-        </div>)}</div>
-      </section>}
-      {save.isError && <p role="alert" className="text-sm text-destructive">{save.error.message}</p>}
-      <DialogFooter><Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button><Button type="button" disabled={pending || !draft?.games.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button></DialogFooter>
+        </section>}
+
+        <section className="flex flex-col gap-4 border-t pt-6" aria-labelledby="schedule-dates-heading">
+          <div><h3 id="schedule-dates-heading" className="font-medium">Dates &amp; availability</h3><p className="text-sm text-muted-foreground">Choose the date range and times your venues are available.</p></div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ScheduleDate id="schedule-start-date" label="Start date" value={startDate} disabled={pending} onChange={(value) => { setStartDate(value); changed() }} />
+            <ScheduleDate id="schedule-end-date" label="End date" value={endDate} disabled={pending} onChange={(value) => { setEndDate(value); changed() }} />
+          </div>
+          <div className="flex flex-col gap-3">
+            {windows.map((window, position) => <div key={window.id} className="flex flex-col gap-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium">Playing window {position + 1}</p><p className="text-xs text-muted-foreground">Repeats every week</p></div>{windows.length > 1 && <Button type="button" variant="ghost" size="icon-sm" disabled={pending} aria-label={`Remove playing window ${position + 1}`} onClick={() => { setWindows((current) => current.filter((item) => item.id !== window.id)); changed() }}><Trash2Icon /></Button>}</div>
+              <FieldSet className="gap-2"><FieldLegend variant="label" className="mb-0" required>Playing days</FieldLegend>
+                <ToggleGroup multiple variant="outline" size="sm" disabled={pending} aria-label={`Playing days for window ${position + 1}`} className="w-full flex-wrap" value={window.weekdays.map(String)} onValueChange={(values) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, weekdays: values.map(Number) } : item)); changed() }}>
+                  {weekdays.map((day, index) => <ToggleGroupItem key={day} value={String(index)} aria-label={day}>{day}</ToggleGroupItem>)}
+                </ToggleGroup>
+              </FieldSet>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <ScheduleTime id={`schedule-window-${window.id}-start`} label="Start time" value={window.startTime} disabled={pending} onChange={(value) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, startTime: value } : item)); changed() }} />
+                <ScheduleTime id={`schedule-window-${window.id}-end`} label="End time" value={window.endTime} disabled={pending} onChange={(value) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, endTime: value } : item)); changed() }} />
+              </div>
+            </div>)}
+            <div><Button type="button" variant="outline" size="sm" disabled={pending || windows.length >= 20} onClick={() => { const id = nextWindowId.current++; setWindows((current) => [...current, { id, weekdays: [], startTime: '09:00', endTime: '17:00' }]); changed() }}><PlusIcon data-icon="inline-start" />Add playing window</Button></div>
+          </div>
+          <Field><FieldLabel htmlFor="schedule-zone" required>Time zone</FieldLabel><Input id="schedule-zone" required disabled={pending} value={timeZone} onChange={(e) => { setZoneOverride(e.target.value); changed() }} placeholder="Asia/Manila" /><FieldDescription>All playing windows and preview times use this IANA time zone.</FieldDescription></Field>
+        </section>
+
+        <section className="flex flex-col gap-4 border-t pt-6" aria-labelledby="schedule-settings-heading">
+          <div><h3 id="schedule-settings-heading" className="font-medium">Game settings</h3><p className="text-sm text-muted-foreground">Select courts and allow enough time between games.</p></div>
+          <FieldSet className="gap-2"><FieldLegend variant="label" className="mb-0" required>Venues</FieldLegend>{venues.length ? <div className="grid gap-3 sm:grid-cols-2">{venues.map((venue) => <label key={venue.id} className="flex items-center gap-2 text-sm"><Checkbox checked={venueIds.includes(venue.id)} disabled={pending} onCheckedChange={(checked) => { setVenueIds((current) => checked ? [...current, venue.id] : current.filter((id) => id !== venue.id)); changed() }} />{venue.name}</label>)}</div> : <p className="text-sm text-muted-foreground">Add a venue before generating a schedule.</p>}</FieldSet>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field><FieldLabel htmlFor="schedule-duration" required>Game duration (minutes)</FieldLabel><Input id="schedule-duration" type="number" min="1" step="1" required disabled={pending} value={duration} onChange={(e) => { setDuration(e.target.value); changed() }} /></Field>
+            <Field><FieldLabel htmlFor="schedule-rest" required>Minimum rest (minutes)</FieldLabel><Input id="schedule-rest" type="number" min="0" step="1" required disabled={pending} value={rest} onChange={(e) => { setRest(e.target.value); changed() }} /></Field>
+          </div>
+        </section>
+
+        {draft && <section aria-labelledby="schedule-preview-heading" className="flex flex-col gap-4 border-t pt-6">
+          <div><h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 font-medium">Review schedule · {draft.games.length} {draft.games.length === 1 ? 'game' : 'games'}</h3><p className="text-sm text-muted-foreground">Select a game to adjust its date, time or venue. Times are in {draft.input.availability.timeZone}.</p></div>
+          {(outsideSeason || otherWarnings.length > 0) && <Alert role="status"><AlertTitle>Please review</AlertTitle><AlertDescription><ul className="list-disc pl-4">{outsideSeason && <li>Some games are outside the season dates.</li>}{otherWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></AlertDescription></Alert>}
+          {!draft.games.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
+          <Accordion className="overflow-hidden rounded-lg border">{draft.games.map((item, index) => <AccordionItem key={index} value={String(index)}>
+            <AccordionTrigger className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="font-medium">{item.game.homeName} vs {item.game.awayName}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span></span></AccordionTrigger>
+            <AccordionContent className="flex flex-col gap-4 px-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ScheduleDate id={`schedule-game-date-${index}`} label="Date" value={item.localTime.slice(0, 10)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${value}T${game.localTime.slice(11, 16)}` } : game) }); setError('') }} />
+              <ScheduleTime id={`schedule-game-time-${index}`} label="Time" value={item.localTime.slice(11, 16)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${game.localTime.slice(0, 10)}T${value}` } : game) }); setError('') }} />
+            </div>
+            <Field><FieldLabel htmlFor={`schedule-game-venue-${index}`} required>Venue</FieldLabel>
+              <Select value={item.venueId} disabled={pending} items={venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => ({ value: venue.id, label: venue.name }))} onValueChange={(value) => { if (value) { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, venueId: value } : game) }); setError('') } }}>
+                <SelectTrigger id={`schedule-game-venue-${index}`} aria-required="true" className="w-full"><SelectValue placeholder="Choose a venue" /></SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}><SelectGroup>{venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => <SelectItem key={venue.id} value={venue.id}>{venue.name}</SelectItem>)}</SelectGroup></SelectContent>
+              </Select>
+            </Field>
+            </AccordionContent>
+          </AccordionItem>)}</Accordion>
+        </section>}
+      </div>
+      {(preview.isError || error || save.isError) && <div className="border-t px-6 py-3"><Alert variant="destructive" role="alert"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error || (preview.isError ? preview.error.message : save.error?.message)}</AlertDescription></Alert></div>}
+      <DialogFooter className="border-t px-6 py-4">
+        <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
+        <Button type="submit" variant={draft ? 'outline' : 'default'} disabled={pending || !venues.length}>{preview.isPending ? 'Generating preview…' : draft ? 'Update preview' : 'Preview schedule'}</Button>
+        {draft && <Button type="button" disabled={pending || !draft.games.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
+      </DialogFooter>
     </form>
   </>
 }
