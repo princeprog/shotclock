@@ -19,6 +19,7 @@ import { teamListHref, type TeamFilters } from '@/lib/team-filter-links'
 import { readTeamView, saveTeamView, subscribeTeamView, selectSeasonTeamRegistrations, availableTeamDivisions } from '@/lib/team-view'
 import { useWorkspace } from '@/components/workspace-context'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldDescription, FieldGroup, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -208,25 +209,25 @@ function RegisterTeamForm({ team, organizationId, seasonId, onClose }: { team: T
   </form>
 }
 
-function CreateTeamForm({ leagueId, season, initialDivisionId, onClose, onCreated, onPendingChange }: { leagueId: string; season: Season; initialDivisionId: string; onClose: () => void; onCreated: (leagueId: string, seasonId: string, divisionId: string) => void; onPendingChange: (pending: boolean) => void }) {
+function CreateTeamForm({ leagueId, season, initialDivisionId, onClose, onCreated, onPendingChange }: { leagueId: string; season: Season; initialDivisionId: string; onClose: () => void; onCreated: (leagueId: string, seasonId: string, divisionIds: string[]) => void; onPendingChange: (pending: boolean) => void }) {
   const client = useQueryClient()
   const seasonId = season.id
-  const [divisionId, setDivisionId] = useState(initialDivisionId)
+  const [divisionIds, setDivisionIds] = useState<string[]>(initialDivisionId ? [initialDivisionId] : [])
   const availableDivisions = useLeagueQuery<Division[]>(`seasons/${seasonId}/divisions`, !!seasonId)
-  const chosenDivision = availableDivisions.data?.find((item) => item.id === divisionId)
+  const validDivisions = divisionIds.length > 0 && divisionIds.every((id) => availableDivisions.data?.some((item) => item.id === id))
   const availableSeasons = useLeagueQuery<Season[]>(`leagues/${leagueId}/seasons`, !!leagueId)
   const chosenSeason = availableSeasons.data?.find((item) => item.id === seasonId && item.status !== 'completed')
   const mutation = useMutation({
-    mutationFn: (body: { name: string; abbreviation: string | null; seasonId: string; divisionId: string }) => leagueRequest(`leagues/${leagueId}/teams`, client, 'POST', body),
-    onSuccess: (_result, submitted) => { const registeredSeason = availableSeasons.data?.find((item) => item.id === submitted.seasonId); toast.success(`Team created and registered for ${registeredSeason?.name ?? 'the selected season'}.`); onCreated(leagueId, submitted.seasonId, submitted.divisionId) },
+    mutationFn: (body: { name: string; abbreviation: string | null; seasonId: string; divisionIds: string[] }) => leagueRequest(`leagues/${leagueId}/teams`, client, 'POST', body),
+    onSuccess: (_result, submitted) => { const registeredSeason = availableSeasons.data?.find((item) => item.id === submitted.seasonId); toast.success(`Team created and registered for ${registeredSeason?.name ?? 'the selected season'}.`); onCreated(leagueId, submitted.seasonId, submitted.divisionIds) },
     onSettled: () => onPendingChange(false),
   })
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!chosenSeason || !chosenDivision || availableDivisions.isLoading || availableDivisions.isError || availableSeasons.isLoading || availableSeasons.isError || mutation.isPending) return
+    if (!chosenSeason || !validDivisions || availableDivisions.isLoading || availableDivisions.isError || availableSeasons.isLoading || availableSeasons.isError || mutation.isPending) return
     const data = new FormData(event.currentTarget)
     onPendingChange(true)
-    mutation.mutate({ name: String(data.get('name') ?? '').trim(), abbreviation: optional(String(data.get('abbreviation') ?? '')), seasonId: chosenSeason.id, divisionId: chosenDivision.id })
+    mutation.mutate({ name: String(data.get('name') ?? '').trim(), abbreviation: optional(String(data.get('abbreviation') ?? '')), seasonId: chosenSeason.id, divisionIds })
   }
   return <form onSubmit={submit} className="flex flex-col gap-5">
     <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -234,11 +235,15 @@ function CreateTeamForm({ leagueId, season, initialDivisionId, onClose, onCreate
           <FieldLabel htmlFor="create-team-name" required>Team name</FieldLabel>
           <Input id="create-team-name" name="name" placeholder="e.g. City Hawks" required maxLength={120} disabled={mutation.isPending} />
         </Field>
-        <Field className="min-w-0 gap-2"><FieldLabel htmlFor="create-team-division" required>Division</FieldLabel><Select value={divisionId || null} onValueChange={(value) => setDivisionId(value ?? '')} items={(availableDivisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={season.status === 'completed' || availableDivisions.isLoading || availableDivisions.isError || mutation.isPending}><SelectTrigger id="create-team-division" className="w-full" aria-required="true"><SelectValue placeholder="Select a division" /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{availableDivisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select>{seasonId && (availableDivisions.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : availableDivisions.isError ? <FieldDescription>Could not load divisions. Try again.</FieldDescription> : !availableDivisions.data?.length ? <FieldDescription>No divisions are available in this season.</FieldDescription> : null)}{availableDivisions.isError && <Button type="button" size="sm" variant="outline" onClick={() => void availableDivisions.refetch()}>Try again</Button>}</Field>
         <Field className="min-w-0 gap-2">
           <FieldLabel htmlFor="create-team-abbreviation">Abbreviation <span className="font-normal text-muted-foreground">(optional)</span></FieldLabel>
           <Input id="create-team-abbreviation" name="abbreviation" placeholder="e.g. CH" maxLength={12} disabled={mutation.isPending} />
         </Field>
+        <FieldSet className="gap-3 sm:col-span-2" aria-describedby="create-team-divisions-help">
+          <FieldLegend variant="label" className="mb-0" required>Divisions</FieldLegend>
+          <FieldDescription id="create-team-divisions-help">Select at least one division. Each division has its own roster.</FieldDescription>
+          {availableDivisions.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : availableDivisions.isError ? <><FieldDescription>Could not load divisions. Try again.</FieldDescription><Button type="button" size="sm" variant="outline" onClick={() => void availableDivisions.refetch()}>Try again</Button></> : !availableDivisions.data?.length ? <FieldDescription>No divisions are available in this season.</FieldDescription> : <div className="flex max-h-48 flex-col gap-3 overflow-y-auto py-1">{availableDivisions.data.map((item) => <div key={item.id} className="flex items-center gap-3"><Checkbox id={`create-team-division-${item.id}`} checked={divisionIds.includes(item.id)} onCheckedChange={(checked) => setDivisionIds((current) => checked ? [...current, item.id] : current.filter((id) => id !== item.id))} disabled={mutation.isPending} /><FieldLabel htmlFor={`create-team-division-${item.id}`}>{item.name}</FieldLabel></div>)}</div>}
+        </FieldSet>
         <FieldDescription id="create-team-season-description" aria-live="polite" className="empty:hidden sm:col-span-2">{availableSeasons.isLoading ? 'Checking season…' : availableSeasons.isError ? 'Could not load the season. Try again before creating a team.' : !chosenSeason ? 'Teams cannot be added to this season. Select a draft or active season in the header.' : null}</FieldDescription>
         {availableSeasons.isError && <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => void availableSeasons.refetch()}>Try again</Button>}
     </FieldGroup>
@@ -246,7 +251,7 @@ function CreateTeamForm({ leagueId, season, initialDivisionId, onClose, onCreate
     <Separator />
     <DialogFooter>
       <Button type="button" variant="outline" disabled={mutation.isPending} onClick={onClose}>Cancel</Button>
-      <Button type="submit" disabled={mutation.isPending || !leagueId || !chosenSeason || !chosenDivision || availableDivisions.isLoading || availableDivisions.isError || availableSeasons.isLoading || availableSeasons.isError}>{mutation.isPending ? 'Creating…' : 'Create team'}</Button>
+      <Button type="submit" disabled={mutation.isPending || !leagueId || !chosenSeason || !validDivisions || availableDivisions.isLoading || availableDivisions.isError || availableSeasons.isLoading || availableSeasons.isError}>{mutation.isPending ? 'Creating…' : 'Create team'}</Button>
     </DialogFooter>
   </form>
 }
@@ -585,7 +590,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
             })}
           </ul>}
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{teamFiltersActive ? 'No matching teams' : 'No teams in this season'}</h3></EmptyTitle><EmptyDescription>{teamFiltersActive ? 'Try a different search or division.' : 'Register an existing team or create a team to start building rosters for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{teamFiltersActive && <Button variant="outline" onClick={() => { setTeamSearch(''); setDebouncedTeamSearch(''); setTeamDivisionSelection({ id: '', seasonId: teamSeasonFilter }) }}>Clear filters</Button>}</div></EmptyContent></Empty></CardContent></Card>}
-        <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="pr-8"><DialogTitle className="text-base">Create a team</DialogTitle><DialogDescription className="sr-only">Enter team details and select a division in the current season.</DialogDescription></DialogHeader><CreateTeamForm key={`${league}-${season.id}`} leagueId={league} season={season} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivision) => { changeWorkspace(nextLeague, nextSeason, nextDivision); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivision !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
+        <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="pr-8"><DialogTitle className="text-base">Create a team</DialogTitle><DialogDescription className="sr-only">Enter team details and select divisions in the current season.</DialogDescription></DialogHeader><CreateTeamForm key={`${league}-${season.id}`} leagueId={league} season={season} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivisions) => { changeWorkspace(nextLeague, nextSeason, nextDivisions[0]); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivisions.length > 1 || nextDivisions[0] !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
       </Dialog>
       {registerExistingOpen && <RegisterExistingTeamDialog open onOpenChange={setRegisterExistingOpen} leagueId={league} seasonId={season.id} divisions={divisions.data ?? []} initialDivisionId={selectedTeamDivision} />}
       {teamToCorrect?.season_team_id && teamToCorrect.division_id && <CorrectTeamRegistrationDialog key={teamToCorrect.season_team_id} team={{ id: teamToCorrect.season_team_id, name: teamToCorrect.name, divisionId: teamToCorrect.division_id }} divisions={divisions.data ?? []} onClose={() => setTeamToCorrect(null)} />}
