@@ -430,9 +430,9 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
     {season.status === 'draft' && <Alert><AlertTitle>Season is in draft</AlertTitle><AlertDescription>You can schedule games now. Start the season before recording final scores.</AlertDescription></Alert>}
     {season.status === 'completed' && <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>Scheduling is closed. Final scores can still be corrected.</AlertDescription></Alert>}
     <Tabs value={status} onValueChange={(value) => { if (typeof value === 'string') { setStatus(value); resetPage() } }}>
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-4">
         <TabsList><TabsTrigger value="scheduled">Scheduled</TabsTrigger><TabsTrigger value="completed">Final results</TabsTrigger></TabsList>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-end gap-2">
           <Choice label="Division" value={divisionFilter} options={divisions} emptyLabel="All divisions" onChange={(value) => { setDivisionFilter(value); setPage(1) }} />
           <Popover><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dates?.from ? dates.to ? `${format(dates.from, 'MMM d')} – ${format(dates.to, 'MMM d, yyyy')}` : `From ${format(dates.from, 'MMM d, yyyy')}` : 'All dates'}</PopoverTrigger><PopoverContent align="end" className="w-auto p-0"><Calendar mode="range" selected={dates} onSelect={(value) => { setDates(value); resetPage() }} autoFocus />{dates?.from && <Button type="button" variant="ghost" className="mx-3 mb-3" onClick={clearDates}>Clear dates</Button>}</PopoverContent></Popover>
           <Button type="button" variant="outline" disabled={!dates?.from} onClick={clearDates}>Reset</Button>
