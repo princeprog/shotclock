@@ -47,7 +47,7 @@ export function CreateLeagueDialog({ organizationId, first = false }: { organiza
       <DialogHeader><DialogTitle>{first ? 'Create your first league' : 'Create a league'}</DialogTitle><DialogDescription>Enter a name and an optional location. You can update these details later.</DialogDescription></DialogHeader>
       <form onSubmit={submit} className="flex flex-col gap-6">
         <FieldGroup className="gap-4">
-          <Field data-invalid={!!nameError}><FieldLabel htmlFor="create-league-name">League name</FieldLabel><Input id="create-league-name" value={name} onChange={(event) => { setName(event.target.value); setNameError('') }} maxLength={120} required disabled={createLeague.isPending} aria-invalid={!!nameError} />{nameError && <FieldError>{nameError}</FieldError>}</Field>
+          <Field data-invalid={!!nameError}><FieldLabel htmlFor="create-league-name" required>League name</FieldLabel><Input id="create-league-name" value={name} onChange={(event) => { setName(event.target.value); setNameError('') }} maxLength={120} required disabled={createLeague.isPending} aria-invalid={!!nameError} />{nameError && <FieldError>{nameError}</FieldError>}</Field>
           <Field><FieldLabel htmlFor="create-league-location">Location (optional)</FieldLabel><Input id="create-league-location" value={location} onChange={(event) => setLocation(event.target.value)} maxLength={160} disabled={createLeague.isPending} /></Field>
         </FieldGroup>
         {createLeague.isError && <FieldError>{createLeague.error.message}</FieldError>}

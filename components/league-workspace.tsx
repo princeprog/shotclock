@@ -92,7 +92,7 @@ function TimePicker({ id, name, value, invalid, required, disabled, onChange }: 
   const hours = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, '0'))
   const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'))
   return <FieldSet className="gap-2">
-    <FieldLegend variant="label" className="mb-0">Time</FieldLegend>
+    <FieldLegend variant="label" className="mb-0" required={required}>Time</FieldLegend>
     <input type="hidden" name={name} value={joinGameTime(hour, minute, period)} />
     <div className="grid grid-cols-3 gap-2">
       {([
@@ -138,20 +138,20 @@ function Editor({ title, path, method = 'POST', fields, submitLabel = 'Save', tr
     <FieldGroup className="gap-3">
       {fields.map((field) => field.type === 'datetime-local' ? <Fragment key={field.name}>
         <Field data-invalid={missingDate === field.name || undefined}>
-          <FieldLabel htmlFor={`${path}-${field.name}`}>Date</FieldLabel>
+          <FieldLabel htmlFor={`${path}-${field.name}`} required={field.required}>Date</FieldLabel>
           <DatePicker key={resetCount} id={`${path}-${field.name}`} name={`${field.name}Date`} label="Date" value={field.value ? String(field.value).slice(0, 10) : ''} required={field.required} disabled={mutation.isPending} invalid={missingDate === field.name} onChange={() => setMissingDate('')} />
           {missingDate === field.name && <p id={`${path}-${field.name}-error`} role="alert" className="text-sm text-destructive">Choose a date for the game.</p>}
         </Field>
         <TimePicker key={resetCount} id={`${path}-${field.name}-time`} name={`${field.name}Time`} value={field.value ? String(field.value).slice(11, 16) : ''} required={field.required} disabled={mutation.isPending} invalid={missingTime === field.name} onChange={() => setMissingTime('')} />
       </Fragment> : <Field key={field.name}>
-        <FieldLabel htmlFor={`${path}-${field.name}`}>{field.label}</FieldLabel>
+        <FieldLabel htmlFor={`${path}-${field.name}`} required={field.required}>{field.label}</FieldLabel>
         {field.options ? <Select key={resetCount} name={field.name} defaultValue={field.value ? String(field.value) : null} required={field.required} disabled={mutation.isPending} items={[{ value: null, label: `Select ${field.label.toLowerCase()}` }, ...field.options]}>
-          <SelectTrigger id={`${path}-${field.name}`} aria-invalid={mutation.isError} className="w-full"><SelectValue /></SelectTrigger>
+          <SelectTrigger id={`${path}-${field.name}`} aria-required={field.required || undefined} aria-invalid={mutation.isError} className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent alignItemWithTrigger={false}><SelectGroup>
             {!field.required && <SelectItem value={null}>No {field.label.toLowerCase()} selected</SelectItem>}
             {field.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
           </SelectGroup></SelectContent>
-        </Select> : field.type === 'date' ? <DatePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} label={field.label} value={field.value} invalid={mutation.isError} /> : <Input id={`${path}-${field.name}`} name={field.name} type={field.type ?? 'text'} defaultValue={field.value ?? ''} required={field.required} min={field.type === 'number' ? 0 : undefined} disabled={mutation.isPending} aria-invalid={mutation.isError} />}
+        </Select> : field.type === 'date' ? <DatePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} label={field.label} value={field.value} required={field.required} disabled={mutation.isPending} invalid={mutation.isError} /> : <Input id={`${path}-${field.name}`} name={field.name} type={field.type ?? 'text'} defaultValue={field.value ?? ''} required={field.required} min={field.type === 'number' ? 0 : undefined} disabled={mutation.isPending} aria-invalid={mutation.isError} />}
       </Field>)}
     </FieldGroup>
     {mutation.isError && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
@@ -196,9 +196,9 @@ function RegisterTeamForm({ team, organizationId, seasonId, onClose }: { team: T
     onSuccess: () => { toast.success(`${team.name} added to the division.`); onClose() },
   })
   return <form onSubmit={(event) => { event.preventDefault(); if (ready && available.some((item) => item.id === divisionId) && !registration.isPending) registration.mutate() }} className="flex flex-col gap-6">
-    <Field className="gap-2"><FieldLabel htmlFor="registration-division">Division</FieldLabel>
+    <Field className="gap-2"><FieldLabel htmlFor="registration-division" required>Division</FieldLabel>
       <Select value={divisionId || null} onValueChange={(value) => { setDivisionId(value ?? ''); registration.reset() }} items={available.map((item) => ({ value: item.id, label: item.name }))} disabled={!ready || !available.length || registration.isPending}>
-        <SelectTrigger id="registration-division" className="w-full"><SelectValue placeholder="Select a division" /></SelectTrigger>
+        <SelectTrigger aria-required="true" id="registration-division" className="w-full"><SelectValue placeholder="Select a division" /></SelectTrigger>
         <SelectContent alignItemWithTrigger={false}><SelectGroup>{available.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
       </Select>
       {divisions.isLoading || registrations.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : divisions.isError || registrations.isError ? <FieldDescription>Couldn’t load divisions. Close and try again.</FieldDescription> : !available.length ? <FieldDescription>This team is already registered in every division of this season.</FieldDescription> : null}
@@ -231,10 +231,10 @@ function CreateTeamForm({ leagueId, season, initialDivisionId, onClose, onCreate
   return <form onSubmit={submit} className="flex flex-col gap-5">
     <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field className="min-w-0 gap-2 sm:col-span-2">
-          <FieldLabel htmlFor="create-team-name">Team name</FieldLabel>
+          <FieldLabel htmlFor="create-team-name" required>Team name</FieldLabel>
           <Input id="create-team-name" name="name" placeholder="e.g. City Hawks" required maxLength={120} disabled={mutation.isPending} />
         </Field>
-        <Field className="min-w-0 gap-2"><FieldLabel htmlFor="create-team-division">Division</FieldLabel><Select value={divisionId || null} onValueChange={(value) => setDivisionId(value ?? '')} items={(availableDivisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={season.status === 'completed' || availableDivisions.isLoading || availableDivisions.isError || mutation.isPending}><SelectTrigger id="create-team-division" className="w-full" aria-required="true"><SelectValue placeholder="Select a division" /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{availableDivisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select>{seasonId && (availableDivisions.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : availableDivisions.isError ? <FieldDescription>Could not load divisions. Try again.</FieldDescription> : !availableDivisions.data?.length ? <FieldDescription>No divisions are available in this season.</FieldDescription> : null)}{availableDivisions.isError && <Button type="button" size="sm" variant="outline" onClick={() => void availableDivisions.refetch()}>Try again</Button>}</Field>
+        <Field className="min-w-0 gap-2"><FieldLabel htmlFor="create-team-division" required>Division</FieldLabel><Select value={divisionId || null} onValueChange={(value) => setDivisionId(value ?? '')} items={(availableDivisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={season.status === 'completed' || availableDivisions.isLoading || availableDivisions.isError || mutation.isPending}><SelectTrigger id="create-team-division" className="w-full" aria-required="true"><SelectValue placeholder="Select a division" /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{availableDivisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select>{seasonId && (availableDivisions.isLoading ? <FieldDescription>Loading divisions…</FieldDescription> : availableDivisions.isError ? <FieldDescription>Could not load divisions. Try again.</FieldDescription> : !availableDivisions.data?.length ? <FieldDescription>No divisions are available in this season.</FieldDescription> : null)}{availableDivisions.isError && <Button type="button" size="sm" variant="outline" onClick={() => void availableDivisions.refetch()}>Try again</Button>}</Field>
         <Field className="min-w-0 gap-2">
           <FieldLabel htmlFor="create-team-abbreviation">Abbreviation <span className="font-normal text-muted-foreground">(optional)</span></FieldLabel>
           <Input id="create-team-abbreviation" name="abbreviation" placeholder="e.g. CH" maxLength={12} disabled={mutation.isPending} />

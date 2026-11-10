@@ -74,8 +74,8 @@ export function LoginForm({ mode = 'login' }: { mode?: Mode }) {
           <p className="text-sm text-muted-foreground">{copy[mode].description}</p>
         </div>
         {success ? <p role="status" className="text-sm">{success}</p> : <>
-          {hasEmail && <Field><FieldLabel htmlFor="email">Email</FieldLabel><Input id="email" name="email" type="email" autoComplete="email" required maxLength={254} /></Field>}
-          {hasPassword && <Field><div className="flex items-center"><FieldLabel htmlFor="password">Password</FieldLabel>{mode === 'login' && <Link href="/forgot-password" className="ml-auto text-sm underline-offset-4 hover:underline">Forgot password?</Link>}</div><Input id="password" name="password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'login' ? undefined : 12} maxLength={128} />{mode !== 'login' && <FieldDescription>Use at least 12 characters.</FieldDescription>}</Field>}
+          {hasEmail && <Field><FieldLabel htmlFor="email" required>Email</FieldLabel><Input id="email" name="email" type="email" autoComplete="email" required maxLength={254} /></Field>}
+          {hasPassword && <Field><div className="flex items-center"><FieldLabel htmlFor="password" required>Password</FieldLabel>{mode === 'login' && <Link href="/forgot-password" className="ml-auto text-sm underline-offset-4 hover:underline">Forgot password?</Link>}</div><Input id="password" name="password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'login' ? undefined : 12} maxLength={128} />{mode !== 'login' && <FieldDescription>Use at least 12 characters.</FieldDescription>}</Field>}
           {(mode === 'verify-email' || mode === 'reset-password') && !token && <FieldError>This link is missing its token. Request a new link.</FieldError>}
           {error && <FieldError>{error}</FieldError>}
           <Button type="submit" disabled={pending || ((mode === 'verify-email' || mode === 'reset-password') && !token)}>{pending ? 'Please wait…' : copy[mode].button}</Button>
