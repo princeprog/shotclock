@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { CalendarDaysIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { CalendarDaysIcon, CircleAlertIcon, CircleCheckIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -368,14 +369,24 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
           <div><h3 id="schedule-capacity-heading" className="font-medium">Schedule capacity</h3><p className="text-sm text-muted-foreground">Check the number of games and available court slots before generating.</p></div>
           {!settingsKey && <p className="text-sm text-muted-foreground">Complete the dates, playing windows, venues and game settings to check capacity.</p>}
-          {settingsKey && (!estimateReady && !estimate.isError) && <p className="text-sm text-muted-foreground" role="status">Checking capacity…</p>}
+          {settingsKey && !estimateReady && (settledSettings !== settingsKey || !estimate.isError) && <p className="text-sm text-muted-foreground" role="status">Checking capacity…</p>}
           {settingsKey && settledSettings === settingsKey && estimate.isError && <Alert variant="destructive"><AlertTitle>Capacity check unavailable</AlertTitle><AlertDescription>{estimate.error.message} <Button type="button" variant="link" size="sm" onClick={() => void estimate.refetch()}>Retry</Button></AlertDescription></Alert>}
-          {estimateReady && estimate.data && <div className="flex flex-col gap-3 rounded-lg border p-4 text-sm">
-            <p className="font-medium">{estimate.data.required} games needed · up to {estimate.data.capacity} available court slots</p>
-            <p className="text-muted-foreground">This is an upper bound after existing bookings. Team rest and round order may reduce capacity.</p>
-            {estimate.data.required === 0 && <p className="text-muted-foreground">No divisions are ready to generate games with these settings.</p>}
-            {estimate.data.capacity < estimate.data.required && <p className="text-destructive" role="alert">At least {estimate.data.required - estimate.data.capacity} more court slots are needed. Add venues or playing time.</p>}
-            <ul className="flex flex-col gap-1">{estimate.data.divisions.map((division) => <li key={division.id}><span className="font-medium">{division.name}:</span> {division.reason ? `Skipped — ${division.reason}` : `${division.gameCount} games${mode === 'preliminary' && playoffs && division.teamCount < 4 ? ' · round robin only' : ''}`}</li>)}</ul>
+          {estimateReady && estimate.data && <div className="overflow-hidden rounded-lg border text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
+              <p className="font-medium">Capacity overview</p>
+              {estimate.data.required === 0 ? <Badge variant="secondary">No eligible divisions</Badge> : estimate.data.capacity < estimate.data.required ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />More slots needed</Badge> : <Badge variant="secondary"><CircleCheckIcon data-icon="inline-start" />Slots available</Badge>}
+            </div>
+            <dl className="grid grid-cols-2 gap-4 px-4 py-4">
+              <div><dt className="text-muted-foreground">Games to schedule</dt><dd className="mt-1 text-xl font-semibold tabular-nums">{estimate.data.required.toLocaleString('en-US')}</dd></div>
+              <div><dt className="text-muted-foreground">Available court slots</dt><dd className="mt-1 text-xl font-semibold tabular-nums">Up to {estimate.data.capacity.toLocaleString('en-US')}</dd></div>
+            </dl>
+            {estimate.data.required === 0 && <p className="px-4 pb-4 text-muted-foreground">No divisions are ready to generate games with these settings.</p>}
+            {estimate.data.capacity < estimate.data.required && <p className="px-4 pb-4 text-destructive" role="alert">At least {estimate.data.required - estimate.data.capacity} more court slots are needed. Add venues or playing time.</p>}
+            <p className="px-4 pb-4 text-muted-foreground">Available slots are an estimate after existing bookings. Team rest and round order may reduce capacity.</p>
+            {estimate.data.divisions.length > 0 && <div className="border-t px-4 py-3">
+              <p className="mb-2 font-medium">Divisions</p>
+              <ul className="flex flex-col gap-2">{estimate.data.divisions.map((division) => <li key={division.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5"><span className="min-w-0 font-medium">{division.name}</span><span className="text-muted-foreground">{division.reason ? `Skipped — ${division.reason}` : `${division.gameCount} ${division.gameCount === 1 ? 'game' : 'games'}${mode === 'preliminary' && playoffs && division.teamCount < 4 ? ' · round robin only' : ''}`}</span></li>)}</ul>
+            </div>}
           </div>}
         </section>
 
