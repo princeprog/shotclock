@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useSyncExte
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { usePathname, useRouter } from 'next/navigation'
 import { leagueRequest } from '@/lib/league-client'
+import { allowWorkspaceChange } from '@/lib/schedule-navigation-guard'
 import { organizationPickerUrl, shouldChooseOrganization } from '@/lib/organization-navigation'
 import { readOrganizationSelection, resolveSelectedOrganization, subscribeOrganizationSelection } from '@/lib/organization-selection'
 import { useAppDispatch, useAppSelector } from '@/lib/store-hooks'
@@ -60,11 +61,13 @@ function useWorkspaceValue() {
 
   function changeLeague(id: string) {
     if (id === leagueId || !leagues.data?.some((item) => item.id === id)) return
+    if (!allowWorkspaceChange()) return
     dispatch(selectLeague(id))
     saveWorkspaceSelection(organizationId, { ...saved, leagueId: id })
   }
   function changeSeason(id: string) {
     if (!leagueId || !seasons.data?.some((item) => item.id === id)) return
+    if (id === seasonId || !allowWorkspaceChange()) return
     if (ui.leagueId !== leagueId) dispatch(selectLeague(leagueId))
     dispatch(selectSeason(id))
     saveWorkspaceSelection(organizationId, { ...saved, leagueId, seasons: { ...saved.seasons, [leagueId]: id } })
@@ -78,6 +81,7 @@ function useWorkspaceValue() {
   }
   function changeWorkspace(nextLeagueId: string, nextSeasonId: string, nextDivisionId?: string) {
     if (!leagues.data?.some((item) => item.id === nextLeagueId) || !nextSeasonId) return
+    if ((nextLeagueId !== leagueId || nextSeasonId !== seasonId) && !allowWorkspaceChange()) return
     dispatch(selectLeague(nextLeagueId))
     dispatch(selectSeason(nextSeasonId))
     if (nextDivisionId) dispatch(selectDivision(nextDivisionId))

@@ -28,6 +28,7 @@ function harness(mode = 'preliminary', result = response, diagnostics = {}) {
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
+    if (name === '@/lib/schedule-navigation-guard') return { confirmDiscardSchedulePreview: () => true }
     if (name === '@/lib/game-time') return { joinGameTime: () => '', splitGameTime: () => ({}) }
     return require(name)
   } }
@@ -101,6 +102,19 @@ test('playoff save uses the included divisions and the playoff season route', as
   assert.equal(h.calls[1][0], 'seasons/s1/playoffs')
   assert.deepEqual(Object.keys(h.calls[1][3]).sort(), ['availability', 'divisionIds', 'games'])
   assert.deepEqual(Array.from(h.calls[1][3].divisionIds), ['b', 'a'])
+})
+
+test('the dedicated page switches from setup to review and can return to settings', async () => {
+  const h = harness(); h.props.presentation = 'page'; h.setup()
+  let tree = h.render()
+  assert.ok(tree.some((node) => node.type === 'ol' && node.props['aria-label'] === 'Schedule progress'))
+  await h.preview(); tree = h.render()
+  assert.ok(tree.some((node) => node.type === 'div' && node.props.hidden === true))
+  assert.ok(tree.some((node) => node.type === 'Button' && nodes(node).includes('Save schedule')))
+  tree.find((node) => node.type === 'Button' && nodes(node).includes('Edit settings')).props.onClick()
+  tree = h.render()
+  assert.equal(tree.some((node) => node.type === 'div' && node.props.hidden === true), false)
+  assert.equal(tree.some((node) => node.type === 'Button' && nodes(node).includes('Save schedule')), false)
 })
 
 test('preview cannot be saved after switching seasons', async () => {

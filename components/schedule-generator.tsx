@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { leagueRequest } from '@/lib/league-client'
+import { confirmDiscardSchedulePreview } from '@/lib/schedule-navigation-guard'
 import { SchedulePreviewCalendar } from '@/components/schedule-preview-calendar'
 
 type ScheduleGame = {
@@ -69,6 +70,8 @@ type Props = {
   onClose: () => void
   onSaved: () => void
   onPendingChange?: (pending: boolean) => void
+  onUnsavedChange?: (unsaved: boolean) => void
+  presentation?: 'dialog' | 'page'
 }
 
 // A datetime-local value is a wall time, not an instant in the browser's zone.
@@ -181,7 +184,7 @@ function ScheduleTime({ id, label, value, disabled, onChange }: { id: string; la
   </FieldSet>
 }
 
-export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd, venues, mode, onClose, onSaved, onPendingChange }: Props) {
+export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd, venues, mode, onClose, onSaved, onPendingChange, onUnsavedChange, presentation = 'dialog' }: Props) {
   const client = useQueryClient()
   const defaultZone = useSyncExternalStore(subscribe, browserTimeZone, serverTimeZone)
   const [zoneOverride, setZoneOverride] = useState<string | null>(null)
@@ -259,10 +262,11 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   })
   const save = useMutation({
     mutationFn: (body: (ScheduleInput | { availability: Availability }) & { games: SavedGame[]; divisionIds: string[] }) => leagueRequest(path, client, 'POST', body),
-    onSuccess: onSaved,
+    onSuccess: () => { onUnsavedChange?.(false); onSaved() },
   })
   const pending = estimate.isFetching || preview.isPending || save.isPending
   useEffect(() => { onPendingChange?.(pending) }, [pending, onPendingChange])
+  useEffect(() => { onUnsavedChange?.(!!draft && draft.seasonId === seasonId && draft.mode === mode) }, [draft, seasonId, mode, onUnsavedChange])
   useEffect(() => {
     if (draft && !wasPreviewed.current) previewHeading.current?.scrollIntoView({ block: 'start' })
     wasPreviewed.current = !!draft
@@ -315,14 +319,21 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const hasPreview = draft?.seasonId === seasonId && draft.mode === mode
   const outsideSeason = draft?.games.some((item) => isOutsideSeason(item.localTime, seasonStart, seasonEnd)) ?? false
   const otherWarnings = draft?.warnings.filter((warning) => !/^some games are outside the season dates\.?$/i.test(warning.trim())) ?? []
+  const reviewing = presentation === 'page' && !!hasPreview
 
   return <>
-    <DialogHeader className="border-b px-6 py-5 pr-14">
+    {presentation === 'dialog' && <DialogHeader className="border-b px-6 py-5 pr-14">
       <DialogTitle>{mode === 'preliminary' ? 'Generate preliminary schedule' : 'Schedule playoff games'}</DialogTitle>
       <DialogDescription>{seasonName} <span aria-hidden="true">—</span> Set shared availability, then review each division’s games.</DialogDescription>
-    </DialogHeader>
+    </DialogHeader>}
+    {presentation === 'page' && <ol aria-label="Schedule progress" className="flex flex-wrap gap-x-6 gap-y-2 border-b pb-5 text-sm">
+      <li className={!reviewing ? 'font-medium' : 'text-muted-foreground'}>1. Setup</li>
+      <li className={showCapacity && !reviewing ? 'font-medium' : 'text-muted-foreground'}>2. Capacity check</li>
+      <li className={reviewing ? 'font-medium' : 'text-muted-foreground'}>3. Review schedule</li>
+    </ol>}
     <form onSubmit={requestPreview} className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-6 py-6">
+      <div className={presentation === 'page' ? 'flex flex-col gap-7 py-6' : 'flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-6 py-6'}>
+        <div hidden={reviewing} className={reviewing ? 'hidden' : 'flex flex-col gap-7'}>
         {mode === 'preliminary' && <section className="flex flex-col gap-4" aria-labelledby="schedule-format-heading">
           <div><h3 id="schedule-format-heading" className="font-medium">Competition format</h3><p className="text-sm text-muted-foreground">Choose how teams play through the season.</p></div>
           <Field><FieldLabel htmlFor="schedule-format" required>Round-robin format</FieldLabel>
@@ -371,6 +382,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
             <Field><FieldLabel htmlFor="schedule-rest" required>Minimum rest (minutes)</FieldLabel><Input id="schedule-rest" type="number" min="0" step="1" required disabled={pending} value={rest} onChange={(e) => { setRest(e.target.value); changed() }} /></Field>
           </div>
         </section>
+
+        </div>
 
         {showCapacity && <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
           <div><h3 ref={capacityHeading} id="schedule-capacity-heading" className="scroll-mt-2 font-medium">Schedule capacity</h3><p className="text-sm text-muted-foreground">Check the number of games and available court slots before generating.</p></div>
@@ -443,9 +456,9 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         </section>}
       </div>
       {(preview.isError || error || save.isError) && <div className="border-t px-6 py-3"><Alert variant="destructive" role="alert"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error || (preview.isError ? preview.error.message : save.error?.message)}</AlertDescription></Alert></div>}
-      <DialogFooter className="border-t px-6 py-4">
+      <DialogFooter className={presentation === 'page' ? 'border-t py-4' : 'border-t px-6 py-4'}>
         <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
-        <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending}>{estimate.isFetching ? 'Checking capacity…' : preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>
+        {reviewing ? <Button type="button" variant="outline" disabled={pending} onClick={() => { if (confirmDiscardSchedulePreview()) { setDraft(null); setShowCapacity(false); preview.reset() } }}>Edit settings</Button> : <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending}>{estimate.isFetching ? 'Checking capacity…' : preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>}
         {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
       </DialogFooter>
     </form>

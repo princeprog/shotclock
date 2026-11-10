@@ -56,6 +56,7 @@ test('games default to season scope and the division filter resets pagination wi
   assert.match(path, /page=1/)
   const generator = find(tree, (node) => node.props?.children?.includes?.('Generate schedule'))
   assert.equal(generator.props.disabled, false)
+  assert.equal(generator.props.render.props.href, '/manage/games/generate')
 })
 
 test('manual scheduling selects a division and uses only its registrations', () => {
