@@ -4,7 +4,7 @@ import { Fragment, useEffect, useState, useSyncExternalStore, type FormEvent } f
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, parseISO, startOfDay } from 'date-fns'
-import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardPenLineIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
@@ -176,8 +176,9 @@ function SeasonActions({ season, onEdit }: { season: Season; onEdit: () => void 
   </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
 }
 
-function TeamActions({ team, onEdit, onRegister, onCorrect, onRemove, canRegister }: { team: Team; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; onRemove?: () => void; canRegister: boolean }) {
+function TeamActions({ team, roster, onEdit, onRegister, onCorrect, onRemove, canRegister }: { team: Team; roster?: { href: string; onClick: () => void }; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; onRemove?: () => void; canRegister: boolean }) {
   return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${team.name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+    {roster && <DropdownMenuItem className="py-2" render={<Link href={roster.href} onClick={roster.onClick} />}><ClipboardListIcon />View roster</DropdownMenuItem>}
     <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit team</DropdownMenuItem>
   </DropdownMenuGroup>{(canRegister || onCorrect) && <><DropdownMenuSeparator /><DropdownMenuGroup>
     {canRegister && <DropdownMenuItem className="py-2" onClick={onRegister}><CalendarPlusIcon />Add to division</DropdownMenuItem>}
@@ -461,6 +462,11 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const teamRows = selectSeasonTeamRegistrations(organizationTeams.data ?? [], teamSeasonFilter, selectedTeamDivision)
   const teamFiltersActive = !!teamSearch.trim() || !!selectedTeamDivision
   const teamReturnQuery = teamListHref({ search: teamSearch, leagueId: '', seasonId: '', divisionId: selectedTeamDivision }).slice('/manage/teams'.length)
+  const rosterAction = (team: OrganizationTeamRow) => {
+    if (!team.season_team_id || !team.season_id) return undefined
+    const seasonId = team.season_id
+    return { href: `/manage/rosters/${team.season_team_id}${teamReturnQuery}`, onClick: () => changeWorkspace(team.league_id, seasonId, team.division_id ?? undefined) }
+  }
   const seasonTeams = useLeagueQuery<SeasonTeam[]>(`seasons/${season?.id}/teams?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && ['dashboard', 'games'].includes(section))
   const venues = useLeagueQuery<Item[]>(`leagues/${league}/venues`, !!league && ['dashboard', 'games'].includes(section))
   const dashboard = useLeagueQuery<Dashboard>(`seasons/${season?.id}/dashboard?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'dashboard')
@@ -555,7 +561,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     {section === 'teams' && (!leagues.data?.length || !league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <>
       <Dialog open={createTeamOpen} onOpenChange={(open) => { if (!createTeamPending) setCreateTeamOpen(open) }}>
         {teamRows.length ? <section aria-label="Teams" className="flex flex-col gap-4">
-          {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption><TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-28 text-muted-foreground">Roster</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+          {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption><TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
             <TableBody>{teamRows.map((team) => {
               const canRegister = season.status !== 'completed' && team.season_id === season.id
               return <TableRow key={team.season_team_id ?? team.id}>
@@ -572,8 +578,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.league_name}</TableCell>
                 <TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.season_name ?? '—'}</TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.division_name ?? '—'}</TableCell>
                 <TableCell className="hidden md:table-cell"><Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge></TableCell>
-                <TableCell>{team.season_team_id && team.season_id ? <Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/manage/rosters/${team.season_team_id}${teamReturnQuery}`} aria-label={`View ${team.name} roster for ${team.season_name}`} onClick={() => changeWorkspace(team.league_id, team.season_id!, team.division_id ?? undefined)} />}>View roster</Button> : <span className="text-sm text-muted-foreground">—</span>}</TableCell>
-                <TableCell className="pr-3 text-right"><TeamActions team={team} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} /></TableCell>
+                <TableCell className="pr-3 text-right"><TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} /></TableCell>
               </TableRow>
             })}</TableBody>
           </Table></CardContent></Card> : <ul aria-label="Teams and their season registrations" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -584,14 +589,11 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <div className="flex items-start gap-3">
                   <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-[#E67145]/10 text-sm font-semibold text-[#A64320] dark:text-[#FFAE88]">{initials}</span>
                   <div className="min-w-0 flex-1"><h4 className="break-words font-semibold leading-snug">{team.name}</h4><p className="mt-1 break-words text-sm text-muted-foreground">{team.league_name}</p></div>
-                  <TeamActions team={team} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} />
+                  <TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} />
                 </div>
                 <div className="mt-5 flex flex-1 flex-col items-start gap-2 text-sm">
                   <Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge>
                   <p className="break-words text-muted-foreground">{team.season_name ?? 'Not registered for a season'}{team.division_name ? ` · ${team.division_name}` : ''}</p>
-                </div>
-                <div className="mt-5 border-t pt-4">
-                  {team.season_team_id && team.season_id ? <Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/manage/rosters/${team.season_team_id}${teamReturnQuery}`} aria-label={`View ${team.name} roster for ${team.season_name}`} onClick={() => changeWorkspace(team.league_id, team.season_id!, team.division_id ?? undefined)} />}>View roster</Button> : <span className="text-sm text-muted-foreground">No roster yet</span>}
                 </div>
               </li>
             })}
