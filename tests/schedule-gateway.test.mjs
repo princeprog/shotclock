@@ -85,3 +85,9 @@ test('season-scoped query parameters are forwarded on existing GET routes', asyn
     assert.equal(calls.at(-1).path, `/league/seasons/${id}/${kind}?scope=season&page=2`)
   }
 })
+
+test('team pagination and filters reach the API unchanged', async () => {
+  const query = `leagueId=${id}&seasonId=${id}&divisionId=${id}&search=hawks&page=2&pageSize=20`
+  assert.equal((await request('GET', `organizations/${id}/teams?${query}`)).status, 200)
+  assert.equal(calls.at(-1).path, `/league/organizations/${id}/teams?${query}`)
+})

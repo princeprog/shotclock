@@ -19,7 +19,7 @@ import { requirePaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { teamListHref, type TeamFilters } from '@/lib/team-filter-links'
-import { readTeamView, saveTeamView, subscribeTeamView, selectSeasonTeamRegistrations, availableTeamDivisions } from '@/lib/team-view'
+import { readTeamView, saveTeamView, subscribeTeamView, availableTeamDivisions } from '@/lib/team-view'
 import { useWorkspace } from '@/components/workspace-context'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -470,6 +470,10 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const teamLeagueFilter = league
   const teamSeasonFilter = season?.id ?? ''
   const selectedTeamDivision = (!teamDivisionSelection.seasonId || teamDivisionSelection.seasonId === teamSeasonFilter) && divisions.data?.some((item) => item.id === teamDivisionSelection.id) ? teamDivisionSelection.id : ''
+  const teamPageScope = JSON.stringify([org, league, teamSeasonFilter, selectedTeamDivision])
+  const [teamPagination, setTeamPagination] = useState({ scope: teamPageScope, page: 1, pageSize: 10 })
+  const teamPage = teamPagination.scope === teamPageScope ? teamPagination.page : 1
+  const setTeamPage = (page: number) => setTeamPagination((current) => ({ ...current, scope: teamPageScope, page }))
   const teamDivisionForLink = divisions.isSuccess ? selectedTeamDivision : teamDivisionSelection.id
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedTeamSearch(teamSearch.trim()), 300)
@@ -503,10 +507,25 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const teamFilters = new URLSearchParams()
   if (teamLeagueFilter) teamFilters.set('leagueId', teamLeagueFilter)
   if (teamSeasonFilter) teamFilters.set('seasonId', teamSeasonFilter)
+  if (selectedTeamDivision) teamFilters.set('divisionId', selectedTeamDivision)
   if (debouncedTeamSearch) teamFilters.set('search', debouncedTeamSearch)
+  teamFilters.set('page', String(teamPage))
+  teamFilters.set('pageSize', String(teamPagination.pageSize))
   const teamSearchPending = section === 'teams' && teamSearch.trim() !== debouncedTeamSearch
-  const organizationTeams = useLeagueQuery<OrganizationTeamRow[]>(`organizations/${org}/teams?${teamFilters}`, !!org && section === 'teams' && !teamSearchPending && !!league && !!season)
-  const teamRows = selectSeasonTeamRegistrations(organizationTeams.data ?? [], teamSeasonFilter, selectedTeamDivision)
+  const teamPagePath = `organizations/${org}/teams?${teamFilters}`
+  const organizationTeams = useQuery({ queryKey: ['league', teamPagePath], queryFn: async () => requirePaginatedResult<OrganizationTeamRow>(await leagueRequest<unknown>(teamPagePath, queryClient)), enabled: !!org && section === 'teams' && !teamSearchPending && !!league && !!season && divisions.isSuccess, retry: false })
+  // Sync the requested page with workspace changes and server-side clamping after data changes.
+  useEffect(() => {
+    if (teamPagination.scope !== teamPageScope) {
+      // A changed scope must also update state so returning to the old scope cannot restore its page.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTeamPagination((current) => ({ ...current, scope: teamPageScope, page: 1 }))
+    } else if (!teamSearchPending && !organizationTeams.isFetching && organizationTeams.data && organizationTeams.data.page !== teamPage) {
+      // The server may clamp a page after a registration is removed.
+      setTeamPagination((current) => current.scope === teamPageScope && current.page === teamPage ? { ...current, page: organizationTeams.data!.page } : current)
+    }
+  }, [teamPageScope, teamPagination.scope, teamPage, teamSearchPending, organizationTeams.data, organizationTeams.isFetching])
+  const teamRows = organizationTeams.data?.items ?? []
   const teamFiltersActive = !!teamSearch.trim() || !!selectedTeamDivision
   const teamReturnQuery = teamListHref({ search: teamSearch, leagueId: '', seasonId: '', divisionId: selectedTeamDivision }).slice('/manage/teams'.length)
   const rosterAction = (team: OrganizationTeamRow) => {
@@ -554,7 +573,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
         <Field className="w-full sm:w-52"><FieldLabel htmlFor="season-status">Status</FieldLabel><Select value={seasonStatus || null} onValueChange={(value) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonStatus(value ?? '') }} items={[{ value: null, label: 'All statuses' }, { value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }]}><SelectTrigger id="season-status" className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>All statuses</SelectItem><SelectItem value="draft">Draft</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="completed">Completed</SelectItem></SelectGroup></SelectContent></Select></Field>
         </div>
       </div> : section === 'teams' ? <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end"><Field className="w-full sm:w-64"><FieldLabel htmlFor="team-search">Search teams</FieldLabel><Input id="team-search" type="search" placeholder="Search by team name" maxLength={120} value={teamSearch} onChange={(event) => setTeamSearch(event.target.value)} /></Field><Choice label="Division" value={selectedTeamDivision} options={divisions.data ?? []} emptyLabel="All divisions" onChange={(value) => setTeamDivisionSelection({ id: value, seasonId: teamSeasonFilter })} /></div>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end"><Field className="w-full sm:w-64"><FieldLabel htmlFor="team-search">Search teams</FieldLabel><Input id="team-search" type="search" placeholder="Search by team name" maxLength={120} value={teamSearch} onChange={(event) => { setTeamPage(1); setTeamSearch(event.target.value) }} /></Field><Choice label="Division" value={selectedTeamDivision} options={divisions.data ?? []} emptyLabel="All divisions" onChange={(value) => { setTeamPage(1); setTeamDivisionSelection({ id: value, seasonId: teamSeasonFilter }) }} /></div>
         <div className="flex flex-wrap items-center gap-3">
           <div role="group" aria-label="Teams display" className="inline-flex items-center gap-1 rounded-lg border bg-muted/30 p-1">
             <Button type="button" size="icon-sm" variant={teamView === 'table' ? 'secondary' : 'ghost'} aria-label="Table view" aria-pressed={teamView === 'table'} title="Table view" onClick={() => saveTeamView('table')}><ListIcon aria-hidden="true" /></Button>
@@ -645,8 +664,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
               </li>
             })}
           </ul>}
-        </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{teamFiltersActive ? 'No matching teams' : 'No teams in this season'}</h3></EmptyTitle><EmptyDescription>{teamFiltersActive ? 'Try a different search or division.' : 'Register an existing team or create a team to start building rosters for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{teamFiltersActive && <Button variant="outline" onClick={() => { setTeamSearch(''); setDebouncedTeamSearch(''); setTeamDivisionSelection({ id: '', seasonId: teamSeasonFilter }) }}>Clear filters</Button>}</div></EmptyContent></Empty></CardContent></Card>}
-        <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="pr-8"><DialogTitle>Create a team</DialogTitle><DialogDescription>Enter team details and choose divisions in the current season.</DialogDescription></DialogHeader><CreateTeamForm key={`${league}-${season.id}`} leagueId={league} season={season} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivisions) => { changeWorkspace(nextLeague, nextSeason, nextDivisions[0]); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivisions.length > 1 || nextDivisions[0] !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
+          {organizationTeams.data && <DataPagination meta={organizationTeams.data} onPageChange={setTeamPage} onPageSizeChange={(pageSize) => setTeamPagination({ scope: teamPageScope, page: 1, pageSize })} />}
+        </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{teamFiltersActive ? 'No matching teams' : 'No teams in this season'}</h3></EmptyTitle><EmptyDescription>{teamFiltersActive ? 'Try a different search or division.' : 'Register an existing team or create a team to start building rosters for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{teamFiltersActive && <Button variant="outline" onClick={() => { setTeamPage(1); setTeamSearch(''); setDebouncedTeamSearch(''); setTeamDivisionSelection({ id: '', seasonId: teamSeasonFilter }) }}>Clear filters</Button>}</div></EmptyContent></Empty></CardContent></Card>}
+        <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="pr-8"><DialogTitle>Create a team</DialogTitle><DialogDescription>Enter team details and choose divisions in the current season.</DialogDescription></DialogHeader><CreateTeamForm key={`${league}-${season.id}`} leagueId={league} season={season} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivisions) => { changeWorkspace(nextLeague, nextSeason, nextDivisions[0]); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivisions.length > 1 || nextDivisions[0] !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamPage(1); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
       </Dialog>
       {registerExistingOpen && <RegisterExistingTeamDialog open onOpenChange={setRegisterExistingOpen} leagueId={league} seasonId={season.id} divisions={divisions.data ?? []} initialDivisionId={selectedTeamDivision} />}
       {teamToCorrect?.season_team_id && teamToCorrect.division_id && <CorrectTeamRegistrationDialog key={teamToCorrect.season_team_id} team={{ id: teamToCorrect.season_team_id, name: teamToCorrect.name, divisionId: teamToCorrect.division_id }} divisions={divisions.data ?? []} onClose={() => setTeamToCorrect(null)} />}

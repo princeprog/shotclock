@@ -26,6 +26,19 @@ test('team registration invalidates roster correction destinations', async () =>
   client.clear()
 })
 
+test('team changes invalidate every cached page and filter of the team list', async () => {
+  const client = makeQueryClient()
+  const paths = [
+    'organizations/o1/teams?seasonId=s1&page=1&pageSize=10',
+    'organizations/o1/teams?seasonId=s1&page=2&pageSize=10&divisionId=d1',
+    'organizations/o1/teams?seasonId=s1&page=1&pageSize=20&search=hawks',
+  ]
+  for (const path of paths) client.setQueryData(['league', path], { items: [], page: 1, pageSize: 10, total: 0, totalPages: 1 })
+  await applyLeagueMutation(client, 'seasons/s1/teams', 'POST', { teamId: 't1' }, { season_id: 's1', team_id: 't1' })
+  for (const path of paths) assert.equal(client.getQueryState(['league', path])?.isInvalidated, true, path)
+  client.clear()
+})
+
 test('a league query is reused on remount and refetches only when invalidated', async () => {
   const client = makeQueryClient()
   let requests = 0
