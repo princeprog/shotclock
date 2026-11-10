@@ -4,10 +4,25 @@ import { isTrustedMutation } from '@/lib/auth-security'
 
 const uuid = '[0-9a-fA-F-]{36}'
 const routes: Record<string, RegExp[]> = {
-  GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions)|teams/${uuid}|season-teams/${uuid}(/roster)?)$`)],
-  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/score)$`)],
+  GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions)|teams/${uuid}|season-teams/${uuid}(/roster)?|divisions/${uuid}/schedule/status)$`)],
+  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/score|divisions/${uuid}/(schedule|playoffs)(/preview)?)$`)],
   PATCH: [new RegExp(`^(organizations|leagues|seasons|teams|season-teams|rosters|games|venues|divisions|players)/${uuid}$`)],
-  DELETE: [new RegExp(`^(divisions|season-teams|rosters)/${uuid}$`)],
+  DELETE: [new RegExp(`^(divisions|season-teams|rosters|games)/${uuid}$`)],
+}
+
+async function readBoundedBody(request: NextRequest, limit: number): Promise<string | null> {
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const decoder = new TextDecoder()
+  let bytes = 0
+  let body = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) return body + decoder.decode()
+    bytes += value.byteLength
+    if (bytes > limit) { await reader.cancel().catch(() => {}); return null }
+    body += decoder.decode(value, { stream: true })
+  }
 }
 
 async function forward(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
@@ -21,8 +36,10 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
   if (request.method !== 'GET') {
     if (request.method !== 'DELETE') {
       if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) return NextResponse.json({ error: 'Invalid request' }, { status: 415 })
-      body = await request.text()
-      if (body.length > 8192) return NextResponse.json({ error: 'Request too large' }, { status: 413 })
+      const saveSchedule = request.method === 'POST' && new RegExp(`^divisions/${uuid}/(schedule|playoffs)$`).test(route)
+      const boundedBody = await readBoundedBody(request, saveSchedule ? 256 * 1024 : 8192)
+      if (boundedBody === null) return NextResponse.json({ error: 'Request too large' }, { status: 413 })
+      body = boundedBody
       try { const parsed: unknown = JSON.parse(body); if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error() }
       catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }) }
     }

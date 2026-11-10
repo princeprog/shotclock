@@ -8,6 +8,7 @@ import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon,
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
+import { ScheduleGenerator } from '@/components/schedule-generator'
 import { VenuesWorkspace } from '@/components/venues-workspace'
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
@@ -45,7 +46,8 @@ type Team = Item & { abbreviation: string | null }
 type OrganizationTeamRow = Team & { league_id: string; league_name: string; season_team_id: string | null; season_id: string | null; season_name: string | null; season_status: 'draft' | 'active' | 'completed' | null; division_id: string | null; division_name: string | null }
 type Division = Item & { season_id: string; min_age: number | null; max_age: number | null }
 type SeasonTeam = Item & { team_id: string; division_id: string }
-type Game = { id: string; home_name: string; away_name: string; home_season_team_id: string; away_season_team_id: string; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; status: string; home_score: number | null; away_score: number | null }
+type Game = { id: string; home_name: string; away_name: string; home_season_team_id: string; away_season_team_id: string; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; status: string; home_score: number | null; away_score: number | null; stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'; round?: number | null }
+type ScheduleStatus = { hasSchedule: boolean; canGeneratePreliminary: boolean; playoffStage: 'semifinal' | 'final' | null; playoffs: boolean; thirdPlace: boolean }
 type Standing = Item & { wins: number; losses: number; pointDifference: number }
 type Dashboard = { teamCount: number; upcoming: Game[]; recent: Game[]; standings: Standing[] }
 type Option = { value: string; label: string }
@@ -286,6 +288,11 @@ function dateTime(value: string | null) { return value ? new Date(value).toLocal
 function localInput(value: string | null) { if (!value) return ''; const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 const names = (items: Item[]): Option[] => items.map((item) => ({ value: item.id, label: item.name }))
 const optional = (v: string) => v.trim() || null
+const gameStage = (game: Game) => {
+  const labels = { preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Final', third_place: 'Third place' }
+  if (!game.stage) return ''
+  return `${labels[game.stage] ?? game.stage}${game.round ? ` · Round ${game.round}` : ''}`
+}
 
 
 function GamesList({ games, season, teams, venues }: { games: Game[]; season: Season; teams: SeasonTeam[]; venues: Item[] }) {
@@ -297,7 +304,7 @@ function GamesList({ games, season, teams, venues }: { games: Game[]; season: Se
   ]
   return <div className="flex flex-col gap-4">{games.length === 0 && <NoData>No games to show yet.</NoData>}{games.map((game) => <div key={game.id} className="flex flex-col gap-2 border-b pb-4 last:border-0 last:pb-0">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{game.home_name} <span className="tabular-nums">{game.home_score !== null && game.away_score !== null ? `${game.home_score} – ${game.away_score}` : 'vs'}</span> {game.away_name}</p><Badge variant="secondary" className="capitalize">{game.status}</Badge></div>
-    <p className="text-sm text-muted-foreground">{dateTime(game.scheduled_at)}{game.venue_name ? ` · ${game.venue_name}` : ''}</p>
+    <p className="text-sm text-muted-foreground">{dateTime(game.scheduled_at)}{game.venue_name ? ` · ${game.venue_name}` : ''}{gameStage(game) ? ` · ${gameStage(game)}` : ''}</p>
     {game.status === 'scheduled' && season.status !== 'completed' && <details><summary className="cursor-pointer text-sm underline">Edit schedule</summary><div className="pt-3"><Editor title="Edit game" path={`games/${game.id}`} method="PATCH" fields={fields(game)} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId) })} /></div></details>}
     {(season.status === 'active' || (season.status === 'completed' && game.status === 'completed')) && <details><summary className="cursor-pointer text-sm underline">{game.status === 'completed' ? 'Correct score' : 'Record final score'}</summary><div className="pt-3"><Editor title="Final score" path={`games/${game.id}/score`} fields={[{ name: 'homeScore', label: `${game.home_name} score`, type: 'number', required: true, value: game.home_score }, { name: 'awayScore', label: `${game.away_name} score`, type: 'number', required: true, value: game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} /></div></details>}
   </div>)}</div>
@@ -337,7 +344,7 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
   </section>
 }
 
-type GameDialog = { kind: 'schedule' } | { kind: 'edit' | 'score'; game: Game }
+type GameDialog = { kind: 'schedule' } | { kind: 'generator'; mode: 'preliminary' | 'playoffs' } | { kind: 'edit' | 'score' | 'remove'; game: Game }
 
 function GamesManager({ season, division, teams, venues }: { season: Season; division: Division; teams: SeasonTeam[]; venues: Item[] }) {
   const [dialog, setDialog] = useState<GameDialog | null>(null)
@@ -353,6 +360,11 @@ function GamesManager({ season, division, teams, venues }: { season: Season; div
   if (dates?.to) params.set('to', startOfDay(addDays(dates.to, 1)).toISOString())
   const path = `seasons/${season.id}/games?${params}`
   const games = useQuery({ queryKey: ['league', path], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(path, client)), retry: false })
+  const scheduleStatus = useLeagueQuery<ScheduleStatus>(`divisions/${division.id}/schedule/status`)
+  const removeGame = useMutation({
+    mutationFn: (id: string) => leagueRequest(`games/${id}`, client, 'DELETE'),
+    onSuccess: () => { setDialog(null); setPage(1); toast.success('Game removed.') },
+  })
   const resetPage = () => { setPage(1); setPageSize(10) }
   const clearDates = () => { setDates(undefined); resetPage() }
   const editable = season.status !== 'completed'
@@ -363,7 +375,7 @@ function GamesManager({ season, division, teams, venues }: { season: Season; div
     { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: localInput(game?.scheduled_at ?? null) },
     { name: 'venueId', label: 'Venue', value: game?.venue_id, options: names(venues) },
   ]
-  const closeDialog = () => setDialog(null)
+  const closeDialog = () => { setDialog(null); setPending(false); removeGame.reset() }
   const saved = (message: string) => { closeDialog(); toast.success(message) }
   const groups = new Map<string, { day: Date | null; rows: Game[] }>()
   for (const row of games.data?.items ?? []) {
@@ -384,12 +396,13 @@ function GamesManager({ season, division, teams, venues }: { season: Season; div
           const canScore = (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
           return <TableRow key={row.id}>
             <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? new Date(row.scheduled_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '—'}</TableCell>
-            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium">{row.home_name} <span className="font-normal text-muted-foreground">vs</span> {row.away_name}</span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}<div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground md:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
+            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium">{row.home_name} <span className="font-normal text-muted-foreground">vs</span> {row.away_name}</span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{gameStage(row) && <div className="mt-1 text-xs text-muted-foreground">{gameStage(row)}</div>}<div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground md:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
             <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground md:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
             <TableCell className="hidden w-32 lg:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'seasonDraft'}>{row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
             <TableCell className="pr-3 text-right">{(canEdit || canScore) && <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.home_name} vs ${row.away_name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuGroup>
               {canEdit && <DropdownMenuItem onClick={() => setDialog({ kind: 'edit', game: row })}><PencilIcon />Edit schedule</DropdownMenuItem>}
               {canScore && <DropdownMenuItem onClick={() => setDialog({ kind: 'score', game: row })}><CircleCheckIcon />{row.status === 'completed' ? 'Correct score' : 'Record final score'}</DropdownMenuItem>}
+              {canEdit && <DropdownMenuItem onClick={() => { removeGame.reset(); setDialog({ kind: 'remove', game: row }) }}><Trash2Icon />Remove game</DropdownMenuItem>}
             </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>}</TableCell>
           </TableRow>
         })}</TableBody>
@@ -397,7 +410,10 @@ function GamesManager({ season, division, teams, venues }: { season: Season; div
     </div>
   </section>)}<DataPagination meta={games.data} onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /></div> : <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{dates?.from ? 'No games in this date range' : status === 'completed' ? 'No final results yet' : 'No scheduled games'}</h3></EmptyTitle><EmptyDescription>{dates?.from ? 'Choose different dates to see more games.' : status === 'completed' ? 'Final scores will appear here once recorded.' : editable ? 'Schedule a matchup for this season.' : 'No scheduled games are available for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{dates?.from && <Button variant="outline" onClick={clearDates}>Clear dates</Button>}{status === 'scheduled' && editable && teams.length >= 2 && <Button onClick={() => setDialog({ kind: 'schedule' })}><PlusIcon data-icon="inline-start" />Schedule game</Button>}</div></EmptyContent></Empty></CardContent></Card>
   return <div className="flex flex-col gap-8">
-    <div className="flex flex-wrap items-center justify-between gap-4"><div className="flex flex-col gap-1"><h3 className="font-medium">{season.name} · {division.name}</h3><div className="flex items-center gap-2"><SeasonStatusBadge status={season.status} includeSeason /></div></div>{editable && <Button onClick={() => setDialog({ kind: 'schedule' })} disabled={teams.length < 2}><PlusIcon data-icon="inline-start" />Schedule game</Button>}</div>
+    <div className="flex flex-wrap items-center justify-between gap-4"><div className="flex flex-col gap-1"><h3 className="font-medium">{season.name} · {division.name}</h3><div className="flex items-center gap-2"><SeasonStatusBadge status={season.status} includeSeason /></div></div>{editable && <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setDialog({ kind: 'generator', mode: 'preliminary' })} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleStatus.data.canGeneratePreliminary || teams.length < 2}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>{scheduleStatus.data?.playoffs && <Button variant="outline" onClick={() => setDialog({ kind: 'generator', mode: 'playoffs' })} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleStatus.data.playoffStage}><TrophyIcon data-icon="inline-start" />{scheduleStatus.data.playoffStage === 'semifinal' ? 'Schedule semifinals' : scheduleStatus.data.playoffStage === 'final' ? 'Schedule final round' : 'Schedule playoffs'}</Button>}<Button onClick={() => setDialog({ kind: 'schedule' })} disabled={teams.length < 2}><PlusIcon data-icon="inline-start" />Schedule game</Button></div>}</div>
+    {editable && scheduleStatus.isError && <Alert variant="destructive"><AlertTitle>Couldn’t load schedule status</AlertTitle><AlertDescription><p>{scheduleStatus.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void scheduleStatus.refetch()}>Try again</Button></AlertDescription></Alert>}
+    {editable && scheduleStatus.isSuccess && !scheduleStatus.data.canGeneratePreliminary && <p className="text-sm text-muted-foreground">{scheduleStatus.data.hasSchedule ? 'This division already has a generated schedule.' : 'Remove existing preliminary games before generating a schedule.'}</p>}
+    {editable && scheduleStatus.isSuccess && scheduleStatus.data.playoffs && !scheduleStatus.data.playoffStage && <p className="text-sm text-muted-foreground">The next playoff round becomes available when the earlier games are complete and that round has not already been scheduled. {scheduleStatus.data.thirdPlace ? 'The final round includes a third-place game.' : ''}</p>}
     {editable && teams.length < 2 && <Alert><AlertTitle>Register teams to schedule games</AlertTitle><AlertDescription><p>Add at least two teams to this division before scheduling a matchup.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/teams" />}>Manage teams</Button></AlertDescription></Alert>}
     {season.status === 'draft' && <Alert><AlertTitle>Season is in draft</AlertTitle><AlertDescription>You can schedule games now. Start the season before recording final scores.</AlertDescription></Alert>}
     {season.status === 'completed' && <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>Scheduling is closed. Final scores can still be corrected.</AlertDescription></Alert>}
@@ -405,7 +421,9 @@ function GamesManager({ season, division, teams, venues }: { season: Season; div
       <div className="flex flex-wrap items-center justify-between gap-4 border-b pb-4"><TabsList><TabsTrigger value="scheduled">Scheduled</TabsTrigger><TabsTrigger value="completed">Final results</TabsTrigger></TabsList><div className="flex flex-wrap items-center gap-2"><Popover><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dates?.from ? dates.to ? `${format(dates.from, 'MMM d')} – ${format(dates.to, 'MMM d, yyyy')}` : `From ${format(dates.from, 'MMM d, yyyy')}` : 'All dates'}</PopoverTrigger><PopoverContent align="end" className="w-auto p-0"><Calendar mode="range" selected={dates} onSelect={(value) => { setDates(value); resetPage() }} autoFocus />{dates?.from && <Button type="button" variant="ghost" className="mx-3 mb-3" onClick={clearDates}>Clear dates</Button>}</PopoverContent></Popover><Button type="button" variant="outline" disabled={!dates?.from} onClick={clearDates}>Reset</Button></div></div>
       <TabsContent value={status} className="pt-5">{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</TabsContent>
     </Tabs>
-    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending) closeDialog() }}><DialogContent showCloseButton={!pending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'score' ? `${game?.home_name} vs ${game?.away_name} · ${season.name}` : `Choose two teams in ${division.name} and enter the local date and time.`}</DialogDescription></DialogHeader>
+    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">{dialog?.kind !== 'generator' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : dialog?.kind === 'score' ? `${game?.home_name} vs ${game?.away_name} · ${season.name}` : `Choose two teams in ${division.name} and enter the local date and time.`}</DialogDescription></DialogHeader>}
+      {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} divisionId={division.id} seasonName={season.name} divisionName={division.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} teamCount={teams.length} mode={dialog.mode} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
+      {dialog?.kind === 'remove' && <><p className="text-sm text-muted-foreground">This removes the game from the schedule. Games with dependent playoff games or records may be blocked.</p>{removeGame.isError && <p role="alert" className="text-sm text-destructive">{removeGame.error.message}</p>}<DialogFooter><Button type="button" variant="outline" disabled={removeGame.isPending} onClick={closeDialog}>Cancel</Button><Button type="button" variant="destructive" disabled={removeGame.isPending} onClick={() => removeGame.mutate(dialog.game.id)}>{removeGame.isPending ? 'Removing…' : 'Remove game'}</Button></DialogFooter></>}
       {(dialog?.kind === 'schedule' || dialog?.kind === 'edit') && <Editor key={dialog.kind === 'edit' ? dialog.game.id : 'schedule'} title="Game details" path={dialog.kind === 'edit' ? `games/${dialog.game.id}` : `seasons/${season.id}/games`} method={dialog.kind === 'edit' ? 'PATCH' : 'POST'} fields={gameFields} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId) })} submitLabel={dialog.kind === 'edit' ? 'Save changes' : 'Schedule game'} alignActions="end" onSaved={() => saved(dialog.kind === 'edit' ? 'Schedule updated.' : 'Game scheduled.')} onCancel={closeDialog} onPendingChange={setPending} />}
       {dialog?.kind === 'score' && <Editor key={dialog.game.id} title="Final score" path={`games/${dialog.game.id}/score`} fields={[{ name: 'homeScore', label: `${dialog.game.home_name} score`, type: 'number', required: true, value: dialog.game.home_score }, { name: 'awayScore', label: `${dialog.game.away_name} score`, type: 'number', required: true, value: dialog.game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} submitLabel="Save score" alignActions="end" onSaved={() => saved('Final score saved.')} onCancel={closeDialog} onPendingChange={setPending} />}
     </DialogContent></Dialog>

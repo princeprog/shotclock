@@ -134,3 +134,38 @@ test('draft registration corrections refresh affected team and roster views', as
   assert.equal(client.getQueryState(['league', 'season-teams/st1/roster'])?.isInvalidated, true)
   client.clear()
 })
+
+test('schedule previews do not invalidate, while saves and game changes refresh schedule status', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'seasons/s1/divisions'], [{ id: 'd1', season_id: 's1' }])
+  const paths = ['divisions/d1/schedule/status', 'divisions/d2/schedule/status', 'seasons/s1/games?page=1', 'seasons/s1/dashboard', 'seasons/s1/standings', 'seasons/s2/games', 'organizations/o1/leagues']
+  for (const path of paths) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'divisions/d1/schedule/preview', 'POST', {}, {})
+  await applyLeagueMutation(client, 'divisions/d1/playoffs/preview', 'POST', {}, {})
+  assert.deepEqual(paths.filter((path) => client.getQueryState(['league', path])?.isInvalidated), [])
+  await applyLeagueMutation(client, 'divisions/d1/schedule', 'POST', {}, {})
+  assert.deepEqual(paths.filter((path) => client.getQueryState(['league', path])?.isInvalidated), ['divisions/d1/schedule/status', 'seasons/s1/games?page=1', 'seasons/s1/dashboard', 'seasons/s1/standings'])
+  client.clear()
+})
+
+test('game deletion and scoring refresh schedule status even with empty responses', async () => {
+  const client = makeQueryClient()
+  for (const path of ['divisions/d1/schedule/status', 'divisions/d2/schedule/status', 'seasons/s1/games', 'seasons/s1/standings', 'seasons/s1/dashboard']) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'games/g1', 'DELETE', undefined, {})
+  for (const path of ['divisions/d1/schedule/status', 'divisions/d2/schedule/status', 'seasons/s1/games', 'seasons/s1/standings', 'seasons/s1/dashboard']) assert.equal(client.getQueryState(['league', path])?.isInvalidated, true, path)
+  client.clear()
+})
+
+test('playoff saves and final scores invalidate the affected division status', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'seasons/s1/divisions'], [{ id: 'd1' }])
+  for (const path of ['divisions/d1/schedule/status', 'divisions/d2/schedule/status', 'seasons/s1/games', 'seasons/s1/standings']) client.setQueryData(['league', path], [])
+  await applyLeagueMutation(client, 'divisions/d1/playoffs', 'POST', {}, {})
+  assert.equal(client.getQueryState(['league', 'divisions/d1/schedule/status'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'divisions/d2/schedule/status'])?.isInvalidated, false)
+  client.setQueryData(['league', 'divisions/d1/schedule/status'], [])
+  await applyLeagueMutation(client, 'games/g1/score', 'POST', {}, { season_id: 's1', division_id: 'd1' })
+  assert.equal(client.getQueryState(['league', 'divisions/d1/schedule/status'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s1/standings'])?.isInvalidated, true)
+  client.clear()
+})
