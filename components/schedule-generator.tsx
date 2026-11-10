@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
 import { CalendarDaysIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { leagueRequest } from '@/lib/league-client'
+import { SchedulePreviewCalendar } from '@/components/schedule-preview-calendar'
 
 type ScheduleGame = {
   divisionId: string
@@ -47,8 +48,11 @@ type PlayingWindow = {
 }
 type WindowDraft = PlayingWindow & { id: number }
 type ScheduleInput = { availability: Availability; format: 'single' | 'double'; playoffs: boolean; thirdPlace: boolean }
-type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; playoffs?: boolean; playoffStage?: string | null }
+type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; playoffs?: boolean; playoffStage?: string | null; gameCount?: number }
 type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[] }
+type Estimate = { capacity: number; required: number; divisions: DivisionPreview[] }
+type CalendarBooking = { id: string; scheduledAt: string; durationMinutes: number; venueId: string; homeName: string; awayName: string; divisionName: string }
+type Validation = { issues: { index: number; message: string }[] }
 type SavedGame = Omit<ScheduleGame, 'homeName' | 'awayName' | 'divisionName'>
 type GameDraft = { game: ScheduleGame; localTime: string; originalLocalTime: string; venueId: string }
 type Props = {
@@ -130,6 +134,15 @@ const subscribe = () => () => {}
 const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const serverTimeZone = () => ''
 
+function useDebouncedValue(value: string, delay = 500) {
+  const [settled, setSettled] = useState('')
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSettled(value), delay)
+    return () => window.clearTimeout(timer)
+  }, [value, delay])
+  return settled
+}
+
 function ScheduleDate({ id, label, value, disabled, onChange }: { id: string; label: string; value: string; disabled: boolean; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false)
   const parsed = value ? parseISO(value) : undefined
@@ -184,9 +197,41 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [thirdPlace, setThirdPlace] = useState(false)
   const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; warnings: string[]; divisions: DivisionPreview[]; seasonId: string; mode: Props['mode'] } | null>(null)
   const [error, setError] = useState('')
+  const [expandedGame, setExpandedGame] = useState<string | null>(null)
   const previewHeading = useRef<HTMLHeadingElement>(null)
   const wasPreviewed = useRef(false)
   const path = `seasons/${seasonId}/${mode === 'preliminary' ? 'schedule' : 'playoffs'}`
+
+  let settingsKey = ''
+  if (startDate && endDate && startDate <= endDate && !validateWindows(windows) && venueIds.length && duration && rest && Number.isInteger(Number(duration)) && Number(duration) > 0 && Number(duration) <= 1440 && Number.isInteger(Number(rest)) && Number(rest) >= 0 && Number(rest) <= 10080 && timeZone) {
+    try {
+      new Intl.DateTimeFormat('en', { timeZone }).format()
+      const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest) }
+      settingsKey = JSON.stringify(mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability })
+    } catch { /* Wait until the time zone is valid. */ }
+  }
+  const settledSettings = useDebouncedValue(settingsKey)
+  const estimate = useQuery({ queryKey: ['schedule-estimate', path, settledSettings], enabled: !!settingsKey && settledSettings === settingsKey, retry: false,
+    queryFn: () => leagueRequest<Estimate>(`${path}/estimate`, client, 'POST', JSON.parse(settledSettings)) })
+
+  let validationKey = ''
+  const invalidGameIndexes: number[] = []
+  if (draft && draft.seasonId === seasonId && draft.mode === mode) {
+    const games = draft.games.map((item, index) => {
+      const scheduledAt = item.localTime === item.originalLocalTime ? item.game.scheduledAt : resolveZonedTime(item.localTime, draft.input.availability.timeZone)
+      if (!scheduledAt || !draft.input.availability.venueIds.includes(item.venueId)) invalidGameIndexes.push(index)
+      return gameForSave(item.game, scheduledAt ?? item.game.scheduledAt, item.venueId)
+    })
+    if (!invalidGameIndexes.length && games.length) validationKey = JSON.stringify({ ...draft.input, games, divisionIds: draft.divisions.filter((division) => division.reason === undefined).map((division) => division.id) })
+  }
+  const settledValidation = useDebouncedValue(validationKey)
+  const validation = useQuery({ queryKey: ['schedule-validation', path, settledValidation], enabled: !!validationKey && settledValidation === validationKey, retry: false, staleTime: 0,
+    queryFn: () => leagueRequest<Validation>(`${path}/validate`, client, 'POST', JSON.parse(settledValidation)) })
+  const calendarKey = draft && draft.seasonId === seasonId && draft.mode === mode ? JSON.stringify({ availability: draft.input.availability }) : ''
+  const calendar = useQuery({ queryKey: ['schedule-calendar', seasonId, calendarKey], enabled: !!calendarKey, retry: false,
+    queryFn: () => leagueRequest<{ games: CalendarBooking[] }>(`seasons/${seasonId}/schedule/calendar`, client, 'POST', JSON.parse(calendarKey)) })
+  const estimateReady = !!settingsKey && settledSettings === settingsKey && !estimate.isFetching && !!estimate.data && !estimate.isError
+  const validationReady = !!validationKey && settledValidation === validationKey && !validation.isFetching && !!validation.data && !validation.isError
 
   const preview = useMutation({
     mutationFn: (input: ScheduleInput | { availability: Availability }) => leagueRequest<Preview>(`${path}/preview`, client, 'POST', input),
@@ -239,13 +284,16 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     if (!Number.isInteger(Number(duration)) || Number(duration) <= 0 || !duration || !Number.isInteger(Number(rest)) || Number(rest) < 0 || !rest) { setError('Enter a positive game duration and a nonnegative rest time in whole minutes.'); return }
     try { new Intl.DateTimeFormat('en', { timeZone }).format() } catch { setError('Enter a valid IANA time zone, such as Asia/Manila.'); return }
     if (!timeZone.trim()) { setError('Enter a valid IANA time zone.'); return }
+    if (!estimateReady || !estimate.data) { setError('Wait for the capacity check or retry it before generating a preview.'); return }
+    if (!estimate.data.required) { setError('No divisions are ready to generate games.'); return }
+    if (estimate.data.capacity < estimate.data.required) { setError('Add more playing time or venues before generating a preview.'); return }
     const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest) }
     const input = mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability }
     preview.mutate(input)
   }
 
   function saveSchedule() {
-    if (!draft || draft.seasonId !== seasonId || draft.mode !== mode || !draft.games.length || pending) return
+    if (!draft || draft.seasonId !== seasonId || draft.mode !== mode || !draft.games.length || pending || !validationReady || !!validation.data?.issues.length) return
     setError('')
     const games: SavedGame[] = []
     for (const [index, item] of draft.games.entries()) {
@@ -317,10 +365,34 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
           </div>
         </section>
 
+        <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
+          <div><h3 id="schedule-capacity-heading" className="font-medium">Schedule capacity</h3><p className="text-sm text-muted-foreground">Check the number of games and available court slots before generating.</p></div>
+          {!settingsKey && <p className="text-sm text-muted-foreground">Complete the dates, playing windows, venues and game settings to check capacity.</p>}
+          {settingsKey && (!estimateReady && !estimate.isError) && <p className="text-sm text-muted-foreground" role="status">Checking capacity…</p>}
+          {settingsKey && settledSettings === settingsKey && estimate.isError && <Alert variant="destructive"><AlertTitle>Capacity check unavailable</AlertTitle><AlertDescription>{estimate.error.message} <Button type="button" variant="link" size="sm" onClick={() => void estimate.refetch()}>Retry</Button></AlertDescription></Alert>}
+          {estimateReady && estimate.data && <div className="flex flex-col gap-3 rounded-lg border p-4 text-sm">
+            <p className="font-medium">{estimate.data.required} games needed · up to {estimate.data.capacity} available court slots</p>
+            <p className="text-muted-foreground">This is an upper bound after existing bookings. Team rest and round order may reduce capacity.</p>
+            {estimate.data.required === 0 && <p className="text-muted-foreground">No divisions are ready to generate games with these settings.</p>}
+            {estimate.data.capacity < estimate.data.required && <p className="text-destructive" role="alert">At least {estimate.data.required - estimate.data.capacity} more court slots are needed. Add venues or playing time.</p>}
+            <ul className="flex flex-col gap-1">{estimate.data.divisions.map((division) => <li key={division.id}><span className="font-medium">{division.name}:</span> {division.reason ? `Skipped — ${division.reason}` : `${division.gameCount} games${mode === 'preliminary' && playoffs && division.teamCount < 4 ? ' · round robin only' : ''}`}</li>)}</ul>
+          </div>}
+        </section>
+
         {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className="flex flex-col gap-4 border-t pt-6">
           <div><h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 font-medium">Review schedule · {draft.games.length} {draft.games.length === 1 ? 'game' : 'games'}</h3><p className="text-sm text-muted-foreground">Select a game to adjust its date, time or venue. Times are in {draft.input.availability.timeZone}.</p></div>
           {(outsideSeason || otherWarnings.length > 0) && <Alert role="status"><AlertTitle>Please review</AlertTitle><AlertDescription><ul className="list-disc pl-4">{outsideSeason && <li>Some games are outside the season dates.</li>}{otherWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></AlertDescription></Alert>}
           {!draft.games.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
+          {invalidGameIndexes.length > 0 && <Alert variant="destructive" role="alert"><AlertTitle>Check the edited game times</AlertTitle><AlertDescription>Choose valid, unambiguous local times and available venues before saving.</AlertDescription></Alert>}
+          {!invalidGameIndexes.length && !validationReady && !validation.isError && <p className="text-sm text-muted-foreground" role="status">Checking the preview for conflicts…</p>}
+          {validationKey && settledValidation === validationKey && validation.isError && <Alert variant="destructive"><AlertTitle>Could not check this preview</AlertTitle><AlertDescription>{validation.error.message} <Button type="button" variant="link" size="sm" onClick={() => void validation.refetch()}>Retry</Button></AlertDescription></Alert>}
+          {validationReady && !!validation.data?.issues.length && <Alert variant="destructive" role="alert"><AlertTitle>Resolve schedule conflicts</AlertTitle><AlertDescription>Review the marked games below. Changes are checked again before saving.</AlertDescription></Alert>}
+          {validationReady && !validation.data?.issues.length && <p className="text-sm text-muted-foreground" role="status">No scheduling conflicts found.</p>}
+          <SchedulePreviewCalendar games={draft.games.map((item, index) => ({ index, localTime: item.localTime, homeName: item.game.homeName, awayName: item.game.awayName, divisionName: item.game.divisionName, venueName: venues.find((venue) => venue.id === item.venueId)?.name ?? '', conflict: invalidGameIndexes.includes(index) || !!(validationReady && validation.data?.issues.some((issue) => issue.index === index)) }))}
+            bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venues.find((venue) => venue.id === game.venueId)?.name ?? '' }))}
+            loading={calendar.isFetching} error={calendar.isError ? calendar.error.message : ''} onRetry={() => void calendar.refetch()}
+            initialDate={draft.games[0]?.localTime.slice(0, 10) ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
+            onSelect={(index) => { setExpandedGame(String(index)); window.setTimeout(() => document.getElementById(`schedule-game-trigger-${index}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 0) }} />
           <div className="flex flex-col gap-5">{draft.divisions.map((division) => {
             const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
             const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
@@ -334,8 +406,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               </div>
               {rounds.map((round) => <div key={round} className="flex flex-col gap-2">
                 <h5 className="text-sm font-medium">Round {round}</h5>
-                <Accordion className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).map(({ item, index }) => <AccordionItem key={index} value={String(index)}>
-            <AccordionTrigger className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="font-medium">{item.game.homeName} vs {item.game.awayName}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span></span></AccordionTrigger>
+                <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).map(({ item, index }) => <AccordionItem key={index} value={String(index)}>
+            <AccordionTrigger id={`schedule-game-trigger-${index}`} className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="font-medium">{item.game.homeName} vs {item.game.awayName}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span>{invalidGameIndexes.includes(index) && <span className="text-xs text-destructive">Invalid or ambiguous local time or venue.</span>}{validationReady && validation.data?.issues.filter((issue) => issue.index === index).map((issue) => <span key={issue.message} className="text-xs text-destructive">{issue.message}</span>)}</span></AccordionTrigger>
             <AccordionContent className="flex flex-col gap-4 px-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <ScheduleDate id={`schedule-game-date-${index}`} label="Date" value={item.localTime.slice(0, 10)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${value}T${game.localTime.slice(11, 16)}` } : game) }); setError('') }} />
@@ -357,8 +429,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       {(preview.isError || error || save.isError) && <div className="border-t px-6 py-3"><Alert variant="destructive" role="alert"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error || (preview.isError ? preview.error.message : save.error?.message)}</AlertDescription></Alert></div>}
       <DialogFooter className="border-t px-6 py-4">
         <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
-        <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending || !venues.length}>{preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>
-        {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
+        <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending || !venues.length || !estimateReady || !estimate.data?.required || !!(estimate.data && estimate.data.capacity < estimate.data.required)}>{preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>
+        {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
       </DialogFooter>
     </form>
   </>

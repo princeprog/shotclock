@@ -6,6 +6,17 @@ import { applyLeagueMutation, invalidateLeagueChange, leagueChangeForMutation, s
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve))
 
+test('league changes invalidate live scheduling diagnostics without treating checks as mutations', async () => {
+  const client = makeQueryClient()
+  const keys = [['schedule-estimate', 'seasons/s1/schedule', '{}'], ['schedule-validation', 'seasons/s1/schedule', '{}'], ['schedule-calendar', 's1', '{}']]
+  for (const key of keys) client.setQueryData(key, {})
+  await applyLeagueMutation(client, 'seasons/s1/schedule/validate', 'POST', {}, {})
+  for (const key of keys) assert.equal(client.getQueryState(key)?.isInvalidated, false)
+  await applyLeagueMutation(client, 'games/g1', 'PATCH', {}, {})
+  for (const key of keys) assert.equal(client.getQueryState(key)?.isInvalidated, true)
+  client.clear()
+})
+
 test('moving a roster entry invalidates both its previous and new team rosters', async () => {
   const client = makeQueryClient()
   client.setQueryData(['league', 'season-teams/old/roster'], [])

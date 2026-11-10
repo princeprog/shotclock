@@ -81,6 +81,7 @@ function contextMatches(query: Query, key: string, id?: string) {
 
 export function isAffectedLeagueQuery(query: Query, change: LeagueChange, client?: QueryClient) {
   const [root, raw] = query.queryKey
+  if (typeof root === 'string' && ['schedule-estimate', 'schedule-validation', 'schedule-calendar'].includes(root)) return ['game', 'team', 'season', 'venue', 'league', 'unknown'].includes(change.kind)
   if (root !== 'league' || typeof raw !== 'string') return false
   const path = raw.split('?')[0]
   const org = /^organizations\/([^/]+)\/(leagues|seasons|teams|team-seasons|venues)$/.exec(path)
@@ -120,7 +121,7 @@ function publish(message: CacheMessage) {
 }
 export function publishSessionChange() { publish({ type: 'session-change' }) }
 export async function applyLeagueMutation(client: QueryClient, path: string, method: string, body: unknown, result: unknown) {
-  if (method === 'POST' && /^(divisions|seasons)\/[^/]+\/(schedule|playoffs)\/preview(?:\?|$)/.test(path)) return
+  if (method === 'POST' && /^(divisions|seasons)\/[^/]+\/(schedule|playoffs)\/(preview|estimate|validate|calendar)(?:\?|$)/.test(path)) return
   const change = leagueChangeForMutation(client, path, method, body, result)
   publish({ type: 'league-change', change })
   await invalidateLeagueChange(client, change)

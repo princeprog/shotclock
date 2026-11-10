@@ -16,23 +16,24 @@ function nodes(element) {
   if (typeof element !== 'object') return [element]
   return [element, ...nodes(element.props?.children)]
 }
-function harness(mode = 'preliminary', result = response) {
+function harness(mode = 'preliminary', result = response, diagnostics = {}) {
   const state = []; let cursor = 0; const calls = []
-  const context = { exports: {}, require(name) {
+  const context = { exports: {}, window: { setTimeout: (callback) => { callback(); return 1 }, clearTimeout() {} }, require(name) {
     if (name === 'react') return {
       useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (value) => { state[i] = typeof value === 'function' ? value(state[i]) : value }] },
       useRef(initial) { const i = cursor++; return state[i] ??= { current: initial } },
-      useEffect() {}, useSyncExternalStore() { return 'Asia/Manila' },
+      useEffect(effect) { effect() }, useSyncExternalStore() { return 'Asia/Manila' },
     }
-    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
+    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: false, data: enabled ? queryKey[0] === 'schedule-estimate' ? { capacity: diagnostics.capacity ?? 100, required: 3, divisions: [] } : queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [] } : { games: [] } : undefined, refetch() {} }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
+    if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
     if (name === '@/lib/game-time') return { joinGameTime: () => '', splitGameTime: () => ({}) }
     return require(name)
   } }
   vm.runInNewContext(compiled, context)
   const props = { seasonId: 's1', seasonName: 'Summer', seasonStart: '2026-01-01', seasonEnd: '2026-02-01', venues: [{ id: 'court', name: 'Court' }, { id: 'court2', name: 'Court 2' }], mode, onClose() {}, onSaved() {} }
-  const render = () => { cursor = 0; return nodes(context.exports.ScheduleGenerator(props)) }
+  const render = () => { cursor = 0; context.exports.ScheduleGenerator(props); cursor = 0; return nodes(context.exports.ScheduleGenerator(props)) }
   const setup = () => {
     let tree = render()
     tree.find((n) => n.type === 'ToggleGroup').props.onValueChange(['1'])
@@ -115,4 +116,24 @@ test('rejects a preview that assigns a game to a skipped division', async () => 
   const tree = h.render()
   assert.ok(tree.includes('The preview contained incomplete game details. Please try again.'))
   assert.equal(tree.some((n) => n.type === 'Button' && nodes(n).includes('Save schedule')), false)
+})
+
+test('a proven shortfall blocks preview and explains how many slots are missing', async () => {
+  const h = harness('preliminary', response, { capacity: 1 }); h.setup()
+  const tree = h.render()
+  assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Preview schedule')).props.disabled, true)
+  assert.match(tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' '), /2\s+more court slots/)
+  await h.preview()
+  assert.equal(h.calls.length, 0)
+})
+
+test('conflicts and pending checks both prevent saving', async () => {
+  for (const diagnostics of [{ issues: [{ index: 0, message: 'Venue conflict: choose another time.' }] }, { checking: true }]) {
+    const h = harness('preliminary', response, diagnostics); h.setup(); await h.preview()
+    const tree = h.render()
+    const save = tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule'))
+    assert.equal(save.props.disabled, true)
+    save.props.onClick()
+    assert.equal(h.calls.length, 1)
+  }
 })

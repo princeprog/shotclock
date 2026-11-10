@@ -79,6 +79,22 @@ test('season saves accept at most 2 MiB while previews keep the 8192-byte limit'
   }
 })
 
+test('season preview diagnostics have bounded, owner-protected gateway routes', async () => {
+  const sizedBody = (size) => `{"value":"${'x'.repeat(size - 12)}"}`
+  for (const kind of ['schedule', 'playoffs']) {
+    for (const action of ['estimate', 'validate']) {
+      const path = `seasons/${id}/${kind}/${action}`
+      assert.equal((await request('POST', path, '{}')).status, 200)
+      assert.equal((await request('POST', path, '{}', { origin: 'https://evil.test' })).status, 403)
+      const limit = action === 'validate' ? 2 * 1024 * 1024 : 8192
+      assert.equal((await request('POST', path, sizedBody(limit))).status, 200)
+      assert.equal((await request('POST', path, sizedBody(limit + 1))).status, 413)
+    }
+  }
+  assert.equal((await request('POST', `seasons/${id}/schedule/calendar`, '{}')).status, 200)
+  assert.equal((await request('POST', `seasons/${id}/playoffs/calendar`, '{}')).status, 404)
+})
+
 test('season-scoped query parameters are forwarded on existing GET routes', async () => {
   for (const kind of ['games', 'teams', 'standings', 'dashboard']) {
     assert.equal((await request('GET', `seasons/${id}/${kind}?scope=season&page=2`)).status, 200)
