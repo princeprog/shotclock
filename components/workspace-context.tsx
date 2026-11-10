@@ -13,7 +13,7 @@ import { parseWorkspaceSelection, readWorkspaceSelection, resolveWorkspaceDivisi
 type Organization = { id: string; name: string }
 type League = { id: string; name: string; location: string | null }
 type Season = { id: string; name: string; status: 'draft' | 'active' | 'completed'; start_date: string | null; end_date: string | null }
-type Division = { id: string; season_id: string; name: string; max_age: number | null }
+type Division = { id: string; season_id: string; name: string; min_age: number | null; max_age: number | null }
 
 function useWorkspaceValue() {
   const client = useQueryClient()
