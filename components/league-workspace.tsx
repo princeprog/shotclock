@@ -169,9 +169,9 @@ function SeasonActions({ season, onEdit }: { season: Season; onEdit: () => void 
     onError: (error) => toast.error(error.message),
   })
   if (season.status === 'completed') return null
-  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${season.name}`} disabled={mutation.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuGroup>
-    <DropdownMenuItem onClick={onEdit}><PencilIcon />Edit season</DropdownMenuItem>
-    <DropdownMenuItem disabled={mutation.isPending} onClick={() => mutation.mutate()}>{season.status === 'draft' ? <><PlayIcon />Start season</> : <><CircleCheckIcon />Complete season</>}</DropdownMenuItem>
+  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${season.name}`} disabled={mutation.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+    <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit season</DropdownMenuItem>
+    <DropdownMenuItem className="py-2" disabled={mutation.isPending} onClick={() => mutation.mutate()}>{season.status === 'draft' ? <><PlayIcon />Start season</> : <><CircleCheckIcon />Complete season</>}</DropdownMenuItem>
   </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
 }
 
@@ -456,7 +456,6 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const [editing, setEditing] = useState('')
   const [seasonToEdit, setSeasonToEdit] = useState<Season | null>(null)
   const [createSeasonOpen, setCreateSeasonOpen] = useState(false)
-  const [createSeasonLeague, setCreateSeasonLeague] = useState('')
   const [createTeamOpen, setCreateTeamOpen] = useState(false)
   const [createTeamPending, setCreateTeamPending] = useState(false)
   const [teamToEdit, setTeamToEdit] = useState<Team | null>(null)
@@ -508,8 +507,8 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
         <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><TableHead>Team</TableHead><TableHead>Wins</TableHead><TableHead>Losses</TableHead><TableHead>Point difference</TableHead></TableRow></TableHeader><TableBody>{dashboard.data.standings.map((row) => <TableRow key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</TableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
       </>}
     </>}
-    {section === 'leagues' && (leagues.data?.length ? <section aria-labelledby="leagues-list-title" className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-4"><div className="flex flex-col gap-1"><h3 id="leagues-list-title" className="font-medium">Your leagues</h3><p className="text-sm text-muted-foreground">{leagues.data.length} {leagues.data.length === 1 ? 'league' : 'leagues'} in this organization</p></div><CreateLeagueDialog organizationId={org} /></div>
+    {section === 'leagues' && (leagues.data?.length ? <section aria-label="Leagues" className="flex flex-col gap-4">
+      <div className="flex justify-end"><CreateLeagueDialog organizationId={org} /></div>
       <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Leagues in this organization</caption>
         <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
         <TableBody>{leagues.data.map((item) => <Fragment key={item.id}>
@@ -527,9 +526,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
       <Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No leagues yet</h3></EmptyTitle><EmptyDescription>Create your first league to start organizing seasons, teams, and games.</EmptyDescription></EmptyHeader><EmptyContent><CreateLeagueDialog organizationId={org} first /></EmptyContent></Empty>
     </CardContent></Card>)}
     {section === 'seasons' && (!leagues.data?.length ? <Panel title="A league is needed" description="Create a league before setting up a season."><Button className="self-start" nativeButton={false} render={<Link href="/manage/leagues" />}>Set up a league</Button></Panel> : <>
-      <Dialog open={createSeasonOpen} onOpenChange={(open) => { if (open) setCreateSeasonLeague(selectedSeasonLeague); setCreateSeasonOpen(open) }}>
-        {seasonPage.data?.items.length ? <section aria-labelledby="seasons-list-title" className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-4"><div className="flex flex-col gap-1"><h3 id="seasons-list-title" className="font-medium">Your seasons</h3><p className="text-sm text-muted-foreground">{seasonPage.data.total} {seasonPage.data.total === 1 ? 'season' : 'seasons'} {filtersActive ? 'matching your filters' : 'in this organization'}</p></div><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
+      <Dialog open={createSeasonOpen} onOpenChange={setCreateSeasonOpen}>
+        {seasonPage.data?.items.length ? <section aria-label="Seasons" className="flex flex-col gap-4">
+          <div className="flex justify-end"><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
           <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Seasons in this organization</caption>
             <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="w-24 text-muted-foreground sm:w-32">Status</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Start date</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">End date</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
             <TableBody>{seasonPage.data.items.map((item) => <Fragment key={item.id}>
@@ -537,7 +536,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
             </Fragment>)}</TableBody>
           </Table><DataPagination meta={seasonPage.data} onPageChange={setSeasonPageNumber} onPageSizeChange={(size) => { setSeasonPageNumber(1); setSeasonPageSize(size) }} /></CardContent></Card>
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{filtersActive ? 'No matching seasons' : 'No seasons yet'}</h3></EmptyTitle><EmptyDescription>{filtersActive ? 'Try different filters or create a season.' : 'Create your first season to start organizing teams and games.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{filtersActive && <Button variant="outline" onClick={() => { setSeasonSearch(''); setSeasonStatus(''); setSeasonLeagueFilter(''); setSeasonPageNumber(1); setSeasonPageSize(10) }}>Clear filters</Button>}<DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />{filtersActive ? 'Create season' : 'Create your first season'}</DialogTrigger></div></EmptyContent></Empty></CardContent></Card>}
-        <DialogContent><DialogHeader><DialogTitle>Create a season</DialogTitle><DialogDescription>Choose a league and add a name and optional dates.</DialogDescription></DialogHeader><Field><FieldLabel htmlFor="create-season-league">League</FieldLabel><Select value={createSeasonLeague || null} onValueChange={(value) => setCreateSeasonLeague(value ?? '')} items={[{ value: null, label: 'Select a league' }, ...(leagues.data ?? []).map((item) => ({ value: item.id, label: item.name }))]}><SelectTrigger id="create-season-league" className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{leagues.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{createSeasonLeague && <Editor key={createSeasonLeague} title="Season details" path={`leagues/${createSeasonLeague}/seasons`} fields={dateFields()} transform={seasonData} submitLabel="Create season" alignActions="end" onSaved={() => setCreateSeasonOpen(false)} />}</DialogContent>
+        <DialogContent><DialogHeader><DialogTitle>Create a season</DialogTitle><DialogDescription>{selectedLeague ? `Add a name and optional dates for ${selectedLeague.name}.` : 'Close this dialog and select a league in the header before creating a season.'}</DialogDescription></DialogHeader>{selectedLeague && <Editor key={selectedLeague.id} title="Season details" path={`leagues/${selectedLeague.id}/seasons`} fields={dateFields()} transform={seasonData} submitLabel="Create season" alignActions="end" onSaved={() => setCreateSeasonOpen(false)} />}</DialogContent>
       </Dialog>
       <Dialog open={seasonToEdit !== null} onOpenChange={(open) => { if (!open) setSeasonToEdit(null) }}><DialogContent><DialogHeader><DialogTitle>Edit season</DialogTitle><DialogDescription>Update the season name and optional dates.</DialogDescription></DialogHeader>{seasonToEdit && <Editor key={seasonToEdit.id} title="Season details" path={`seasons/${seasonToEdit.id}`} method="PATCH" fields={dateFields(seasonToEdit)} transform={seasonData} alignActions="end" onSaved={() => setSeasonToEdit(null)} onCancel={() => setSeasonToEdit(null)} />}</DialogContent></Dialog>
     </>)}
