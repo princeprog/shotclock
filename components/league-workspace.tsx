@@ -350,6 +350,78 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
 
 type GameDialog = { kind: 'schedule' } | { kind: 'generator'; mode: 'preliminary' | 'playoffs' } | { kind: 'edit' | 'score' | 'remove' | 'forfeit' | 'history'; game: Game }
 
+function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, teams, teamsLoading, teamsError, onRetryTeams, venues, onClose, onSaved, onPendingChange }: {
+  seasonId: string; divisions: Division[]; divisionId: string; onDivisionChange: (id: string) => void; teams: SeasonTeam[]; teamsLoading: boolean; teamsError: string | null; onRetryTeams: () => void; venues: Item[]; onClose: () => void; onSaved: () => void; onPendingChange: (pending: boolean) => void
+}) {
+  const client = useQueryClient()
+  const [homeTeam, setHomeTeam] = useState('')
+  const [awayTeam, setAwayTeam] = useState('')
+  const [venue, setVenue] = useState('')
+  const [error, setError] = useState('')
+  const [missingDate, setMissingDate] = useState(false)
+  const [missingTime, setMissingTime] = useState(false)
+  const mutation = useMutation({ mutationFn: (body: object) => leagueRequest(`seasons/${seasonId}/games`, client, 'POST', body), onSuccess: onSaved, onSettled: () => onPendingChange(false) })
+  const teamOptions = names(teams)
+  const teamsDisabled = mutation.isPending || !divisionId || teamsLoading || !!teamsError || teams.length < 2
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    if (!divisionId) { setError('Choose a division before scheduling a game.'); return }
+    if (teamsLoading || teamsError || teams.length < 2) { setError('At least two registered teams must be available in this division.'); return }
+    if (!teams.some((team) => team.id === homeTeam) || !teams.some((team) => team.id === awayTeam)) { setError('Choose a home team and an away team.'); return }
+    if (homeTeam === awayTeam) { setError('Choose two different teams.'); return }
+    const values = new FormData(event.currentTarget)
+    const date = String(values.get('gameDate') ?? '')
+    const time = String(values.get('gameTime') ?? '')
+    if (!date) { setMissingDate(true); document.getElementById('schedule-game-date')?.focus(); return }
+    if (!time) { setMissingTime(true); document.getElementById('schedule-game-time-hour')?.focus(); return }
+    const scheduledAt = new Date(`${date}T${time}`)
+    if (!Number.isFinite(scheduledAt.getTime())) { setError('Choose a valid date and time.'); return }
+    try {
+      onPendingChange(true)
+      await mutation.mutateAsync({ homeTeamId: homeTeam, awayTeamId: awayTeam, scheduledAt: scheduledAt.toISOString(), venueId: optional(venue) })
+    } catch { onPendingChange(false) }
+  }
+
+  return <form onSubmit={submit} className="flex flex-col gap-5">
+    <FieldGroup className="gap-4">
+      <Field><FieldLabel htmlFor="game-division" required>Division</FieldLabel>
+        <Select value={divisionId || null} onValueChange={(value) => { if ((value ?? '') !== divisionId) { setHomeTeam(''); setAwayTeam(''); setError(''); onDivisionChange(value ?? '') } }} disabled={mutation.isPending} items={divisions.map((item) => ({ value: item.id, label: item.name }))}>
+          <SelectTrigger id="game-division" className="w-full" aria-required="true"><SelectValue placeholder="Select a division" /></SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}><SelectGroup>{divisions.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
+        </Select>
+      </Field>
+      <div className="grid gap-4 sm:grid-cols-2">{[{ id: 'home', label: 'Home team', value: homeTeam, set: setHomeTeam }, { id: 'away', label: 'Away team', value: awayTeam, set: setAwayTeam }].map((field) => <Field key={field.id}>
+        <FieldLabel htmlFor={`schedule-game-${field.id}`} required>{field.label}</FieldLabel>
+        <Select value={field.value || null} disabled={teamsDisabled} items={teamOptions} onValueChange={(value) => { field.set(value ?? ''); setError('') }}>
+          <SelectTrigger id={`schedule-game-${field.id}`} className="w-full" aria-required="true"><SelectValue placeholder={!divisionId ? 'Select a division first' : teamsLoading ? 'Loading teams…' : 'Select a team'} /></SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}><SelectGroup>{teamOptions.map((team) => <SelectItem key={team.value} value={team.value}>{team.label}</SelectItem>)}</SelectGroup></SelectContent>
+        </Select>
+      </Field>)}</div>
+      {!divisionId && <FieldDescription>Select a division to choose its teams.</FieldDescription>}
+      {divisionId && teamsLoading && <p className="text-sm text-muted-foreground" role="status">Loading teams…</p>}
+      {divisionId && teamsError && <Alert variant="destructive"><AlertTitle>Couldn’t load teams</AlertTitle><AlertDescription>{teamsError} <Button type="button" variant="link" size="sm" onClick={onRetryTeams}>Try again</Button></AlertDescription></Alert>}
+      {divisionId && !teamsLoading && !teamsError && teams.length < 2 && <p className="text-sm text-muted-foreground">Register at least two teams in this division before scheduling a game.</p>}
+      <div className="grid gap-4">
+        <Field data-invalid={missingDate || undefined}><FieldLabel htmlFor="schedule-game-date" required>Date</FieldLabel>
+          <DatePicker id="schedule-game-date" name="gameDate" label="Date" required disabled={mutation.isPending} invalid={missingDate} onChange={() => setMissingDate(false)} />
+          {missingDate && <p id="schedule-game-date-error" role="alert" className="text-sm text-destructive">Choose a date for the game.</p>}
+        </Field>
+        <TimePicker id="schedule-game-time" name="gameTime" value="" required disabled={mutation.isPending} invalid={missingTime} onChange={() => setMissingTime(false)} />
+      </div>
+      <Field><FieldLabel htmlFor="schedule-game-venue">Venue</FieldLabel>
+        <Select value={venue || null} disabled={mutation.isPending} onValueChange={(value) => setVenue(value ?? '')} items={[{ value: null, label: 'No venue selected' }, ...names(venues)]}>
+          <SelectTrigger id="schedule-game-venue" className="w-full"><SelectValue placeholder="Select a venue (optional)" /></SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>No venue selected</SelectItem>{venues.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent>
+        </Select>
+      </Field>
+    </FieldGroup>
+    {(error || mutation.isError) && <p role="alert" className="text-sm text-destructive">{error || mutation.error?.message}</p>}
+    <DialogFooter><Button type="button" variant="outline" disabled={mutation.isPending} onClick={onClose}>Cancel</Button><Button type="submit" disabled={mutation.isPending || teamsLoading}>{mutation.isPending ? 'Scheduling…' : 'Schedule game'}</Button></DialogFooter>
+  </form>
+}
+
 function GamesManager({ season, divisions, venues }: { season: Season; divisions: Division[]; venues: Item[] }) {
   const [dialog, setDialog] = useState<GameDialog | null>(null)
   const [pending, setPending] = useState(false)
@@ -452,8 +524,8 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
       {dialog?.kind === 'forfeit' && <GameForfeitDialog game={dialog.game} onClose={closeDialog} onSaved={() => saved('Forfeit recorded.')} onPendingChange={setPending} />}
       {dialog?.kind === 'history' && <GameScheduleHistory gameId={dialog.game.id} />}
       {dialog?.kind === 'remove' && <><p className="text-sm text-muted-foreground">This removes the game from the schedule. Games with dependent playoff games or records may be blocked.</p>{removeGame.isError && <p role="alert" className="text-sm text-destructive">{removeGame.error.message}</p>}<DialogFooter><Button type="button" variant="outline" disabled={removeGame.isPending} onClick={closeDialog}>Cancel</Button><Button type="button" variant="destructive" disabled={removeGame.isPending} onClick={() => removeGame.mutate(dialog.game.id)}>{removeGame.isPending ? 'Removing…' : 'Remove game'}</Button></DialogFooter></>}
-      {dialog?.kind === 'schedule' && <Field><FieldLabel htmlFor="game-division" required>Division</FieldLabel><Select value={scheduleDivision || null} onValueChange={(value) => setScheduleDivision(value ?? '')} disabled={pending} items={divisions.map((item) => ({ value: item.id, label: item.name }))}><SelectTrigger id="game-division" className="w-full" aria-required="true"><SelectValue placeholder="Select a division" /></SelectTrigger><SelectContent><SelectGroup>{divisions.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>}
-      {(dialog?.kind === 'schedule' || dialog?.kind === 'edit') && teamDivision && (registrations.isLoading ? <p>Loading teams…</p> : registrations.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load teams</AlertTitle><AlertDescription><p>{registrations.error.message}</p><Button variant="outline" size="sm" onClick={() => void registrations.refetch()}>Try again</Button></AlertDescription></Alert> : teams.length < 2 ? <p className="text-sm text-muted-foreground">Register at least two teams in this division to schedule a game.</p> : <Editor key={`${dialog.kind}-${teamDivision}-${game?.id ?? ''}`} title="Game details" path={dialog.kind === 'edit' ? `games/${dialog.game.id}` : `seasons/${season.id}/games`} method={dialog.kind === 'edit' ? 'PATCH' : 'POST'} fields={gameFields} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId), ...(dialog.kind === 'edit' ? { durationMinutes: Number(v.durationMinutes) } : {}) })} submitLabel={dialog.kind === 'edit' ? 'Save changes' : 'Schedule game'} alignActions="end" onSaved={() => saved(dialog.kind === 'edit' ? 'Schedule updated.' : 'Game scheduled.')} onCancel={closeDialog} onPendingChange={setPending} />)}
+      {dialog?.kind === 'schedule' && <ScheduleGameForm seasonId={season.id} divisions={divisions} divisionId={scheduleDivision} onDivisionChange={setScheduleDivision} teams={teams} teamsLoading={!!scheduleDivision && registrations.isFetching} teamsError={registrations.isError ? registrations.error.message : null} onRetryTeams={() => void registrations.refetch()} venues={venues} onClose={closeDialog} onSaved={() => saved('Game scheduled.')} onPendingChange={setPending} />}
+      {dialog?.kind === 'edit' && teamDivision && (registrations.isLoading ? <p>Loading teams…</p> : registrations.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load teams</AlertTitle><AlertDescription><p>{registrations.error.message}</p><Button variant="outline" size="sm" onClick={() => void registrations.refetch()}>Try again</Button></AlertDescription></Alert> : teams.length < 2 ? <p className="text-sm text-muted-foreground">Register at least two teams in this division to schedule a game.</p> : <Editor key={`${dialog.kind}-${teamDivision}-${game?.id ?? ''}`} title="Game details" path={`games/${dialog.game.id}`} method="PATCH" fields={gameFields} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} submitLabel="Save changes" alignActions="end" onSaved={() => saved('Schedule updated.')} onCancel={closeDialog} onPendingChange={setPending} />)}
       {dialog?.kind === 'score' && <Editor key={dialog.game.id} title="Final score" path={`games/${dialog.game.id}/score`} fields={[{ name: 'homeScore', label: `${dialog.game.home_name} score`, type: 'number', required: true, value: dialog.game.home_score }, { name: 'awayScore', label: `${dialog.game.away_name} score`, type: 'number', required: true, value: dialog.game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} submitLabel="Save score" alignActions="end" onSaved={() => saved('Final score saved.')} onCancel={closeDialog} onPendingChange={setPending} />}
     </DialogContent></Dialog>
   </div>
