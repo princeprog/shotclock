@@ -120,6 +120,10 @@ function resolveZonedTime(value: string, timeZone: string): string | null {
   }
 }
 
+function fixtureKey(game: Pick<ScheduleGame, 'divisionId' | 'stage' | 'round' | 'homeTeamId' | 'awayTeamId'>): string {
+  return [game.divisionId, game.stage, game.round, game.homeTeamId, game.awayTeamId].join(':')
+}
+
 function gameForSave(game: ScheduleGame, scheduledAt: string, venueId: string): SavedGame {
   return { divisionId: game.divisionId, homeTeamId: game.homeTeamId, awayTeamId: game.awayTeamId, round: game.round, stage: game.stage, scheduledAt, venueId, durationMinutes: game.durationMinutes }
 }
@@ -308,9 +312,12 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const validationReady = !!validationKey && settledValidation === validationKey && !validation.isFetching && !!validation.data && !validation.isError
 
   const preview = useMutation({
-    mutationFn: (input: ScheduleInput | { availability: Availability }) => leagueRequest<Preview>(`${path}/preview`, client, 'POST', input),
-    onSuccess: (result, input) => {
+    mutationFn: (input: (ScheduleInput | { availability: Availability }) & { pinned?: SavedGame[] }) => leagueRequest<Preview>(`${path}/preview`, client, 'POST', input),
+    onSuccess: (result, { pinned, ...input }) => {
       try {
+        // Kept games come back where the organizer put them; remember what the generator first chose so they can be reverted.
+        const keptSlots = new Set((pinned ?? []).map((game) => `${fixtureKey(game)}@${game.scheduledAt}@${game.venueId}`))
+        const generatedSlots = new Map((draft?.games ?? []).map((item) => [fixtureKey(item.game), item.generated]))
         if (!Array.isArray(result.games) || !Array.isArray(result.warnings) || !Array.isArray(result.divisions)) throw new Error()
         const ids = new Set<string>()
         for (const division of result.divisions) {
@@ -321,7 +328,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         const games = result.games.map((game) => {
           if (!game.divisionId || !game.divisionName || !includedIds.has(game.divisionId) || !game.homeTeamId || !game.awayTeamId || !game.homeName || !game.awayName || !game.venueId || !Number.isFinite(Date.parse(game.scheduledAt))) throw new Error()
           const localTime = formatInZone(game.scheduledAt, input.availability.timeZone)
-          return { game, localTime, originalLocalTime: localTime, venueId: game.venueId, kept: false, generated: { scheduledAt: game.scheduledAt, venueId: game.venueId } }
+          const kept = keptSlots.has(`${fixtureKey(game)}@${game.scheduledAt}@${game.venueId}`)
+          return { game, localTime, originalLocalTime: localTime, venueId: game.venueId, kept, generated: kept ? generatedSlots.get(fixtureKey(game)) : { scheduledAt: game.scheduledAt, venueId: game.venueId } }
         })
         const unplaced = result.unplaced ?? []
         if (!Array.isArray(unplaced) || unplaced.some((item) => !includedIds.has(item.divisionId) || !item.homeTeamId || !item.awayTeamId || typeof item.reason !== 'string')) throw new Error()
@@ -415,6 +423,21 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       return { ...item, game: { ...item.game, scheduledAt: slot.scheduledAt }, localTime, originalLocalTime: localTime, venueId: slot.venueId, kept: true }
     }) })
     setSuggestions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== `game-${index}`)))
+  }
+  function revertGame(index: number) {
+    setDraft((current) => current && { ...current, games: current.games.map((item, i) => {
+      if (i !== index || !item.generated) return item
+      const localTime = formatInZone(item.generated.scheduledAt, current.input.availability.timeZone)
+      return { ...item, game: { ...item.game, scheduledAt: item.generated.scheduledAt }, localTime, originalLocalTime: localTime, venueId: item.generated.venueId, kept: false }
+    }) })
+    setError('')
+  }
+  function regenerate() {
+    if (!draft) return
+    const pinned = draft.games.flatMap((item, index) => item.kept ? [draftGames[index]] : [])
+    if (invalidGameIndexes.length || pinned.some((game) => !game)) { setError('Fix the edited game times before regenerating.'); return }
+    setError('')
+    preview.mutate({ ...draft.input, pinned })
   }
   // A dragged game keeps its time of day; the conflict check runs again on the new date.
   function moveToDay(index: number, day: string) {
@@ -581,6 +604,10 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
         {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className="flex flex-col gap-4 border-t pt-6">
           <div><h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 font-medium">Review schedule · {draft.games.length} {draft.games.length === 1 ? 'game' : 'games'}</h3><p className="text-sm text-muted-foreground">Select a game to adjust its date, time or venue. Times are in {draft.input.availability.timeZone}.</p></div>
+          {draft.games.some((item) => item.kept) && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+            <p className="text-muted-foreground">{draft.games.filter((item) => item.kept).length} kept {draft.games.filter((item) => item.kept).length === 1 ? 'game stays' : 'games stay'} where you put {draft.games.filter((item) => item.kept).length === 1 ? 'it' : 'them'}. Regenerating schedules the other games around them.</p>
+            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={regenerate}>Regenerate other games</Button>
+          </div>}
           {(outsideSeason || otherWarnings.length > 0) && <Alert role="status"><AlertTitle>Please review</AlertTitle><AlertDescription><ul className="list-disc pl-4">{outsideSeason && <li>Some games are outside the season dates.</li>}{otherWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></AlertDescription></Alert>}
           {!draft.games.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
           {invalidGameIndexes.length > 0 && <Alert variant="destructive" role="alert"><AlertTitle>Check the edited game times</AlertTitle><AlertDescription>Choose valid, unambiguous local times and available venues before saving.</AlertDescription></Alert>}
@@ -621,20 +648,21 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               {rounds.map((round) => <div key={round} className="flex flex-col gap-2">
                 <h5 className="text-sm font-medium">Round {round}</h5>
                 <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).map(({ item, index }) => <AccordionItem key={index} value={String(index)}>
-            <AccordionTrigger id={`schedule-game-trigger-${index}`} className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="font-medium">{item.game.homeName} vs {item.game.awayName}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span>{invalidGameIndexes.includes(index) && <span className="text-xs text-destructive">Invalid or ambiguous local time or venue.</span>}{issues.filter((issue) => issue.index === index).map((issue, position) => <span key={position} className="flex flex-col text-xs"><span className="text-destructive">{issue.message}</span>{issueDetail(issue) && <span className="text-muted-foreground">{issueDetail(issue)}</span>}</span>)}</span></AccordionTrigger>
+            <AccordionTrigger id={`schedule-game-trigger-${index}`} className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="flex flex-wrap items-center gap-2 font-medium">{item.game.homeName} vs {item.game.awayName}{item.kept && <Badge variant="outline">Kept</Badge>}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span>{invalidGameIndexes.includes(index) && <span className="text-xs text-destructive">Invalid or ambiguous local time or venue.</span>}{issues.filter((issue) => issue.index === index).map((issue, position) => <span key={position} className="flex flex-col text-xs"><span className="text-destructive">{issue.message}</span>{issueDetail(issue) && <span className="text-muted-foreground">{issueDetail(issue)}</span>}</span>)}</span></AccordionTrigger>
             <AccordionContent className="flex flex-col gap-4 px-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <ScheduleDate id={`schedule-game-date-${index}`} label="Date" value={item.localTime.slice(0, 10)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${value}T${game.localTime.slice(11, 16)}` } : game) }); setError('') }} />
-              <ScheduleTime id={`schedule-game-time-${index}`} label="Time" value={item.localTime.slice(11, 16)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${game.localTime.slice(0, 10)}T${value}` } : game) }); setError('') }} />
+              <ScheduleDate id={`schedule-game-date-${index}`} label="Date" value={item.localTime.slice(0, 10)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${value}T${game.localTime.slice(11, 16)}`, kept: true } : game) }); setError('') }} />
+              <ScheduleTime id={`schedule-game-time-${index}`} label="Time" value={item.localTime.slice(11, 16)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${game.localTime.slice(0, 10)}T${value}`, kept: true } : game) }); setError('') }} />
             </div>
             <Field><FieldLabel htmlFor={`schedule-game-venue-${index}`} required>Venue</FieldLabel>
-              <Select value={item.venueId} disabled={pending} items={venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => ({ value: venue.id, label: venue.name }))} onValueChange={(value) => { if (value) { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, venueId: value } : game) }); setError('') } }}>
+              <Select value={item.venueId} disabled={pending} items={venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => ({ value: venue.id, label: venue.name }))} onValueChange={(value) => { if (value) { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, venueId: value, kept: true } : game) }); setError('') } }}>
                 <SelectTrigger id={`schedule-game-venue-${index}`} aria-required="true" className="w-full"><SelectValue placeholder="Choose a venue" /></SelectTrigger>
                 <SelectContent alignItemWithTrigger={false}><SelectGroup>{venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => <SelectItem key={venue.id} value={venue.id}>{venue.name}</SelectItem>)}</SelectGroup></SelectContent>
               </Select>
             </Field>
             <div className="flex flex-col gap-2">
-              <div><Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`game-${index}`]?.status === 'loading'} onClick={() => void findSlots(`game-${index}`, { index })}>Find open slots</Button></div>
+              <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`game-${index}`]?.status === 'loading'} onClick={() => void findSlots(`game-${index}`, { index })}>Find open slots</Button>
+                {item.kept && item.generated && <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => revertGame(index)}>Revert to generated time</Button>}</div>
               {slotList(`game-${index}`, (slot) => moveGame(index, slot))}
             </div>
             </AccordionContent>
