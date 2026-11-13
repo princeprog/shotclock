@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { CalendarDaysIcon, CircleAlertIcon, CircleCheckIcon, PlusIcon, Trash2Icon, XIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarSearchIcon, CircleAlertIcon, CircleCheckIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -140,6 +140,13 @@ function formatWallTime(value: string): string {
   return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
 }
 
+// A compact wall-time label for review rows, such as "Sat, Jan 2, 9:00 AM".
+function formatGameSlot(value: string): string {
+  const date = new Date(`${value}:00Z`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
+}
+
 function validateWindows(windows: PlayingWindow[]): string {
   if (!windows.length || windows.length > 20) return 'Add between 1 and 20 playing windows.'
   const validTime = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -152,9 +159,10 @@ function validateWindows(windows: PlayingWindow[]): string {
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const issueLabels: Record<IssueType, string> = {
-  team: 'Team overlaps or rest', venue: 'Court bookings', window: 'Outside playing hours', round: 'Round order',
-  blackout: 'Blackout dates', unavailable: 'Unavailable teams', daily_limit: 'Games per day', weekly_limit: 'Weekly pacing',
+  team: 'Team overlap', venue: 'Court booked', window: 'Outside playing hours', round: 'Round order',
+  blackout: 'Blackout date', unavailable: 'Team unavailable', daily_limit: 'Daily limit', weekly_limit: 'Weekly pacing',
 }
+const stageLabels: Record<ScheduleGame['stage'], string> = { preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }
 const paces: { value: Pace; label: string; description: string }[] = [
   { value: 'weekly', label: 'Weekly', description: 'Each team’s games are at least 7 days apart.' },
   { value: 'spread', label: 'Spread across dates', description: 'Rounds are spaced evenly from the start date to the end date.' },
@@ -401,6 +409,23 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const issues = validationReady ? validation.data?.issues ?? [] : []
   // Groups conflicts by type, counting each game once, so the summary can jump to the first one.
   const issueGroups = [...issues.reduce((groups, issue) => groups.set(issue.type ?? 'other', [...new Set([...(groups.get(issue.type ?? 'other') ?? []), issue.index])]), new Map<string, number[]>())]
+  const totalGames = draft ? draft.games.length + draft.unplaced.length : 0
+  const keptCount = draft?.games.filter((item) => item.kept).length ?? 0
+  const conflictCount = new Set([...issues.map((issue) => issue.index), ...invalidGameIndexes]).size
+  const reviewDates = [...new Set((draft?.games ?? []).map((item) => item.localTime.slice(0, 10)).filter((value) => isValid(parseISO(value))))].sort()
+  const firstDate = reviewDates[0]
+  const lastDate = reviewDates[reviewDates.length - 1]
+  const dateRange = !firstDate ? '' : firstDate === lastDate ? formatDate(parseISO(firstDate), 'MMM d, yyyy')
+    : `${formatDate(parseISO(firstDate), firstDate.slice(0, 4) === lastDate.slice(0, 4) ? 'MMM d' : 'MMM d, yyyy')} – ${formatDate(parseISO(lastDate), 'MMM d, yyyy')}`
+  const includedCount = draft?.divisions.filter((division) => division.reason === undefined).length ?? 0
+  const reviewFacts = draft ? [`${includedCount} ${includedCount === 1 ? 'division' : 'divisions'}`, dateRange, draft.input.availability.timeZone].filter(Boolean).join(' · ') : ''
+  const validationFailed = !!validationKey && settledValidation === validationKey && validation.isError
+  const reviewStatus = !draft?.games.length ? null
+    : invalidGameIndexes.length ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />Check edited times</Badge>
+      : validationFailed ? <span className="flex items-center gap-1 text-sm text-destructive">Couldn’t check conflicts<Button type="button" variant="link" size="sm" className="h-auto px-1" onClick={() => void validation.refetch()}>Retry</Button></span>
+        : !validationReady ? <Badge variant="secondary"><LoaderCircleIcon data-icon="inline-start" className="animate-spin" />Checking</Badge>
+          : conflictCount ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />{conflictCount} {conflictCount === 1 ? 'conflict' : 'conflicts'}</Badge>
+            : <Badge variant="secondary"><CircleCheckIcon data-icon="inline-start" />No conflicts</Badge>
   function focusGame(index: number) {
     setExpandedGame(String(index))
     window.setTimeout(() => document.getElementById(`schedule-game-trigger-${index}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 0)
@@ -462,7 +487,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     if (state.status === 'error') return <p className="text-sm text-destructive" role="alert">{state.error}</p>
     if (!state.slots.length) return <p className="text-sm text-muted-foreground" role="status">No open slot meets every rule. Change the settings or move another game.</p>
     return <ul aria-label="Open slots" className="flex flex-wrap gap-2">{state.slots.map((slot) => <li key={`${slot.scheduledAt}-${slot.venueId}`}>
-      <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => onUse(slot)}>Use {formatWallTime(formatInZone(slot.scheduledAt, draft.input.availability.timeZone))} · {venueName(slot.venueId)}</Button>
+      <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => onUse(slot)}>Use {formatGameSlot(formatInZone(slot.scheduledAt, draft.input.availability.timeZone))} · {venueName(slot.venueId)}</Button>
     </li>)}</ul>
   }
   function issueDetail(issue: Issue): string {
@@ -482,6 +507,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   }
   const outsideSeason = draft?.games.some((item) => isOutsideSeason(item.localTime, seasonStart, seasonEnd)) ?? false
   const otherWarnings = draft?.warnings.filter((warning) => !/^some games are outside the season dates\.?$/i.test(warning.trim())) ?? []
+  const notices = [...(outsideSeason ? ['Some games are outside the season dates.'] : []), ...otherWarnings]
   const reviewing = presentation === 'page' && !!hasPreview
 
   return <>
@@ -579,7 +605,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
         </div>
 
-        {showCapacity && <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
+        {showCapacity && !hasPreview && <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
           <div><h3 ref={capacityHeading} id="schedule-capacity-heading" className="scroll-mt-2 font-medium">Schedule capacity</h3><p className="text-sm text-muted-foreground">Check the number of games and available court slots before generating.</p></div>
           {estimate.isFetching && <p className="text-sm text-muted-foreground" role="status">Checking capacity…</p>}
           {!estimate.isFetching && estimate.isError && <Alert variant="destructive"><AlertTitle>Capacity check unavailable</AlertTitle><AlertDescription>{estimate.error.message} Try previewing again.</AlertDescription></Alert>}
@@ -602,75 +628,99 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
           </div>}
         </section>}
 
-        {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className="flex flex-col gap-4 border-t pt-6">
-          <div><h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 font-medium">Review schedule · {draft.games.length} {draft.games.length === 1 ? 'game' : 'games'}</h3><p className="text-sm text-muted-foreground">Select a game to adjust its date, time or venue. Times are in {draft.input.availability.timeZone}.</p></div>
-          {draft.games.some((item) => item.kept) && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-sm">
-            <p className="text-muted-foreground">{draft.games.filter((item) => item.kept).length} kept {draft.games.filter((item) => item.kept).length === 1 ? 'game stays' : 'games stay'} where you put {draft.games.filter((item) => item.kept).length === 1 ? 'it' : 'them'}. Regenerating schedules the other games around them.</p>
-            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={regenerate}>Regenerate other games</Button>
-          </div>}
-          {(outsideSeason || otherWarnings.length > 0) && <Alert role="status"><AlertTitle>Please review</AlertTitle><AlertDescription><ul className="list-disc pl-4">{outsideSeason && <li>Some games are outside the season dates.</li>}{otherWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></AlertDescription></Alert>}
-          {!draft.games.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
-          {invalidGameIndexes.length > 0 && <Alert variant="destructive" role="alert"><AlertTitle>Check the edited game times</AlertTitle><AlertDescription>Choose valid, unambiguous local times and available venues before saving.</AlertDescription></Alert>}
-          {!invalidGameIndexes.length && !validationReady && !validation.isError && <p className="text-sm text-muted-foreground" role="status">Checking the preview for conflicts…</p>}
-          {validationKey && settledValidation === validationKey && validation.isError && <Alert variant="destructive"><AlertTitle>Could not check this preview</AlertTitle><AlertDescription>{validation.error.message} <Button type="button" variant="link" size="sm" onClick={() => void validation.refetch()}>Retry</Button></AlertDescription></Alert>}
-          {validationReady && !!issues.length && <Alert variant="destructive" role="alert"><AlertTitle>Resolve schedule conflicts</AlertTitle><AlertDescription>
-            <p>Review the marked games below. Changes are checked again before saving.</p>
-            <ul aria-label="Conflicts by type" className="mt-2 flex flex-wrap gap-2">{issueGroups.map(([type, indexes]) => <li key={type}><Button type="button" variant="outline" size="sm" onClick={() => focusGame(indexes[0])}>{issueLabels[type as IssueType] ?? 'Other conflicts'} · {indexes.length} {indexes.length === 1 ? 'game' : 'games'}</Button></li>)}</ul>
-          </AlertDescription></Alert>}
-          {validationReady && !validation.data?.issues.length && <p className="text-sm text-muted-foreground" role="status">No scheduling conflicts found.</p>}
-          {draft.unplaced.length > 0 && <section aria-labelledby="schedule-unplaced-heading" className="flex flex-col gap-3 rounded-lg border border-dashed p-4">
-            <div><h4 id="schedule-unplaced-heading" className="font-medium">Needs a time · {draft.unplaced.length} {draft.unplaced.length === 1 ? 'game' : 'games'}</h4>
-              <p className="text-sm text-muted-foreground">These games didn’t fit with the current settings. Find an open slot for each one before saving, or change the settings and preview again.</p></div>
-            <ul className="flex flex-col divide-y">{draft.unplaced.map((item, position) => <li key={`${item.divisionId}-${item.round}-${item.homeTeamId}-${item.awayTeamId}`} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div><p className="text-sm font-medium">{item.homeName} vs {item.awayName}</p><p className="text-xs text-muted-foreground">{item.divisionName} · Round {item.round}</p><p className="text-xs text-muted-foreground">{item.reason}</p></div>
-                <Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`unplaced-${position}`]?.status === 'loading'} onClick={() => void findSlots(`unplaced-${position}`, { game: { divisionId: item.divisionId, homeTeamId: item.homeTeamId, awayTeamId: item.awayTeamId, round: item.round, stage: item.stage } })}>Find open slots</Button>
+        {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className={reviewing ? 'flex flex-col gap-6' : 'flex flex-col gap-6 border-t pt-6'}>
+          <div className="flex flex-col divide-y rounded-lg border">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 text-base font-semibold tabular-nums">{totalGames} {totalGames === 1 ? 'game' : 'games'}</h3>
+                <p className="text-sm text-muted-foreground">{reviewFacts}</p>
+              </div>
+              <div role="status" className="flex flex-wrap items-center gap-2">
+                {draft.unplaced.length > 0 && <Badge variant="outline">{draft.unplaced.length} need a time</Badge>}
+                {reviewStatus}
+              </div>
+            </div>
+            {issueGroups.length > 0 && <ul aria-label="Conflicts by type" className="flex flex-wrap gap-2 px-4 py-3">{issueGroups.map(([type, indexes]) => <li key={type}>
+              <Button type="button" variant="outline" size="sm" aria-label={`${issueLabels[type as IssueType] ?? 'Other'}: ${indexes.length} ${indexes.length === 1 ? 'game' : 'games'}`} onClick={() => focusGame(indexes[0])}>
+                <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />{issueLabels[type as IssueType] ?? 'Other'}<span className="tabular-nums text-muted-foreground">{indexes.length}</span>
+              </Button>
+            </li>)}</ul>}
+            {keptCount > 0 && <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+              <span className="text-muted-foreground">{keptCount} kept in place</span>
+              <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={regenerate}><RefreshCwIcon data-icon="inline-start" />Regenerate other games</Button>
+            </div>}
+            {notices.length > 0 && <ul className="flex flex-col gap-1 px-4 py-3 text-sm text-muted-foreground">{notices.map((notice) => <li key={notice} className="flex items-start gap-2"><CircleAlertIcon className="mt-0.5 size-4 shrink-0" />{notice}</li>)}</ul>}
+          </div>
+          {!draft.games.length && !draft.unplaced.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
+          {draft.unplaced.length > 0 && <section aria-labelledby="schedule-unplaced-heading" className="flex flex-col gap-2">
+            <h4 id="schedule-unplaced-heading" className="text-sm font-semibold">Needs a time</h4>
+            <ul className="divide-y rounded-lg border border-dashed">{draft.unplaced.map((item, position) => <li key={`${item.divisionId}-${item.round}-${item.homeTeamId}-${item.awayTeamId}`} className="flex flex-col gap-2 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <div className="min-w-0"><p className="text-sm font-medium">{item.homeName} vs {item.awayName}</p><p className="text-xs text-muted-foreground">{item.divisionName} · Round {item.round} · {item.reason}</p></div>
+                <Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`unplaced-${position}`]?.status === 'loading'} onClick={() => void findSlots(`unplaced-${position}`, { game: { divisionId: item.divisionId, homeTeamId: item.homeTeamId, awayTeamId: item.awayTeamId, round: item.round, stage: item.stage } })}><CalendarSearchIcon data-icon="inline-start" />Find open slots</Button>
               </div>
               {slotList(`unplaced-${position}`, (slot) => placeGame(position, slot))}
             </li>)}</ul>
           </section>}
-          <SchedulePreviewCalendar games={draft.games.map((item, index) => ({ index, localTime: item.localTime, homeName: item.game.homeName, awayName: item.game.awayName, divisionName: item.game.divisionName, venueName: venues.find((venue) => venue.id === item.venueId)?.name ?? '', conflict: invalidGameIndexes.includes(index) || !!(validationReady && validation.data?.issues.some((issue) => issue.index === index)) }))}
-            bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venues.find((venue) => venue.id === game.venueId)?.name ?? '' }))}
+          <SchedulePreviewCalendar games={draft.games.map((item, index) => ({ index, localTime: item.localTime, homeName: item.game.homeName, awayName: item.game.awayName, divisionName: item.game.divisionName, venueName: venueName(item.venueId), conflict: invalidGameIndexes.includes(index) || issues.some((issue) => issue.index === index) }))}
+            bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venueName(game.venueId) }))}
             loading={calendar.isFetching} error={calendar.isError ? calendar.error.message : ''} onRetry={() => void calendar.refetch()}
-            initialDate={draft.games[0]?.localTime.slice(0, 10) ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
+            initialDate={reviewDates[0] ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
             onSelect={focusGame} onMove={moveToDay} />
-          <div className="flex flex-col gap-5">{draft.divisions.map((division) => {
+          <div className="flex flex-col gap-8">{draft.divisions.map((division) => {
             const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
             const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
+            const note = division.reason !== undefined ? `Skipped · ${division.reason}`
+              : mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount < 4 ? 'Round robin only (fewer than four teams)'
+                : mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.playoffs === false ? 'No playoffs'
+                  : mode === 'playoffs' && division.playoffStage ? stageLabels[division.playoffStage as ScheduleGame['stage']] ?? '' : ''
             return <section key={division.id} className="flex flex-col gap-3" aria-labelledby={`schedule-division-${division.id}`}>
-              <div><h4 id={`schedule-division-${division.id}`} className="font-medium">{division.name}</h4>
-                <p className="text-sm text-muted-foreground">{division.teamCount} {division.teamCount === 1 ? 'team' : 'teams'} · {divisionGames.length} {divisionGames.length === 1 ? 'game' : 'games'}</p>
-                {division.reason !== undefined && <p className="text-sm text-muted-foreground">Skipped: {division.reason}</p>}
-                {division.reason === undefined && mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount < 4 && <p className="text-sm text-muted-foreground">Playoffs require at least four teams in this division.</p>}
-                {division.reason === undefined && mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount >= 4 && division.playoffs === false && <p className="text-sm text-muted-foreground">Playoffs are not included for this division.</p>}
-                {division.reason === undefined && mode === 'playoffs' && division.playoffStage && <p className="text-sm text-muted-foreground">Playoff stage: {division.playoffStage.replace('_', ' ')}</p>}
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-2">
+                <h4 id={`schedule-division-${division.id}`} className="font-semibold">{division.name}</h4>
+                <p className="text-sm text-muted-foreground">{[note, division.reason === undefined ? `${divisionGames.length} ${divisionGames.length === 1 ? 'game' : 'games'}` : ''].filter(Boolean).join(' · ')}</p>
               </div>
-              {rounds.map((round) => <div key={round} className="flex flex-col gap-2">
-                <h5 className="text-sm font-medium">Round {round}</h5>
-                <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).map(({ item, index }) => <AccordionItem key={index} value={String(index)}>
-            <AccordionTrigger id={`schedule-game-trigger-${index}`} className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="flex flex-wrap items-center gap-2 font-medium">{item.game.homeName} vs {item.game.awayName}{item.kept && <Badge variant="outline">Kept</Badge>}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span>{invalidGameIndexes.includes(index) && <span className="text-xs text-destructive">Invalid or ambiguous local time or venue.</span>}{issues.filter((issue) => issue.index === index).map((issue, position) => <span key={position} className="flex flex-col text-xs"><span className="text-destructive">{issue.message}</span>{issueDetail(issue) && <span className="text-muted-foreground">{issueDetail(issue)}</span>}</span>)}</span></AccordionTrigger>
-            <AccordionContent className="flex flex-col gap-4 px-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <ScheduleDate id={`schedule-game-date-${index}`} label="Date" value={item.localTime.slice(0, 10)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${value}T${game.localTime.slice(11, 16)}`, kept: true } : game) }); setError('') }} />
-              <ScheduleTime id={`schedule-game-time-${index}`} label="Time" value={item.localTime.slice(11, 16)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${game.localTime.slice(0, 10)}T${value}`, kept: true } : game) }); setError('') }} />
-            </div>
-            <Field><FieldLabel htmlFor={`schedule-game-venue-${index}`} required>Venue</FieldLabel>
-              <Select value={item.venueId} disabled={pending} items={venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => ({ value: venue.id, label: venue.name }))} onValueChange={(value) => { if (value) { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, venueId: value, kept: true } : game) }); setError('') } }}>
-                <SelectTrigger id={`schedule-game-venue-${index}`} aria-required="true" className="w-full"><SelectValue placeholder="Choose a venue" /></SelectTrigger>
-                <SelectContent alignItemWithTrigger={false}><SelectGroup>{venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => <SelectItem key={venue.id} value={venue.id}>{venue.name}</SelectItem>)}</SelectGroup></SelectContent>
-              </Select>
-            </Field>
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`game-${index}`]?.status === 'loading'} onClick={() => void findSlots(`game-${index}`, { index })}>Find open slots</Button>
-                {item.kept && item.generated && <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => revertGame(index)}>Revert to generated time</Button>}</div>
-              {slotList(`game-${index}`, (slot) => moveGame(index, slot))}
-            </div>
-            </AccordionContent>
-          </AccordionItem>)}</Accordion>
+              {rounds.map((round) => <div key={round} className="flex flex-col gap-1.5">
+                <h5 className="text-xs font-medium text-muted-foreground">Round {round}</h5>
+                <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).sort((a, b) => a.item.localTime.localeCompare(b.item.localTime)).map(({ item, index }) => {
+                  const gameIssues = issues.filter((issue) => issue.index === index)
+                  const invalid = invalidGameIndexes.includes(index)
+                  return <AccordionItem key={index} value={String(index)}>
+                    <AccordionTrigger id={`schedule-game-trigger-${index}`} className="items-center gap-3 px-4 py-2.5 hover:no-underline">
+                      <span className="grid min-w-0 flex-1 gap-x-4 gap-y-0.5 text-left sm:grid-cols-[10.5rem_minmax(0,1fr)_7rem] sm:items-center">
+                        <span className="text-sm font-normal tabular-nums text-muted-foreground">{formatGameSlot(item.localTime)}</span>
+                        <span className="flex min-w-0 items-center gap-2 font-medium"><span className="truncate">{item.game.homeName} vs {item.game.awayName}</span>{item.game.stage !== 'preliminary' && <Badge variant="secondary">{stageLabels[item.game.stage]}</Badge>}{item.kept && <Badge variant="outline">Kept</Badge>}
+                          {(invalid || gameIssues.length > 0) && <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-destructive"><CircleAlertIcon className="size-3.5" />{invalid ? 'Check time' : issueLabels[gameIssues[0].type as IssueType] ?? 'Conflict'}{gameIssues.length > 1 && <span className="tabular-nums">+{gameIssues.length - 1}</span>}</span>}</span>
+                        <span className="truncate text-sm font-normal text-muted-foreground">{venueName(item.venueId)}</span>
+                      </span>
+                    </AccordionTrigger>
+                    <AccordionContent className="flex flex-col gap-4 px-4 pb-4">
+                      {(invalid || gameIssues.length > 0) && <ul aria-label="Conflicts" className="flex flex-col gap-2 rounded-md bg-destructive/5 px-3 py-2 text-sm">
+                        {invalid && <li className="text-destructive">Choose a valid time and an available venue.</li>}
+                        {gameIssues.map((issue, position) => <li key={position}><p className="text-destructive">{issue.message}</p>{issueDetail(issue) && <p className="text-xs text-muted-foreground">{issueDetail(issue)}</p>}</li>)}
+                      </ul>}
+                      <div className="grid gap-4 lg:grid-cols-[1fr_1.4fr_1fr]">
+                        <ScheduleDate id={`schedule-game-date-${index}`} label="Date" value={item.localTime.slice(0, 10)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${value}T${game.localTime.slice(11, 16)}`, kept: true } : game) }); setError('') }} />
+                        <ScheduleTime id={`schedule-game-time-${index}`} label="Time" value={item.localTime.slice(11, 16)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${game.localTime.slice(0, 10)}T${value}`, kept: true } : game) }); setError('') }} />
+                        <Field><FieldLabel htmlFor={`schedule-game-venue-${index}`} required>Venue</FieldLabel>
+                          <Select value={item.venueId} disabled={pending} items={venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => ({ value: venue.id, label: venue.name }))} onValueChange={(value) => { if (value) { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, venueId: value, kept: true } : game) }); setError('') } }}>
+                            <SelectTrigger id={`schedule-game-venue-${index}`} aria-required="true" className="w-full"><SelectValue placeholder="Choose a venue" /></SelectTrigger>
+                            <SelectContent alignItemWithTrigger={false}><SelectGroup>{venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => <SelectItem key={venue.id} value={venue.id}>{venue.name}</SelectItem>)}</SelectGroup></SelectContent>
+                          </Select>
+                        </Field>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`game-${index}`]?.status === 'loading'} onClick={() => void findSlots(`game-${index}`, { index })}><CalendarSearchIcon data-icon="inline-start" />Find open slots</Button>
+                        {item.kept && item.generated && <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => revertGame(index)}><RotateCcwIcon data-icon="inline-start" />Revert</Button>}
+                      </div>
+                      {slotList(`game-${index}`, (slot) => moveGame(index, slot))}
+                    </AccordionContent>
+                  </AccordionItem>
+                })}</Accordion>
               </div>)}
             </section>
           })}</div>
         </section>}
+
       </div>
       {(preview.isError || error || save.isError) && <div className="border-t px-6 py-3"><Alert variant="destructive" role="alert"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error || (preview.isError ? preview.error.message : save.error?.message)}</AlertDescription></Alert></div>}
       <DialogFooter className={presentation === 'page' ? 'border-t py-4' : 'border-t px-6 py-4'}>

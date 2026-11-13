@@ -187,13 +187,25 @@ test('conflicts name the related game and team, and the summary jumps to the fir
   assert.match(text, /A1 · With B1 vs Away · Jan 5, 2026, 9:00 AM · Court/)
   const summary = tree.find((n) => n.type === 'ul' && n.props['aria-label'] === 'Conflicts by type')
   const buttons = nodes(summary).filter((n) => n.type === 'Button')
-  assert.deepEqual(buttons.map((button) => nodes(button).filter((n) => typeof n === 'string' || typeof n === 'number').join('')), ['Court bookings · 1 game', 'Team overlaps or rest · 2 games'])
+  assert.deepEqual(buttons.map((button) => button.props['aria-label']), ['Court booked: 1 game', 'Team overlap: 2 games'])
   buttons[1].props.onClick()
   tree = h.render()
   assert.ok(tree.some((n) => n.type === 'Accordion' && n.props.value.includes('1')))
 })
 
 const label = (node) => nodes(node).filter((n) => typeof n === 'string' || typeof n === 'number').join('')
+
+test('review opens with a compact summary instead of the capacity panel', async () => {
+  const h = harness(); h.setup(); await h.preview()
+  const tree = h.render()
+  assert.equal(tree.some((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-capacity-heading'), false)
+  const heading = tree.find((n) => n.type === 'h3' && n.props.id === 'schedule-preview-heading')
+  assert.equal(label(heading), '3 games')
+  const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
+  assert.match(text, /2 divisions · Jan 5, 2026 · Asia\/Manila/)
+  assert.match(text, /No conflicts/)
+  assert.doesNotMatch(text, /Select a game to adjust/)
+})
 
 test('unplaced games block saving until a suggested slot places them', async () => {
   const unplaced = [{ divisionId: 'a', divisionName: 'Adults', homeTeamId: 'A2', awayTeamId: 'A3', homeName: 'A2', awayName: 'A3', round: 2, stage: 'preliminary', reason: 'No court is free.' }]
@@ -231,7 +243,7 @@ test('a draft game can move to a suggested open slot', async () => {
   assert.deepEqual(JSON.parse(JSON.stringify(h.calls[1][3].target)), { index: 2 })
   tree = h.render()
   const use = tree.find((n) => n.type === 'Button' && label(n).startsWith('Use'))
-  assert.match(label(use), /Jan 6, 2026, 11:00 AM · Court/)
+  assert.match(label(use), /Tue, Jan 6, 11:00 AM · Court/)
   use.props.onClick()
   tree = h.render()
   tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
@@ -270,7 +282,7 @@ test('edited games are kept when regenerating and can be reverted', async () => 
   tree = fresh.render()
   tree.find((n) => n.type?.name === 'ScheduleDate' && n.props.id === 'schedule-game-date-0').props.onChange('2026-01-06')
   tree = fresh.render()
-  tree.find((n) => n.type === 'Button' && nodes(n).includes('Revert to generated time')).props.onClick()
+  tree.find((n) => n.type === 'Button' && nodes(n).includes('Revert')).props.onClick()
   tree = fresh.render()
   assert.equal(tree.some((n) => n.type === 'Badge' && nodes(n).includes('Kept')), false)
   tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
