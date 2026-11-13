@@ -59,7 +59,10 @@ type PlayingWindow = {
 type WindowDraft = PlayingWindow & { id: number }
 type ScheduleInput = { availability: Availability; format: 'single' | 'double'; playoffs: boolean; thirdPlace: boolean }
 type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; playoffs?: boolean; playoffStage?: string | null; gameCount?: number }
-type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[] }
+type Unplaced = Pick<ScheduleGame, 'divisionId' | 'divisionName' | 'homeTeamId' | 'awayTeamId' | 'homeName' | 'awayName' | 'round' | 'stage'> & { reason: string }
+type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[]; unplaced?: Unplaced[] }
+type Slot = { scheduledAt: string; venueId: string }
+type Suggestions = { status: 'loading' | 'done' | 'error'; slots: Slot[]; error?: string }
 type Estimate = { capacity: number; required: number; divisions: DivisionPreview[] }
 type CalendarBooking = { id: string; scheduledAt: string; durationMinutes: number; venueId: string; homeName: string; awayName: string; divisionName: string }
 type IssueType = 'team' | 'venue' | 'window' | 'round' | 'blackout' | 'unavailable' | 'daily_limit' | 'weekly_limit'
@@ -67,7 +70,8 @@ type Issue = { index: number; type?: IssueType; message: string; teamId?: string
 type ExistingConflict = { id: string; scheduledAt: string; venueName: string | null; homeName: string; awayName: string; divisionName: string }
 type Validation = { issues: Issue[]; existingGames?: ExistingConflict[] }
 type SavedGame = Omit<ScheduleGame, 'homeName' | 'awayName' | 'divisionName'>
-type GameDraft = { game: ScheduleGame; localTime: string; originalLocalTime: string; venueId: string }
+// kept marks games the organizer moved; generated holds the time and venue the generator chose, for reverting.
+type GameDraft = { game: ScheduleGame; localTime: string; originalLocalTime: string; venueId: string; kept: boolean; generated?: Slot }
 type Props = {
   seasonId: string
   divisionId?: string
@@ -252,10 +256,11 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [blackoutDates, setBlackoutDates] = useState<string[]>([])
   const nextTeamRowId = useRef(0)
   const [teamRows, setTeamRows] = useState<TeamUnavailabilityDraft[]>([])
-  const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; warnings: string[]; divisions: DivisionPreview[]; seasonId: string; mode: Props['mode'] } | null>(null)
+  const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; unplaced: Unplaced[]; warnings: string[]; divisions: DivisionPreview[]; seasonId: string; mode: Props['mode'] } | null>(null)
   const [error, setError] = useState('')
   const [showCapacity, setShowCapacity] = useState(false)
   const [expandedGame, setExpandedGame] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<Record<string, Suggestions>>({})
   const previewHeading = useRef<HTMLHeadingElement>(null)
   const capacityHeading = useRef<HTMLHeadingElement>(null)
   const wasPreviewed = useRef(false)
@@ -283,12 +288,14 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
   let validationKey = ''
   const invalidGameIndexes: number[] = []
+  let draftGames: SavedGame[] = []
   if (draft && draft.seasonId === seasonId && draft.mode === mode) {
     const games = draft.games.map((item, index) => {
       const scheduledAt = item.localTime === item.originalLocalTime ? item.game.scheduledAt : resolveZonedTime(item.localTime, draft.input.availability.timeZone)
       if (!scheduledAt || !draft.input.availability.venueIds.includes(item.venueId)) invalidGameIndexes.push(index)
       return gameForSave(item.game, scheduledAt ?? item.game.scheduledAt, item.venueId)
     })
+    draftGames = games
     if (!invalidGameIndexes.length && games.length) validationKey = JSON.stringify({ ...draft.input, games, divisionIds: draft.divisions.filter((division) => division.reason === undefined).map((division) => division.id) })
   }
   const settledValidation = useDebouncedValue(validationKey)
@@ -314,9 +321,12 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         const games = result.games.map((game) => {
           if (!game.divisionId || !game.divisionName || !includedIds.has(game.divisionId) || !game.homeTeamId || !game.awayTeamId || !game.homeName || !game.awayName || !game.venueId || !Number.isFinite(Date.parse(game.scheduledAt))) throw new Error()
           const localTime = formatInZone(game.scheduledAt, input.availability.timeZone)
-          return { game, localTime, originalLocalTime: localTime, venueId: game.venueId }
+          return { game, localTime, originalLocalTime: localTime, venueId: game.venueId, kept: false, generated: { scheduledAt: game.scheduledAt, venueId: game.venueId } }
         })
-        setDraft({ input, games, warnings: result.warnings, divisions: result.divisions, seasonId, mode })
+        const unplaced = result.unplaced ?? []
+        if (!Array.isArray(unplaced) || unplaced.some((item) => !includedIds.has(item.divisionId) || !item.homeTeamId || !item.awayTeamId || typeof item.reason !== 'string')) throw new Error()
+        setSuggestions({})
+        setDraft({ input, games, unplaced, warnings: result.warnings, divisions: result.divisions, seasonId, mode })
       } catch {
         setError('The preview contained incomplete game details. Please try again.')
       }
@@ -336,6 +346,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
   function changed() {
     setDraft(null)
+    setSuggestions({})
     setError('')
     setShowCapacity(false)
     preview.reset()
@@ -365,7 +376,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   }
 
   function saveSchedule() {
-    if (!draft || draft.seasonId !== seasonId || draft.mode !== mode || !draft.games.length || pending || !validationReady || !!validation.data?.issues.length) return
+    if (!draft || draft.seasonId !== seasonId || draft.mode !== mode || !draft.games.length || !!draft.unplaced.length || pending || !validationReady || !!validation.data?.issues.length) return
     setError('')
     const games: SavedGame[] = []
     for (const [index, item] of draft.games.entries()) {
@@ -385,6 +396,46 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   function focusGame(index: number) {
     setExpandedGame(String(index))
     window.setTimeout(() => document.getElementById(`schedule-game-trigger-${index}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 0)
+  }
+  async function findSlots(key: string, target: { index: number } | { game: Pick<ScheduleGame, 'divisionId' | 'homeTeamId' | 'awayTeamId' | 'round' | 'stage'> }) {
+    if (!draft) return
+    if (invalidGameIndexes.length) { setSuggestions((current) => ({ ...current, [key]: { status: 'error', slots: [], error: 'Fix the edited game times first.' } })); return }
+    setSuggestions((current) => ({ ...current, [key]: { status: 'loading', slots: [] } }))
+    try {
+      const result = await leagueRequest<{ suggestions: Slot[] }>(`${path}/suggest`, client, 'POST', { ...draft.input, games: draftGames, divisionIds: draft.divisions.filter((division) => division.reason === undefined).map((division) => division.id), target })
+      setSuggestions((current) => ({ ...current, [key]: { status: 'done', slots: Array.isArray(result.suggestions) ? result.suggestions : [] } }))
+    } catch (cause) {
+      setSuggestions((current) => ({ ...current, [key]: { status: 'error', slots: [], error: cause instanceof Error ? cause.message : 'Open slots could not be loaded.' } }))
+    }
+  }
+  function moveGame(index: number, slot: Slot) {
+    setDraft((current) => current && { ...current, games: current.games.map((item, i) => {
+      if (i !== index) return item
+      const localTime = formatInZone(slot.scheduledAt, current.input.availability.timeZone)
+      return { ...item, game: { ...item.game, scheduledAt: slot.scheduledAt }, localTime, originalLocalTime: localTime, venueId: slot.venueId, kept: true }
+    }) })
+    setSuggestions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== `game-${index}`)))
+  }
+  function placeGame(position: number, slot: Slot) {
+    setDraft((current) => {
+      const item = current?.unplaced[position]
+      if (!current || !item) return current
+      const localTime = formatInZone(slot.scheduledAt, current.input.availability.timeZone)
+      const game: ScheduleGame = { divisionId: item.divisionId, divisionName: item.divisionName, homeTeamId: item.homeTeamId, awayTeamId: item.awayTeamId, homeName: item.homeName, awayName: item.awayName,
+        round: item.round, stage: item.stage, scheduledAt: slot.scheduledAt, venueId: slot.venueId, durationMinutes: current.input.availability.durationMinutes }
+      return { ...current, unplaced: current.unplaced.filter((_, i) => i !== position), games: [...current.games, { game, localTime, originalLocalTime: localTime, venueId: slot.venueId, kept: true }] }
+    })
+    setSuggestions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith('unplaced-'))))
+  }
+  function slotList(key: string, onUse: (slot: Slot) => void) {
+    const state = suggestions[key]
+    if (!state || !draft) return null
+    if (state.status === 'loading') return <p className="text-sm text-muted-foreground" role="status">Finding open slots…</p>
+    if (state.status === 'error') return <p className="text-sm text-destructive" role="alert">{state.error}</p>
+    if (!state.slots.length) return <p className="text-sm text-muted-foreground" role="status">No open slot meets every rule. Change the settings or move another game.</p>
+    return <ul aria-label="Open slots" className="flex flex-wrap gap-2">{state.slots.map((slot) => <li key={`${slot.scheduledAt}-${slot.venueId}`}>
+      <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => onUse(slot)}>Use {formatWallTime(formatInZone(slot.scheduledAt, draft.input.availability.timeZone))} · {venueName(slot.venueId)}</Button>
+    </li>)}</ul>
   }
   function issueDetail(issue: Issue): string {
     if (!draft) return ''
@@ -535,6 +586,17 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
             <ul aria-label="Conflicts by type" className="mt-2 flex flex-wrap gap-2">{issueGroups.map(([type, indexes]) => <li key={type}><Button type="button" variant="outline" size="sm" onClick={() => focusGame(indexes[0])}>{issueLabels[type as IssueType] ?? 'Other conflicts'} · {indexes.length} {indexes.length === 1 ? 'game' : 'games'}</Button></li>)}</ul>
           </AlertDescription></Alert>}
           {validationReady && !validation.data?.issues.length && <p className="text-sm text-muted-foreground" role="status">No scheduling conflicts found.</p>}
+          {draft.unplaced.length > 0 && <section aria-labelledby="schedule-unplaced-heading" className="flex flex-col gap-3 rounded-lg border border-dashed p-4">
+            <div><h4 id="schedule-unplaced-heading" className="font-medium">Needs a time · {draft.unplaced.length} {draft.unplaced.length === 1 ? 'game' : 'games'}</h4>
+              <p className="text-sm text-muted-foreground">These games didn’t fit with the current settings. Find an open slot for each one before saving, or change the settings and preview again.</p></div>
+            <ul className="flex flex-col divide-y">{draft.unplaced.map((item, position) => <li key={`${item.divisionId}-${item.round}-${item.homeTeamId}-${item.awayTeamId}`} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div><p className="text-sm font-medium">{item.homeName} vs {item.awayName}</p><p className="text-xs text-muted-foreground">{item.divisionName} · Round {item.round}</p><p className="text-xs text-muted-foreground">{item.reason}</p></div>
+                <Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`unplaced-${position}`]?.status === 'loading'} onClick={() => void findSlots(`unplaced-${position}`, { game: { divisionId: item.divisionId, homeTeamId: item.homeTeamId, awayTeamId: item.awayTeamId, round: item.round, stage: item.stage } })}>Find open slots</Button>
+              </div>
+              {slotList(`unplaced-${position}`, (slot) => placeGame(position, slot))}
+            </li>)}</ul>
+          </section>}
           <SchedulePreviewCalendar games={draft.games.map((item, index) => ({ index, localTime: item.localTime, homeName: item.game.homeName, awayName: item.game.awayName, divisionName: item.game.divisionName, venueName: venues.find((venue) => venue.id === item.venueId)?.name ?? '', conflict: invalidGameIndexes.includes(index) || !!(validationReady && validation.data?.issues.some((issue) => issue.index === index)) }))}
             bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venues.find((venue) => venue.id === game.venueId)?.name ?? '' }))}
             loading={calendar.isFetching} error={calendar.isError ? calendar.error.message : ''} onRetry={() => void calendar.refetch()}
@@ -566,6 +628,10 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
                 <SelectContent alignItemWithTrigger={false}><SelectGroup>{venues.filter((venue) => draft.input.availability.venueIds.includes(venue.id)).map((venue) => <SelectItem key={venue.id} value={venue.id}>{venue.name}</SelectItem>)}</SelectGroup></SelectContent>
               </Select>
             </Field>
+            <div className="flex flex-col gap-2">
+              <div><Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`game-${index}`]?.status === 'loading'} onClick={() => void findSlots(`game-${index}`, { index })}>Find open slots</Button></div>
+              {slotList(`game-${index}`, (slot) => moveGame(index, slot))}
+            </div>
             </AccordionContent>
           </AccordionItem>)}</Accordion>
               </div>)}
@@ -577,7 +643,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       <DialogFooter className={presentation === 'page' ? 'border-t py-4' : 'border-t px-6 py-4'}>
         <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
         {reviewing ? <Button type="button" variant="outline" disabled={pending} onClick={() => { if (confirmDiscardSchedulePreview()) { setDraft(null); setShowCapacity(false); preview.reset() } }}>Edit settings</Button> : <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending}>{estimate.isFetching ? 'Checking capacity…' : preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>}
-        {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
+        {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !!draft.unplaced.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
       </DialogFooter>
     </form>
   </>

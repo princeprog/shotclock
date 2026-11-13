@@ -83,7 +83,7 @@ test('season saves and previews accept at most 2 MiB', async () => {
 test('season preview diagnostics have bounded, owner-protected gateway routes', async () => {
   const sizedBody = (size) => `{"value":"${'x'.repeat(size - 12)}"}`
   for (const kind of ['schedule', 'playoffs']) {
-    for (const action of ['estimate', 'validate']) {
+    for (const action of ['estimate', 'validate', 'suggest']) {
       const path = `seasons/${id}/${kind}/${action}`
       assert.equal((await request('POST', path, '{}')).status, 200)
       assert.equal((await request('POST', path, '{}', { origin: 'https://evil.test' })).status, 403)

@@ -25,7 +25,7 @@ function harness(mode = 'preliminary', result = response, diagnostics = {}) {
       useEffect(effect) { effect() }, useSyncExternalStore() { return 'Asia/Manila' },
     }
     if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: [{ id: 'b', name: 'Boys', teams: [{ id: 'B1', name: 'B1' }, { id: 'B2', name: 'B2' }] }] } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [] }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
-    if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : {} } }
+    if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : args[0].endsWith('/suggest') ? (diagnostics.suggestions ?? { suggestions: [] }) : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
     if (name === '@/lib/schedule-navigation-guard') return { confirmDiscardSchedulePreview: () => true }
@@ -191,6 +191,52 @@ test('conflicts name the related game and team, and the summary jumps to the fir
   buttons[1].props.onClick()
   tree = h.render()
   assert.ok(tree.some((n) => n.type === 'Accordion' && n.props.value.includes('1')))
+})
+
+const label = (node) => nodes(node).filter((n) => typeof n === 'string' || typeof n === 'number').join('')
+
+test('unplaced games block saving until a suggested slot places them', async () => {
+  const unplaced = [{ divisionId: 'a', divisionName: 'Adults', homeTeamId: 'A2', awayTeamId: 'A3', homeName: 'A2', awayName: 'A3', round: 2, stage: 'preliminary', reason: 'No court is free.' }]
+  const h = harness('preliminary', { ...response, unplaced }, { suggestions: { suggestions: [{ scheduledAt: '2026-01-12T01:00:00.000Z', venueId: 'court' }] } }); h.setup(); await h.preview()
+  let tree = h.render()
+  const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
+  assert.match(text, /Needs a time/)
+  assert.match(text, /No court is free\./)
+  assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.disabled, true)
+  const section = tree.find((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-unplaced-heading')
+  nodes(section).find((n) => n.type === 'Button' && nodes(n).includes('Find open slots')).props.onClick()
+  await new Promise(setImmediate)
+  const [path, , , body] = h.calls[1]
+  assert.equal(path, 'seasons/s1/schedule/suggest')
+  assert.deepEqual(JSON.parse(JSON.stringify(body.target)), { game: { divisionId: 'a', homeTeamId: 'A2', awayTeamId: 'A3', round: 2, stage: 'preliminary' } })
+  assert.equal(body.games.length, 3)
+  assert.equal('pinned' in body, false)
+  tree = h.render()
+  nodes(tree.find((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-unplaced-heading')).find((n) => n.type === 'Button' && label(n).startsWith('Use')).props.onClick()
+  tree = h.render()
+  assert.equal(tree.some((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-unplaced-heading'), false)
+  tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
+  await new Promise(setImmediate)
+  const saved = h.calls.at(-1)[3].games
+  assert.equal(saved.length, 4)
+  assert.deepEqual(JSON.parse(JSON.stringify(saved[3])), { divisionId: 'a', homeTeamId: 'A2', awayTeamId: 'A3', round: 2, stage: 'preliminary', scheduledAt: '2026-01-12T01:00:00.000Z', venueId: 'court', durationMinutes: 60 })
+})
+
+test('a draft game can move to a suggested open slot', async () => {
+  const h = harness('preliminary', response, { suggestions: { suggestions: [{ scheduledAt: '2026-01-06T03:00:00.000Z', venueId: 'court' }] } }); h.setup(); await h.preview()
+  let tree = h.render()
+  tree.find((n) => n.type === 'Button' && nodes(n).includes('Find open slots')).props.onClick()
+  await new Promise(setImmediate)
+  // Games are listed by division and round, so the first game shown is preview game 2 (Boys, round 1).
+  assert.deepEqual(JSON.parse(JSON.stringify(h.calls[1][3].target)), { index: 2 })
+  tree = h.render()
+  const use = tree.find((n) => n.type === 'Button' && label(n).startsWith('Use'))
+  assert.match(label(use), /Jan 6, 2026, 11:00 AM · Court/)
+  use.props.onClick()
+  tree = h.render()
+  tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
+  await new Promise(setImmediate)
+  assert.equal(h.calls.at(-1)[3].games[2].scheduledAt, '2026-01-06T03:00:00.000Z')
 })
 
 test('settings send pacing, limits, blackout dates and team availability inside the date range', async () => {

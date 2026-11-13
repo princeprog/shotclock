@@ -5,7 +5,7 @@ import { isTrustedMutation } from '@/lib/auth-security'
 const uuid = '[0-9a-fA-F-]{36}'
 const routes: Record<string, RegExp[]> = {
   GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions|schedule/status)|teams/${uuid}|season-teams/${uuid}(/roster)?|games/${uuid}/schedule-history|divisions/${uuid}/schedule/status)$`)],
-  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/(score|forfeit)|(divisions|seasons)/${uuid}/(schedule|playoffs)(/preview)?|seasons/${uuid}/(schedule|playoffs)/(estimate|validate)|seasons/${uuid}/schedule/calendar)$`)],
+  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/(score|forfeit)|(divisions|seasons)/${uuid}/(schedule|playoffs)(/preview)?|seasons/${uuid}/(schedule|playoffs)/(estimate|validate|suggest)|seasons/${uuid}/schedule/calendar)$`)],
   PATCH: [new RegExp(`^(organizations|leagues|seasons|teams|season-teams|rosters|games|venues|divisions|players)/${uuid}$`)],
   DELETE: [new RegExp(`^(divisions|season-teams|rosters|games)/${uuid}$`)],
 }
@@ -37,8 +37,8 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
     if (request.method !== 'DELETE') {
       if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) return NextResponse.json({ error: 'Invalid request' }, { status: 415 })
       const saveSchedule = request.method === 'POST' && new RegExp(`^(divisions|seasons)/${uuid}/(schedule|playoffs)(?:/validate)?$`).exec(route)
-      // Season previews and estimates can carry team availability for every team, so they share the season save limit.
-      const seasonPlanning = request.method === 'POST' && new RegExp(`^seasons/${uuid}/(schedule|playoffs)/(preview|estimate)$`).test(route)
+      // Season previews, estimates and suggestions can carry team availability and the whole draft, so they share the season save limit.
+      const seasonPlanning = request.method === 'POST' && new RegExp(`^seasons/${uuid}/(schedule|playoffs)/(preview|estimate|suggest)$`).test(route)
       const limit = saveSchedule ? (saveSchedule[1] === 'seasons' ? 2 * 1024 * 1024 : 256 * 1024) : seasonPlanning ? 2 * 1024 * 1024 : 8192
       const boundedBody = await readBoundedBody(request, limit)
       if (boundedBody === null) return NextResponse.json({ error: 'Request too large' }, { status: 413 })
