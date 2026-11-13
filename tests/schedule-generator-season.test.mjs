@@ -239,6 +239,16 @@ test('a draft game can move to a suggested open slot', async () => {
   assert.equal(h.calls.at(-1)[3].games[2].scheduledAt, '2026-01-06T03:00:00.000Z')
 })
 
+test('a game dragged to another day keeps its time of day', async () => {
+  const h = harness(); h.setup(); await h.preview()
+  let tree = h.render()
+  tree.find((n) => n.type === 'SchedulePreviewCalendar').props.onMove(0, '2026-01-07')
+  tree = h.render()
+  tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
+  await new Promise(setImmediate)
+  assert.equal(h.calls.at(-1)[3].games[0].scheduledAt, '2026-01-07T01:00:00.000Z')
+})
+
 test('settings send pacing, limits, blackout dates and team availability inside the date range', async () => {
   const h = harness(); h.setup()
   let tree = h.render()

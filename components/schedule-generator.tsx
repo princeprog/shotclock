@@ -416,6 +416,11 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     }) })
     setSuggestions((current) => Object.fromEntries(Object.entries(current).filter(([key]) => key !== `game-${index}`)))
   }
+  // A dragged game keeps its time of day; the conflict check runs again on the new date.
+  function moveToDay(index: number, day: string) {
+    setDraft((current) => current && { ...current, games: current.games.map((item, i) => i === index ? { ...item, localTime: `${day}T${item.localTime.slice(11, 16)}`, kept: true } : item) })
+    setError('')
+  }
   function placeGame(position: number, slot: Slot) {
     setDraft((current) => {
       const item = current?.unplaced[position]
@@ -601,7 +606,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
             bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venues.find((venue) => venue.id === game.venueId)?.name ?? '' }))}
             loading={calendar.isFetching} error={calendar.isError ? calendar.error.message : ''} onRetry={() => void calendar.refetch()}
             initialDate={draft.games[0]?.localTime.slice(0, 10) ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
-            onSelect={focusGame} />
+            onSelect={focusGame} onMove={moveToDay} />
           <div className="flex flex-col gap-5">{draft.divisions.map((division) => {
             const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
             const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
