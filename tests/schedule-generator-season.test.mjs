@@ -18,7 +18,7 @@ function nodes(element) {
 }
 function harness(mode = 'preliminary', result = response, diagnostics = {}) {
   const state = []; let cursor = 0; const calls = []; let estimateData; let estimateError
-  const context = { exports: {}, window: { setTimeout: (callback) => { callback(); return 1 }, clearTimeout() {} }, require(name) {
+  const context = { exports: {}, document: { getElementById: () => null }, window: { setTimeout: (callback) => { callback(); return 1 }, clearTimeout() {} }, require(name) {
     if (name === 'react') return {
       useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (value) => { state[i] = typeof value === 'function' ? value(state[i]) : value }] },
       useRef(initial) { const i = cursor++; return state[i] ??= { current: initial } },
@@ -172,6 +172,26 @@ test('conflicts and pending checks both prevent saving', async () => {
   }
 })
 
+
+test('conflicts name the related game and team, and the summary jumps to the first game', async () => {
+  const issues = [
+    { index: 0, type: 'venue', message: 'Venue conflict: this court is already booked.', with: { kind: 'existing', id: 'old' } },
+    { index: 1, type: 'team', teamId: 'A1', message: 'Team conflict: a team is playing.', with: { kind: 'draft', index: 2 } },
+    { index: 2, type: 'team', teamId: 'B1', message: 'Team conflict: a team is playing.', with: { kind: 'draft', index: 1 } },
+  ]
+  const existingGames = [{ id: 'old', scheduledAt: '2026-01-05T02:00:00.000Z', venueName: 'Court', homeName: 'X', awayName: 'Y', divisionName: 'Other' }]
+  const h = harness('preliminary', response, { issues, existingGames }); h.setup(); await h.preview()
+  let tree = h.render()
+  const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
+  assert.match(text, /With X vs Y \(Other\) · Jan 5, 2026, 10:00 AM · Court/)
+  assert.match(text, /A1 · With B1 vs Away · Jan 5, 2026, 9:00 AM · Court/)
+  const summary = tree.find((n) => n.type === 'ul' && n.props['aria-label'] === 'Conflicts by type')
+  const buttons = nodes(summary).filter((n) => n.type === 'Button')
+  assert.deepEqual(buttons.map((button) => nodes(button).filter((n) => typeof n === 'string' || typeof n === 'number').join('')), ['Court bookings · 1 game', 'Team overlaps or rest · 2 games'])
+  buttons[1].props.onClick()
+  tree = h.render()
+  assert.ok(tree.some((n) => n.type === 'Accordion' && n.props.value.includes('1')))
+})
 
 test('settings send pacing, limits, blackout dates and team availability inside the date range', async () => {
   const h = harness(); h.setup()

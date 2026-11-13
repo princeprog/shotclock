@@ -62,7 +62,10 @@ type DivisionPreview = { id: string; name: string; teamCount: number; reason?: s
 type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[] }
 type Estimate = { capacity: number; required: number; divisions: DivisionPreview[] }
 type CalendarBooking = { id: string; scheduledAt: string; durationMinutes: number; venueId: string; homeName: string; awayName: string; divisionName: string }
-type Validation = { issues: { index: number; message: string }[] }
+type IssueType = 'team' | 'venue' | 'window' | 'round' | 'blackout' | 'unavailable' | 'daily_limit' | 'weekly_limit'
+type Issue = { index: number; type?: IssueType; message: string; teamId?: string; with?: { kind: 'draft'; index: number } | { kind: 'existing'; id: string } }
+type ExistingConflict = { id: string; scheduledAt: string; venueName: string | null; homeName: string; awayName: string; divisionName: string }
+type Validation = { issues: Issue[]; existingGames?: ExistingConflict[] }
 type SavedGame = Omit<ScheduleGame, 'homeName' | 'awayName' | 'divisionName'>
 type GameDraft = { game: ScheduleGame; localTime: string; originalLocalTime: string; venueId: string }
 type Props = {
@@ -140,6 +143,10 @@ function validateWindows(windows: PlayingWindow[]): string {
 }
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const issueLabels: Record<IssueType, string> = {
+  team: 'Team overlaps or rest', venue: 'Court bookings', window: 'Outside playing hours', round: 'Round order',
+  blackout: 'Blackout dates', unavailable: 'Unavailable teams', daily_limit: 'Games per day', weekly_limit: 'Weekly pacing',
+}
 const paces: { value: Pace; label: string; description: string }[] = [
   { value: 'weekly', label: 'Weekly', description: 'Each team plays at most once a week.' },
   { value: 'spread', label: 'Spread across dates', description: 'Rounds are spaced evenly from the start date to the end date.' },
@@ -371,6 +378,29 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   }
 
   const hasPreview = draft?.seasonId === seasonId && draft.mode === mode
+  const venueName = (id: string) => venues.find((venue) => venue.id === id)?.name ?? ''
+  const issues = validationReady ? validation.data?.issues ?? [] : []
+  // Groups conflicts by type, counting each game once, so the summary can jump to the first one.
+  const issueGroups = [...issues.reduce((groups, issue) => groups.set(issue.type ?? 'other', [...new Set([...(groups.get(issue.type ?? 'other') ?? []), issue.index])]), new Map<string, number[]>())]
+  function focusGame(index: number) {
+    setExpandedGame(String(index))
+    window.setTimeout(() => document.getElementById(`schedule-game-trigger-${index}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 0)
+  }
+  function issueDetail(issue: Issue): string {
+    if (!draft) return ''
+    const team = issue.teamId ? draft.games.find((item) => item.game.homeTeamId === issue.teamId || item.game.awayTeamId === issue.teamId) : undefined
+    const teamName = team ? (team.game.homeTeamId === issue.teamId ? team.game.homeName : team.game.awayName) : ''
+    let related = ''
+    if (issue.with?.kind === 'draft') {
+      const other = draft.games[issue.with.index]
+      if (other) related = `With ${other.game.homeName} vs ${other.game.awayName} · ${formatWallTime(other.localTime)} · ${venueName(other.venueId)}`
+    } else if (issue.with?.kind === 'existing') {
+      const id = issue.with.id
+      const other = validation.data?.existingGames?.find((item) => item.id === id)
+      related = other ? `With ${other.homeName} vs ${other.awayName} (${other.divisionName}) · ${formatWallTime(formatInZone(other.scheduledAt, draft.input.availability.timeZone))}${other.venueName ? ` · ${other.venueName}` : ''}` : 'With an existing game'
+    }
+    return [teamName, related].filter(Boolean).join(' · ')
+  }
   const outsideSeason = draft?.games.some((item) => isOutsideSeason(item.localTime, seasonStart, seasonEnd)) ?? false
   const otherWarnings = draft?.warnings.filter((warning) => !/^some games are outside the season dates\.?$/i.test(warning.trim())) ?? []
   const reviewing = presentation === 'page' && !!hasPreview
@@ -500,13 +530,16 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
           {invalidGameIndexes.length > 0 && <Alert variant="destructive" role="alert"><AlertTitle>Check the edited game times</AlertTitle><AlertDescription>Choose valid, unambiguous local times and available venues before saving.</AlertDescription></Alert>}
           {!invalidGameIndexes.length && !validationReady && !validation.isError && <p className="text-sm text-muted-foreground" role="status">Checking the preview for conflicts…</p>}
           {validationKey && settledValidation === validationKey && validation.isError && <Alert variant="destructive"><AlertTitle>Could not check this preview</AlertTitle><AlertDescription>{validation.error.message} <Button type="button" variant="link" size="sm" onClick={() => void validation.refetch()}>Retry</Button></AlertDescription></Alert>}
-          {validationReady && !!validation.data?.issues.length && <Alert variant="destructive" role="alert"><AlertTitle>Resolve schedule conflicts</AlertTitle><AlertDescription>Review the marked games below. Changes are checked again before saving.</AlertDescription></Alert>}
+          {validationReady && !!issues.length && <Alert variant="destructive" role="alert"><AlertTitle>Resolve schedule conflicts</AlertTitle><AlertDescription>
+            <p>Review the marked games below. Changes are checked again before saving.</p>
+            <ul aria-label="Conflicts by type" className="mt-2 flex flex-wrap gap-2">{issueGroups.map(([type, indexes]) => <li key={type}><Button type="button" variant="outline" size="sm" onClick={() => focusGame(indexes[0])}>{issueLabels[type as IssueType] ?? 'Other conflicts'} · {indexes.length} {indexes.length === 1 ? 'game' : 'games'}</Button></li>)}</ul>
+          </AlertDescription></Alert>}
           {validationReady && !validation.data?.issues.length && <p className="text-sm text-muted-foreground" role="status">No scheduling conflicts found.</p>}
           <SchedulePreviewCalendar games={draft.games.map((item, index) => ({ index, localTime: item.localTime, homeName: item.game.homeName, awayName: item.game.awayName, divisionName: item.game.divisionName, venueName: venues.find((venue) => venue.id === item.venueId)?.name ?? '', conflict: invalidGameIndexes.includes(index) || !!(validationReady && validation.data?.issues.some((issue) => issue.index === index)) }))}
             bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venues.find((venue) => venue.id === game.venueId)?.name ?? '' }))}
             loading={calendar.isFetching} error={calendar.isError ? calendar.error.message : ''} onRetry={() => void calendar.refetch()}
             initialDate={draft.games[0]?.localTime.slice(0, 10) ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
-            onSelect={(index) => { setExpandedGame(String(index)); window.setTimeout(() => document.getElementById(`schedule-game-trigger-${index}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 0) }} />
+            onSelect={focusGame} />
           <div className="flex flex-col gap-5">{draft.divisions.map((division) => {
             const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
             const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
@@ -521,7 +554,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               {rounds.map((round) => <div key={round} className="flex flex-col gap-2">
                 <h5 className="text-sm font-medium">Round {round}</h5>
                 <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).map(({ item, index }) => <AccordionItem key={index} value={String(index)}>
-            <AccordionTrigger id={`schedule-game-trigger-${index}`} className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="font-medium">{item.game.homeName} vs {item.game.awayName}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span>{invalidGameIndexes.includes(index) && <span className="text-xs text-destructive">Invalid or ambiguous local time or venue.</span>}{validationReady && validation.data?.issues.filter((issue) => issue.index === index).map((issue) => <span key={issue.message} className="text-xs text-destructive">{issue.message}</span>)}</span></AccordionTrigger>
+            <AccordionTrigger id={`schedule-game-trigger-${index}`} className="gap-3 px-4 hover:no-underline"><span className="flex min-w-0 flex-col gap-1"><span className="font-medium">{item.game.homeName} vs {item.game.awayName}</span><span className="text-xs font-normal text-muted-foreground">{{ preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[item.game.stage]} · Round {item.game.round} · {formatWallTime(item.localTime)} · {venues.find((venue) => venue.id === item.venueId)?.name}</span>{invalidGameIndexes.includes(index) && <span className="text-xs text-destructive">Invalid or ambiguous local time or venue.</span>}{issues.filter((issue) => issue.index === index).map((issue, position) => <span key={position} className="flex flex-col text-xs"><span className="text-destructive">{issue.message}</span>{issueDetail(issue) && <span className="text-muted-foreground">{issueDetail(issue)}</span>}</span>)}</span></AccordionTrigger>
             <AccordionContent className="flex flex-col gap-4 px-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <ScheduleDate id={`schedule-game-date-${index}`} label="Date" value={item.localTime.slice(0, 10)} disabled={pending} onChange={(value) => { setDraft((current) => current && { ...current, games: current.games.map((game, i) => i === index ? { ...game, localTime: `${value}T${game.localTime.slice(11, 16)}` } : game) }); setError('') }} />
