@@ -24,7 +24,7 @@ function harness(mode = 'preliminary', result = response, diagnostics = {}) {
       useRef(initial) { const i = cursor++; return state[i] ??= { current: initial } },
       useEffect(effect) { effect() }, useSyncExternalStore() { return 'Asia/Manila' },
     }
-    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: [{ id: 'b', name: 'Boys', teams: [{ id: 'B1', name: 'B1' }, { id: 'B2', name: 'B2' }] }] } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [] }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
+    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: [{ id: 'b', name: 'Boys', teams: [{ id: 'B1', name: 'B1' }, { id: 'B2', name: 'B2' }] }] } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [], maxGamesPerTeam: diagnostics.maxGamesPerTeam ?? null, limitedBy: diagnostics.limitedBy ?? null }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : args[0].endsWith('/suggest') ? (diagnostics.suggestions ?? { suggestions: [] }) : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
@@ -207,13 +207,23 @@ test('review opens with a compact summary instead of the capacity panel', async 
   assert.doesNotMatch(text, /Select a game to adjust/)
 })
 
+test('capacity check blocks a preview when pacing leaves too few dates', async () => {
+  const divisions = [{ id: 'b', name: '18 under', teamCount: 8, gameCount: 28, gamesPerTeam: 7 }]
+  const h = harness('preliminary', response, { maxGamesPerTeam: 3, limitedBy: 'weekly', required: 28, divisions }); h.setup(); await h.preview()
+  const text = h.render().filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
+  assert.match(text, /18 under: weekly pacing fits 3 of 7 games per team\. Extend the dates to at least 7 weeks or choose another pacing\./)
+  assert.match(text, /More dates needed/)
+  assert.equal(h.calls.length, 0)
+})
+
 test('unplaced games block saving until a suggested slot places them', async () => {
-  const unplaced = [{ divisionId: 'a', divisionName: 'Adults', homeTeamId: 'A2', awayTeamId: 'A3', homeName: 'A2', awayName: 'A3', round: 2, stage: 'preliminary', reason: 'No court is free.' }]
+  const unplaced = [{ divisionId: 'a', divisionName: 'Adults', homeTeamId: 'A2', awayTeamId: 'A3', homeName: 'A2', awayName: 'A3', round: 2, stage: 'preliminary', reason: 'No court is free.', reasonCode: 'venues_busy' }]
   const h = harness('preliminary', { ...response, unplaced }, { suggestions: { suggestions: [{ scheduledAt: '2026-01-12T01:00:00.000Z', venueId: 'court' }] } }); h.setup(); await h.preview()
   let tree = h.render()
   const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
-  assert.match(text, /Needs a time/)
-  assert.match(text, /No court is free\./)
+  assert.match(text, /Not scheduled/)
+  assert.match(text, /Courts are booked at every open slot/)
+  assert.ok(tree.some((n) => n.type === 'span' && n.props.title === 'No court is free.'))
   assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.disabled, true)
   const section = tree.find((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-unplaced-heading')
   nodes(section).find((n) => n.type === 'Button' && nodes(n).includes('Find open slots')).props.onClick()

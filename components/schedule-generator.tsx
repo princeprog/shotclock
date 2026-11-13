@@ -58,12 +58,12 @@ type PlayingWindow = {
 }
 type WindowDraft = PlayingWindow & { id: number }
 type ScheduleInput = { availability: Availability; format: 'single' | 'double'; playoffs: boolean; thirdPlace: boolean }
-type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; playoffs?: boolean; playoffStage?: string | null; gameCount?: number }
-type Unplaced = Pick<ScheduleGame, 'divisionId' | 'divisionName' | 'homeTeamId' | 'awayTeamId' | 'homeName' | 'awayName' | 'round' | 'stage'> & { reason: string }
+type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; playoffs?: boolean; playoffStage?: string | null; gameCount?: number; gamesPerTeam?: number }
+type Unplaced = Pick<ScheduleGame, 'divisionId' | 'divisionName' | 'homeTeamId' | 'awayTeamId' | 'homeName' | 'awayName' | 'round' | 'stage'> & { reason: string; reasonCode?: string }
 type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[]; unplaced?: Unplaced[] }
 type Slot = { scheduledAt: string; venueId: string }
 type Suggestions = { status: 'loading' | 'done' | 'error'; slots: Slot[]; error?: string }
-type Estimate = { capacity: number; required: number; divisions: DivisionPreview[] }
+type Estimate = { capacity: number; required: number; divisions: DivisionPreview[]; maxGamesPerTeam?: number | null; limitedBy?: 'weekly' | 'daily' | null }
 type CalendarBooking = { id: string; scheduledAt: string; durationMinutes: number; venueId: string; homeName: string; awayName: string; divisionName: string }
 type IssueType = 'team' | 'venue' | 'window' | 'round' | 'blackout' | 'unavailable' | 'daily_limit' | 'weekly_limit'
 type Issue = { index: number; type?: IssueType; message: string; teamId?: string; with?: { kind: 'draft'; index: number } | { kind: 'existing'; id: string } }
@@ -147,6 +147,15 @@ function formatGameSlot(value: string): string {
   return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
 }
 
+// Divisions whose teams need more games than pacing or the daily limit allows in the date range.
+function pacingShortfalls(estimate: Estimate): string[] {
+  const limit = estimate.maxGamesPerTeam
+  if (limit === null || limit === undefined) return []
+  return estimate.divisions.filter((division) => division.reason === undefined && (division.gamesPerTeam ?? 0) > limit).map((division) => estimate.limitedBy === 'weekly'
+    ? `${division.name}: weekly pacing fits ${limit} of ${division.gamesPerTeam} games per team. Extend the dates to at least ${division.gamesPerTeam} weeks or choose another pacing.`
+    : `${division.name}: the daily limit fits ${limit} of ${division.gamesPerTeam} games per team. Add playing days or raise the daily limit.`)
+}
+
 function validateWindows(windows: PlayingWindow[]): string {
   if (!windows.length || windows.length > 20) return 'Add between 1 and 20 playing windows.'
   const validTime = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -161,6 +170,12 @@ const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const issueLabels: Record<IssueType, string> = {
   team: 'Team overlap', venue: 'Court booked', window: 'Outside playing hours', round: 'Round order',
   blackout: 'Blackout date', unavailable: 'Team unavailable', daily_limit: 'Daily limit', weekly_limit: 'Weekly pacing',
+}
+// Short reasons for games that could not be placed; the full explanation stays available on hover.
+const unplacedReasons: Record<string, string> = {
+  no_days: 'No playing days in the date range', short_windows: 'Playing windows are shorter than a game', capacity: 'Not enough court time',
+  rest: 'Minimum rest leaves no open slot', limits: 'Pacing or team limits leave no open date', round_order: 'No open slot after the previous round',
+  spread: 'Later dates are full', teams_busy: 'Teams are busy at every open slot', venues_busy: 'Courts are booked at every open slot', mixed: 'No slot fits every rule',
 }
 const stageLabels: Record<ScheduleGame['stage'], string> = { preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }
 const paces: { value: Pace; label: string; description: string }[] = [
@@ -384,7 +399,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     if (!settingsKey) { setError('Check the scheduling settings and try again.'); return }
     setShowCapacity(true)
     const result = await estimate.refetch()
-    if (result.error || !result.data || !result.data.required || result.data.capacity < result.data.required) {
+    if (result.error || !result.data || !result.data.required || result.data.capacity < result.data.required || pacingShortfalls(result.data).length) {
       capacityHeading.current?.scrollIntoView({ block: 'start' })
       return
     }
@@ -612,7 +627,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
           {estimateReady && estimate.data && <div className="overflow-hidden rounded-lg border text-sm">
             <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
               <p className="font-medium">Capacity overview</p>
-              {estimate.data.required === 0 ? <Badge variant="secondary">No eligible divisions</Badge> : estimate.data.capacity < estimate.data.required ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />More slots needed</Badge> : <Badge variant="secondary"><CircleCheckIcon data-icon="inline-start" />Slots available</Badge>}
+              {estimate.data.required === 0 ? <Badge variant="secondary">No eligible divisions</Badge> : estimate.data.capacity < estimate.data.required ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />More slots needed</Badge> : pacingShortfalls(estimate.data).length ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />More dates needed</Badge> : <Badge variant="secondary"><CircleCheckIcon data-icon="inline-start" />Slots available</Badge>}
             </div>
             <dl className="grid grid-cols-2 gap-4 px-4 py-4">
               <div><dt className="text-muted-foreground">Games to schedule</dt><dd className="mt-1 text-xl font-semibold tabular-nums">{estimate.data.required.toLocaleString('en-US')}</dd></div>
@@ -620,6 +635,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
             </dl>
             {estimate.data.required === 0 && <p className="px-4 pb-4 text-muted-foreground">No divisions are ready to generate games with these settings.</p>}
             {estimate.data.capacity < estimate.data.required && <p className="px-4 pb-4 text-destructive" role="alert">At least {estimate.data.required - estimate.data.capacity} more court slots are needed. Add venues or playing time.</p>}
+            {pacingShortfalls(estimate.data).length > 0 && <ul className="flex flex-col gap-1 px-4 pb-4 text-destructive" role="alert">{pacingShortfalls(estimate.data).map((message) => <li key={message}>{message}</li>)}</ul>}
             <p className="px-4 pb-4 text-muted-foreground">Available slots are an estimate after existing bookings. Team rest and round order may reduce capacity.</p>
             {estimate.data.divisions.length > 0 && <div className="border-t px-4 py-3">
               <p className="mb-2 font-medium">Divisions</p>
@@ -636,7 +652,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
                 <p className="text-sm text-muted-foreground">{reviewFacts}</p>
               </div>
               <div role="status" className="flex flex-wrap items-center gap-2">
-                {draft.unplaced.length > 0 && <Badge variant="outline">{draft.unplaced.length} need a time</Badge>}
+                {draft.unplaced.length > 0 && <Badge variant="outline">{draft.unplaced.length} not scheduled</Badge>}
                 {reviewStatus}
               </div>
             </div>
@@ -653,10 +669,10 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
           </div>
           {!draft.games.length && !draft.unplaced.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
           {draft.unplaced.length > 0 && <section aria-labelledby="schedule-unplaced-heading" className="flex flex-col gap-2">
-            <h4 id="schedule-unplaced-heading" className="text-sm font-semibold">Needs a time</h4>
+            <h4 id="schedule-unplaced-heading" className="text-sm font-semibold">Not scheduled</h4>
             <ul className="divide-y rounded-lg border border-dashed">{draft.unplaced.map((item, position) => <li key={`${item.divisionId}-${item.round}-${item.homeTeamId}-${item.awayTeamId}`} className="flex flex-col gap-2 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <div className="min-w-0"><p className="text-sm font-medium">{item.homeName} vs {item.awayName}</p><p className="text-xs text-muted-foreground">{item.divisionName} · Round {item.round} · {item.reason}</p></div>
+                <div className="min-w-0"><p className="text-sm font-medium">{item.homeName} vs {item.awayName}</p><p className="text-xs text-muted-foreground">{item.divisionName} · Round {item.round} · <span title={item.reason}>{unplacedReasons[item.reasonCode ?? ''] ?? item.reason}</span></p></div>
                 <Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`unplaced-${position}`]?.status === 'loading'} onClick={() => void findSlots(`unplaced-${position}`, { game: { divisionId: item.divisionId, homeTeamId: item.homeTeamId, awayTeamId: item.awayTeamId, round: item.round, stage: item.stage } })}><CalendarSearchIcon data-icon="inline-start" />Find open slots</Button>
               </div>
               {slotList(`unplaced-${position}`, (slot) => placeGame(position, slot))}
