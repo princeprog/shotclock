@@ -156,7 +156,7 @@ const issueLabels: Record<IssueType, string> = {
   blackout: 'Blackout dates', unavailable: 'Unavailable teams', daily_limit: 'Games per day', weekly_limit: 'Weekly pacing',
 }
 const paces: { value: Pace; label: string; description: string }[] = [
-  { value: 'weekly', label: 'Weekly', description: 'Each team plays at most once a week.' },
+  { value: 'weekly', label: 'Weekly', description: 'Each team’s games are at least 7 days apart.' },
   { value: 'spread', label: 'Spread across dates', description: 'Rounds are spaced evenly from the start date to the end date.' },
   { value: 'compact', label: 'As early as possible', description: 'Games fill the earliest open slots.' },
 ]
