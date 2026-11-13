@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { CalendarDaysIcon, CircleAlertIcon, CircleCheckIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { CalendarDaysIcon, CircleAlertIcon, CircleCheckIcon, PlusIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -42,7 +42,15 @@ type Availability = {
   venueIds: string[]
   durationMinutes: number
   restMinutes: number
+  pace: Pace
+  maxGamesPerTeamPerDay: number
+  changeoverMinutes: number
+  blackoutDates: string[]
+  teamUnavailability: { teamId: string; dates: string[] }[]
 }
+type Pace = 'weekly' | 'spread' | 'compact'
+type TeamUnavailabilityDraft = { id: number; teamId: string; dates: string[] }
+type StatusDivision = { id: string; name: string; teams?: { id: string; name: string }[] }
 type PlayingWindow = {
   weekdays: number[]
   startTime: string
@@ -132,6 +140,15 @@ function validateWindows(windows: PlayingWindow[]): string {
 }
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const paces: { value: Pace; label: string; description: string }[] = [
+  { value: 'weekly', label: 'Weekly', description: 'Each team plays at most once a week.' },
+  { value: 'spread', label: 'Spread across dates', description: 'Rounds are spaced evenly from the start date to the end date.' },
+  { value: 'compact', label: 'As early as possible', description: 'Games fill the earliest open slots.' },
+]
+
+function isWhole(value: string, minimum: number, maximum: number): boolean {
+  return value.trim() !== '' && Number.isInteger(Number(value)) && Number(value) >= minimum && Number(value) <= maximum
+}
 const hours = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, '0'))
 const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'))
 const subscribe = () => () => {}
@@ -184,6 +201,29 @@ function ScheduleTime({ id, label, value, disabled, onChange }: { id: string; la
   </FieldSet>
 }
 
+function ScheduleDates({ id, label, values, rangeStart, rangeEnd, disabled, onChange }: { id: string; label: string; values: string[]; rangeStart: string; rangeEnd: string; disabled: boolean; onChange: (values: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const selected = values.map((value) => parseISO(value)).filter(isValid)
+  const start = rangeStart ? parseISO(rangeStart) : undefined
+  return <Field>
+    <FieldLabel htmlFor={id}>{label}</FieldLabel>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger render={<Button id={id} type="button" variant="outline" disabled={disabled} className="w-full justify-start font-normal" />}>
+        <CalendarDaysIcon data-icon="inline-start" />{values.length ? `${values.length} ${values.length === 1 ? 'date' : 'dates'} selected` : 'Choose dates'}
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-0">
+        <Calendar mode="multiple" selected={selected} defaultMonth={selected[0] ?? (start && isValid(start) ? start : undefined)}
+          disabled={(date) => { const day = formatDate(date, 'yyyy-MM-dd'); return (!!rangeStart && day < rangeStart) || (!!rangeEnd && day > rangeEnd) }}
+          onSelect={(dates) => onChange((dates ?? []).map((date) => formatDate(date, 'yyyy-MM-dd')).sort())} />
+      </PopoverContent>
+    </Popover>
+    {values.length > 0 && <ul className="flex flex-wrap gap-1.5" aria-label={label}>{values.map((value) => <li key={value}><Badge variant="secondary" className="gap-1 pr-1">
+      {formatDate(parseISO(value), 'EEE, MMM d')}
+      <button type="button" disabled={disabled} aria-label={`Remove ${formatDate(parseISO(value), 'MMMM d')}`} className="rounded-sm opacity-70 hover:opacity-100" onClick={() => onChange(values.filter((item) => item !== value))}><XIcon className="size-3" /></button>
+    </Badge></li>)}</ul>}
+  </Field>
+}
+
 export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd, venues, mode, onClose, onSaved, onPendingChange, onUnsavedChange, presentation = 'dialog' }: Props) {
   const client = useQueryClient()
   const defaultZone = useSyncExternalStore(subscribe, browserTimeZone, serverTimeZone)
@@ -199,6 +239,12 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [format, setFormat] = useState<'single' | 'double'>('single')
   const [playoffs, setPlayoffs] = useState(false)
   const [thirdPlace, setThirdPlace] = useState(false)
+  const [pace, setPace] = useState<Pace>('weekly')
+  const [maxPerDay, setMaxPerDay] = useState('1')
+  const [changeover, setChangeover] = useState('0')
+  const [blackoutDates, setBlackoutDates] = useState<string[]>([])
+  const nextTeamRowId = useRef(0)
+  const [teamRows, setTeamRows] = useState<TeamUnavailabilityDraft[]>([])
   const [draft, setDraft] = useState<{ input: ScheduleInput | { availability: Availability }; games: GameDraft[]; warnings: string[]; divisions: DivisionPreview[]; seasonId: string; mode: Props['mode'] } | null>(null)
   const [error, setError] = useState('')
   const [showCapacity, setShowCapacity] = useState(false)
@@ -208,11 +254,20 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const wasPreviewed = useRef(false)
   const path = `seasons/${seasonId}/${mode === 'preliminary' ? 'schedule' : 'playoffs'}`
 
+  const status = useQuery({ queryKey: ['league', `seasons/${seasonId}/schedule/status`], retry: false,
+    queryFn: () => leagueRequest<{ divisions: StatusDivision[] }>(`seasons/${seasonId}/schedule/status`, client) })
+  const teamOptions = (status.data?.divisions ?? []).flatMap((division) => (division.teams ?? []).map((team) => ({ value: team.id, label: `${division.name} · ${team.name}` })))
+  const limitsValid = isWhole(maxPerDay, 1, 10) && isWhole(changeover, 0, 240)
   let settingsKey = ''
-  if (startDate && endDate && startDate <= endDate && !validateWindows(windows) && venueIds.length && duration && rest && Number.isInteger(Number(duration)) && Number(duration) > 0 && Number(duration) <= 1440 && Number.isInteger(Number(rest)) && Number(rest) >= 0 && Number(rest) <= 10080 && timeZone) {
+  if (startDate && endDate && startDate <= endDate && !validateWindows(windows) && venueIds.length && duration && rest && Number.isInteger(Number(duration)) && Number(duration) > 0 && Number(duration) <= 1440 && Number.isInteger(Number(rest)) && Number(rest) >= 0 && Number(rest) <= 10080 && limitsValid && timeZone) {
     try {
       new Intl.DateTimeFormat('en', { timeZone }).format()
-      const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest) }
+      // Only dates inside the range matter; one entry per team, as the API expects.
+      const unavailable = new Map<string, Set<string>>()
+      for (const row of teamRows) for (const date of row.dates) if (row.teamId && date >= startDate && date <= endDate) unavailable.set(row.teamId, (unavailable.get(row.teamId) ?? new Set<string>()).add(date))
+      const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest),
+        pace, maxGamesPerTeamPerDay: Number(maxPerDay), changeoverMinutes: Number(changeover), blackoutDates: blackoutDates.filter((date) => date >= startDate && date <= endDate),
+        teamUnavailability: [...unavailable].map(([teamId, dates]) => ({ teamId, dates: [...dates].sort() })) }
       settingsKey = JSON.stringify(mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability })
     } catch { /* Wait until the time zone is valid. */ }
   }
@@ -289,6 +344,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     if (windowError) { setError(windowError); return }
     if (!venueIds.length) { setError('Choose at least one venue.'); return }
     if (!Number.isInteger(Number(duration)) || Number(duration) <= 0 || Number(duration) > 1440 || !duration || !Number.isInteger(Number(rest)) || Number(rest) < 0 || Number(rest) > 10080 || !rest) { setError('Enter a game duration from 1 to 1,440 minutes and a rest time from 0 to 10,080 minutes.'); return }
+    if (!limitsValid) { setError('Enter a games-per-day limit from 1 to 10 and a court changeover from 0 to 240 minutes.'); return }
     try { new Intl.DateTimeFormat('en', { timeZone }).format() } catch { setError('Enter a valid IANA time zone, such as Asia/Manila.'); return }
     if (!timeZone.trim()) { setError('Enter a valid IANA time zone.'); return }
     if (!settingsKey) { setError('Check the scheduling settings and try again.'); return }
@@ -298,9 +354,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       capacityHeading.current?.scrollIntoView({ block: 'start' })
       return
     }
-    const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest) }
-    const input = mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability }
-    preview.mutate(input)
+    preview.mutate(JSON.parse(settingsKey) as ScheduleInput | { availability: Availability })
   }
 
   function saveSchedule() {
@@ -372,6 +426,26 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
             <div><Button type="button" variant="outline" size="sm" disabled={pending || windows.length >= 20} onClick={() => { const id = nextWindowId.current++; setWindows((current) => [...current, { id, weekdays: [], startTime: '09:00', endTime: '17:00' }]); changed() }}><PlusIcon data-icon="inline-start" />Add playing window</Button></div>
           </div>
           <Field><FieldLabel htmlFor="schedule-zone" required>Time zone</FieldLabel><Input id="schedule-zone" required disabled={pending} value={timeZone} onChange={(e) => { setZoneOverride(e.target.value); changed() }} placeholder="Asia/Manila" /><FieldDescription>All playing windows and preview times use this IANA time zone.</FieldDescription></Field>
+          <div className="flex flex-col gap-1.5">
+            <ScheduleDates id="schedule-blackout-dates" label="Blackout dates" values={blackoutDates} rangeStart={startDate} rangeEnd={endDate} disabled={pending} onChange={(values) => { setBlackoutDates(values); changed() }} />
+            <p className="text-sm text-muted-foreground">No games are scheduled on these dates, such as holidays or venue closures.</p>
+          </div>
+          <FieldSet className="gap-3">
+            <FieldLegend variant="label" className="mb-0">Team availability</FieldLegend>
+            <p className="text-sm text-muted-foreground">Add dates when a team can’t play.</p>
+            {teamRows.map((row, position) => <div key={row.id} className="grid gap-4 rounded-lg border p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-start">
+              <Field><FieldLabel htmlFor={`schedule-team-${row.id}`}>Team</FieldLabel>
+                <Select value={row.teamId || null} disabled={pending} items={teamOptions} onValueChange={(value) => { if (value) { setTeamRows((current) => current.map((item) => item.id === row.id ? { ...item, teamId: value } : item)); changed() } }}>
+                  <SelectTrigger id={`schedule-team-${row.id}`} className="w-full"><SelectValue placeholder="Choose a team" /></SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}><SelectGroup>{teamOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent>
+                </Select>
+              </Field>
+              <ScheduleDates id={`schedule-team-dates-${row.id}`} label="Unavailable dates" values={row.dates} rangeStart={startDate} rangeEnd={endDate} disabled={pending} onChange={(values) => { setTeamRows((current) => current.map((item) => item.id === row.id ? { ...item, dates: values } : item)); changed() }} />
+              <Button type="button" variant="ghost" size="icon-sm" className="sm:mt-6" disabled={pending} aria-label={`Remove team availability ${position + 1}`} onClick={() => { setTeamRows((current) => current.filter((item) => item.id !== row.id)); changed() }}><Trash2Icon /></Button>
+            </div>)}
+            {status.isError && <p className="text-sm text-muted-foreground">Teams couldn’t be loaded, so team availability can’t be added right now.</p>}
+            <div><Button type="button" variant="outline" size="sm" disabled={pending || !teamOptions.length || teamRows.length >= 200} onClick={() => { const id = nextTeamRowId.current++; setTeamRows((current) => [...current, { id, teamId: '', dates: [] }]) }}><PlusIcon data-icon="inline-start" />Add team availability</Button></div>
+          </FieldSet>
         </section>
 
         <section className="flex flex-col gap-4 border-t pt-6" aria-labelledby="schedule-settings-heading">
@@ -380,6 +454,17 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
           <div className="grid gap-4 sm:grid-cols-2">
             <Field><FieldLabel htmlFor="schedule-duration" required>Game duration (minutes)</FieldLabel><Input id="schedule-duration" type="number" min="1" step="1" required disabled={pending} value={duration} onChange={(e) => { setDuration(e.target.value); changed() }} /></Field>
             <Field><FieldLabel htmlFor="schedule-rest" required>Minimum rest (minutes)</FieldLabel><Input id="schedule-rest" type="number" min="0" step="1" required disabled={pending} value={rest} onChange={(e) => { setRest(e.target.value); changed() }} /></Field>
+          </div>
+          <Field><FieldLabel htmlFor="schedule-pace" required>Pacing</FieldLabel>
+            <Select value={pace} disabled={pending} items={paces.map(({ value, label }) => ({ value, label }))} onValueChange={(value) => { const next = paces.find((item) => item.value === value); if (next) { setPace(next.value); changed() } }}>
+              <SelectTrigger id="schedule-pace" aria-required="true" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}><SelectGroup>{paces.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
+            </Select>
+            <FieldDescription>{paces.find((item) => item.value === pace)?.description}</FieldDescription>
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field><FieldLabel htmlFor="schedule-max-per-day" required>Max games per team per day</FieldLabel><Input id="schedule-max-per-day" type="number" min="1" max="10" step="1" required disabled={pending} value={maxPerDay} onChange={(e) => { setMaxPerDay(e.target.value); changed() }} /></Field>
+            <Field><FieldLabel htmlFor="schedule-changeover" required>Court changeover (minutes)</FieldLabel><Input id="schedule-changeover" type="number" min="0" max="240" step="1" required disabled={pending} value={changeover} onChange={(e) => { setChangeover(e.target.value); changed() }} /><FieldDescription>Time to clear a court between games.</FieldDescription></Field>
           </div>
         </section>
 

@@ -37,7 +37,9 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
     if (request.method !== 'DELETE') {
       if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) return NextResponse.json({ error: 'Invalid request' }, { status: 415 })
       const saveSchedule = request.method === 'POST' && new RegExp(`^(divisions|seasons)/${uuid}/(schedule|playoffs)(?:/validate)?$`).exec(route)
-      const limit = saveSchedule ? (saveSchedule[1] === 'seasons' ? 2 * 1024 * 1024 : 256 * 1024) : 8192
+      // Season previews and estimates can carry team availability for every team, so they share the season save limit.
+      const seasonPlanning = request.method === 'POST' && new RegExp(`^seasons/${uuid}/(schedule|playoffs)/(preview|estimate)$`).test(route)
+      const limit = saveSchedule ? (saveSchedule[1] === 'seasons' ? 2 * 1024 * 1024 : 256 * 1024) : seasonPlanning ? 2 * 1024 * 1024 : 8192
       const boundedBody = await readBoundedBody(request, limit)
       if (boundedBody === null) return NextResponse.json({ error: 'Request too large' }, { status: 413 })
       body = boundedBody

@@ -24,7 +24,7 @@ function harness(mode = 'preliminary', result = response, diagnostics = {}) {
       useRef(initial) { const i = cursor++; return state[i] ??= { current: initial } },
       useEffect(effect) { effect() }, useSyncExternalStore() { return 'Asia/Manila' },
     }
-    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [] }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
+    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: [{ id: 'b', name: 'Boys', teams: [{ id: 'B1', name: 'B1' }, { id: 'B2', name: 'B2' }] }] } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [] }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
@@ -170,4 +170,35 @@ test('conflicts and pending checks both prevent saving', async () => {
     save.props.onClick()
     assert.equal(h.calls.length, 1)
   }
+})
+
+
+test('settings send pacing, limits, blackout dates and team availability inside the date range', async () => {
+  const h = harness(); h.setup()
+  let tree = h.render()
+  tree.find((n) => n.type === 'Select' && nodes(n).some((child) => child.props?.id === 'schedule-pace')).props.onValueChange('spread')
+  tree = h.render()
+  tree.find((n) => n.type === 'Input' && n.props.id === 'schedule-changeover').props.onChange({ target: { value: '10' } })
+  tree.find((n) => n.type === 'Input' && n.props.id === 'schedule-max-per-day').props.onChange({ target: { value: '2' } })
+  tree = h.render()
+  tree.find((n) => n.type?.name === 'ScheduleDates' && n.props.id === 'schedule-blackout-dates').props.onChange(['2025-12-25', '2026-01-12'])
+  tree = h.render()
+  tree.find((n) => n.type === 'Button' && nodes(n).includes('Add team availability')).props.onClick()
+  tree = h.render()
+  tree.find((n) => n.type === 'Select' && nodes(n).some((child) => child.props?.id === 'schedule-team-0')).props.onValueChange('B1')
+  tree = h.render()
+  tree.find((n) => n.type?.name === 'ScheduleDates' && n.props.id === 'schedule-team-dates-0').props.onChange(['2026-01-05', '2026-03-01'])
+  await h.preview()
+  const availability = h.calls[0][3].availability
+  assert.equal(availability.pace, 'spread')
+  assert.equal(availability.changeoverMinutes, 10)
+  assert.equal(availability.maxGamesPerTeamPerDay, 2)
+  assert.deepEqual(Array.from(availability.blackoutDates), ['2026-01-12'])
+  assert.deepEqual(JSON.parse(JSON.stringify(availability.teamUnavailability)), [{ teamId: 'B1', dates: ['2026-01-05'] }])
+})
+
+test('defaults to weekly pacing, one game per team per day and no changeover', async () => {
+  const h = harness(); h.setup(); await h.preview()
+  const { pace, maxGamesPerTeamPerDay, changeoverMinutes, blackoutDates, teamUnavailability } = h.calls[0][3].availability
+  assert.deepEqual(JSON.parse(JSON.stringify({ pace, maxGamesPerTeamPerDay, changeoverMinutes, blackoutDates, teamUnavailability })), { pace: 'weekly', maxGamesPerTeamPerDay: 1, changeoverMinutes: 0, blackoutDates: [], teamUnavailability: [] })
 })
