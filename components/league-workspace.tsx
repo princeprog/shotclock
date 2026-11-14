@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { Fragment, useEffect, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, parseISO, startOfDay } from 'date-fns'
@@ -54,6 +54,33 @@ type Standing = Item & { wins: number; losses: number; pointDifference: number }
 type Dashboard = { teamCount: number; upcoming: Game[]; recent: Game[]; standings: Standing[] }
 type Option = { value: string; label: string }
 type InputField = { name: string; label: string; type?: string; required?: boolean; min?: number; max?: number; description?: string; value?: string | number | null; options?: Option[] }
+
+// Why generation or playoffs are unavailable, with divisions grouped by reason so a shared reason appears once.
+function scheduleReason(reason: string, several: boolean): string {
+  const text = reason.replace(/^This division /i, '').replace(/^already has /i, several ? 'already have ' : 'already has ').trim()
+  const sentence = text.charAt(0).toUpperCase() + text.slice(1)
+  return /[.!?]$/.test(sentence) ? sentence : sentence + '.'
+}
+
+function scheduleBlockers(sections: { title: string; icon: ReactNode; items: { id: string; name: string; reason: string }[] }[]) {
+  if (!sections.length) return null
+  return <div className="mt-4 divide-y rounded-lg border">
+    {sections.map((section) => {
+      const groups = new Map<string, string[]>()
+      for (const item of section.items) groups.set(item.reason, [...(groups.get(item.reason) ?? []), item.name])
+      return <section key={section.title} aria-label={section.title} className="flex gap-3 px-4 py-3.5">
+        <span aria-hidden="true" className="mt-0.5 text-muted-foreground [&_svg]:size-4">{section.icon}</span>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <h3 className="text-sm font-medium">{section.title}</h3>
+          <ul className="flex flex-col gap-2">{[...groups].map(([reason, names]) => <li key={reason} className="flex flex-col gap-1.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+            <span className="text-muted-foreground">{scheduleReason(reason, names.length > 1)}</span>
+            <span className="flex flex-wrap gap-1.5 sm:justify-end">{names.length > 1 && names.length === section.items.length ? <Badge variant="secondary">All divisions</Badge> : names.map((name) => <Badge key={name} variant="outline">{name}</Badge>)}</span>
+          </li>)}</ul>
+        </div>
+      </section>
+    })}
+  </div>
+}
 
 const pageCopy: Record<Section, { title: string; description: string }> = {
   dashboard: { title: 'Season overview', description: 'Follow your season, upcoming games, and standings in one place.' },
@@ -509,14 +536,16 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
           <Popover><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dates?.from ? dates.to ? `${format(dates.from, 'MMM d')} – ${format(dates.to, 'MMM d, yyyy')}` : `From ${format(dates.from, 'MMM d, yyyy')}` : 'All dates'}</PopoverTrigger><PopoverContent align="end" className="w-auto p-0"><Calendar mode="range" selected={dates} onSelect={(value) => { setDates(value); resetPage() }} autoFocus />{dates?.from && <Button type="button" variant="ghost" className="mx-3 mb-3" onClick={clearDates}>Clear dates</Button>}</PopoverContent></Popover>
           <Button type="button" variant="outline" disabled={!dates?.from} onClick={clearDates}>Reset</Button>
           {editable && <>
-            <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.canGeneratePreliminary)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
+            <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.canGeneratePreliminary)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
             {scheduleDivisions.some((item) => item.playoffs) && <Button variant="outline" onClick={() => setDialog({ kind: 'generator', mode: 'playoffs' })} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
             <Button onClick={openSchedule} disabled={!divisions.length}><PlusIcon data-icon="inline-start" />Schedule game</Button>
           </>}
         </div>
       </div>
-      {editable && scheduleStatus.isSuccess && scheduleDivisions.length > 0 && !scheduleDivisions.some((item) => item.canGeneratePreliminary) && <div className="pt-3 text-sm text-muted-foreground"><p>Schedule generation is unavailable:</p><ul className="list-disc pl-5">{scheduleDivisions.map((item) => <li key={item.id}>{item.name}: {item.preliminaryReason || 'Not eligible for schedule generation.'}</li>)}</ul></div>}
-      {editable && scheduleStatus.isSuccess && scheduleDivisions.some((item) => item.playoffs) && !scheduleDivisions.some((item) => item.playoffStage) && <div className="pt-3 text-sm text-muted-foreground"><p>Playoffs are not ready:</p><ul className="list-disc pl-5">{scheduleDivisions.filter((item) => item.playoffs).map((item) => <li key={item.id}>{item.name}: {item.playoffReason || 'The next round is not ready.'}</li>)}</ul></div>}
+      {editable && scheduleStatus.isSuccess && scheduleBlockers([
+        ...(scheduleDivisions.length > 0 && !scheduleDivisions.some((item) => item.canGeneratePreliminary) ? [{ title: 'Schedule generation unavailable', icon: <CalendarDaysIcon />, items: scheduleDivisions.map((item) => ({ id: item.id, name: item.name, reason: item.preliminaryReason || 'Not eligible for schedule generation.' })) }] : []),
+        ...(scheduleDivisions.some((item) => item.playoffs) && !scheduleDivisions.some((item) => item.playoffStage) ? [{ title: 'Playoffs not ready', icon: <TrophyIcon />, items: scheduleDivisions.filter((item) => item.playoffs).map((item) => ({ id: item.id, name: item.name, reason: item.playoffReason || 'The next round is not ready.' })) }] : []),
+      ])}
       <TabsContent value={status} className="pt-5">{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</TabsContent>
     </Tabs>
     <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : dialog?.kind === 'score' ? `${game?.home_name} vs ${game?.away_name} · ${season.name}${game?.forfeited_by_season_team_id ? '. Saving a score records a played result instead of a forfeit.' : ''}` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
