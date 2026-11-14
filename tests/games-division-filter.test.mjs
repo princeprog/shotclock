@@ -151,7 +151,7 @@ test('opening manual scheduling defaults to the filter and a later filter change
   assert.ok(find(tree, (node) => node.type === h.ScheduleGameForm))
 })
 
-test('unavailable season controls explain each division’s eligibility', () => {
+test('unavailable schedule generation explains each division in a tooltip, without a playoffs message', () => {
   const statuses = [
     { ...divisionStatuses[0], preliminaryReason: 'Needs another team', playoffs: true, playoffReason: 'Finish semifinals' },
     { ...divisionStatuses[1], canGeneratePreliminary: false, preliminaryReason: 'Already scheduled', playoffStage: null, playoffReason: 'Finish preliminary games' },
@@ -159,8 +159,8 @@ test('unavailable season controls explain each division’s eligibility', () => 
   const tree = harness(statuses).render()
   assert.match(text(tree), /Needs another team/)
   assert.match(text(tree), /Already scheduled/)
-  assert.match(text(tree), /Finish semifinals/)
-  assert.match(text(tree), /Finish preliminary games/)
+  assert.ok(find(tree, (node) => node.type === 'TooltipContent'))
+  assert.doesNotMatch(text(tree), /Finish semifinals|Finish preliminary games|Playoffs not ready/)
   assert.equal(find(tree, (node) => node.props?.children?.includes?.('Generate schedule')).props.disabled, true)
   assert.equal(find(tree, (node) => node.props?.children?.includes?.('Schedule playoffs')).props.disabled, true)
 })
