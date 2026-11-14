@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { CalendarDaysIcon, CalendarSearchIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -239,12 +239,12 @@ function ScheduleTime({ id, label, value, disabled, onChange }: { id: string; la
   </FieldSet>
 }
 
-function ScheduleDates({ id, label, values, rangeStart, rangeEnd, disabled, onChange }: { id: string; label: string; values: string[]; rangeStart: string; rangeEnd: string; disabled: boolean; onChange: (values: string[]) => void }) {
+function ScheduleDates({ id, label, hideLabel = false, values, rangeStart, rangeEnd, disabled, onChange }: { id: string; label: string; hideLabel?: boolean; values: string[]; rangeStart: string; rangeEnd: string; disabled: boolean; onChange: (values: string[]) => void }) {
   const [open, setOpen] = useState(false)
   const selected = values.map((value) => parseISO(value)).filter(isValid)
   const start = rangeStart ? parseISO(rangeStart) : undefined
   return <Field>
-    <FieldLabel htmlFor={id}>{label}</FieldLabel>
+    <FieldLabel htmlFor={id} className={hideLabel ? 'sr-only' : undefined}>{label}</FieldLabel>
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button id={id} type="button" variant="outline" disabled={disabled} className="w-full justify-start font-normal" />}>
         <CalendarDaysIcon data-icon="inline-start" />{values.length ? `${values.length} ${values.length === 1 ? 'date' : 'dates'} selected` : 'Choose dates'}
@@ -530,6 +530,13 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     <ScheduleDate id="schedule-start-date" label="Start date" value={startDate} disabled={pending} onChange={(value) => { setStartDate(value); changed() }} />
     <ScheduleDate id="schedule-end-date" label="End date" value={endDate} disabled={pending} onChange={(value) => { setEndDate(value); changed() }} />
   </div>
+  const panel = (fallback: string) => presentation === 'page' ? 'flex flex-col gap-5 rounded-xl border bg-card p-5' : fallback
+  const panelHeading = (id: string, title: string, meta?: ReactNode) => <div className="flex min-h-7 items-center justify-between gap-3"><h3 id={id} className="text-base font-semibold">{title}</h3>{meta}</div>
+  const allVenuesSelected = venues.length > 0 && venues.every((venue) => venueIds.includes(venue.id))
+  const unavailableTeams = teamRows.filter((row) => row.teamId && row.dates.length).length
+  const optionsSummary = [timeZone, blackoutDates.length ? blackoutDates.length + ' blackout ' + (blackoutDates.length === 1 ? 'date' : 'dates') : '', unavailableTeams ? unavailableTeams + ' ' + (unavailableTeams === 1 ? 'team' : 'teams') + ' unavailable' : ''].filter(Boolean).join(' · ')
+  const playingDays = weekdays.filter((_, index) => windows.some((window) => window.weekdays.includes(index)))
+  const summaryItems = [format === 'single' ? 'Single round robin' : 'Double round robin', summaryDates, playingDays.length ? playingDays.join(', ') : 'No playing days', venueIds.length + ' ' + (venueIds.length === 1 ? 'court' : 'courts'), paces.find((item) => item.value === pace)?.label ?? '']
 
   return <>
     {presentation === 'dialog' && <DialogHeader className="border-b px-6 py-5 pr-14">
@@ -540,80 +547,78 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       {[{ label: 'Setup', active: !reviewing && !showCapacity }, { label: 'Capacity check', active: !reviewing && showCapacity }, { label: 'Review schedule', active: reviewing }].map((step, index) => <li key={step.label} aria-current={step.active ? 'step' : undefined} className={`flex items-center gap-2 ${step.active ? 'font-medium' : 'text-muted-foreground'}`}><span className={`flex size-6 items-center justify-center rounded-full border text-xs tabular-nums ${step.active ? 'border-foreground bg-foreground text-background' : ''}`}>{index + 1}</span>{step.label}</li>)}
     </ol>}
     <form onSubmit={requestPreview} className="flex min-h-0 flex-1 flex-col">
-      <div className={presentation === 'page' ? 'flex flex-col gap-7 py-6' : 'flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-6 py-6'}>
+      <div className={presentation === 'page' ? 'flex flex-col gap-7 pb-6' : 'flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto px-6 py-6'}>
         <div hidden={reviewing} className={reviewing ? 'hidden' : presentation === 'page' ? 'grid grid-cols-1 items-start gap-4 lg:grid-cols-2' : 'flex flex-col gap-7'}>
         <div className={presentation === 'page' ? 'contents lg:flex lg:flex-col lg:gap-4' : 'contents'}>
-        {mode === 'preliminary' && <section className={presentation === 'page' ? 'flex flex-col gap-4 rounded-lg border p-5' : 'flex flex-col gap-4'} aria-labelledby="schedule-format-heading">
-          <div><h3 id="schedule-format-heading" className="text-lg font-semibold">Competition</h3></div>
-          <Field><FieldLabel htmlFor="schedule-format" required>Round-robin format</FieldLabel>
+        {mode === 'preliminary' && <section className={panel('flex flex-col gap-4')} aria-labelledby="schedule-format-heading">
+          {panelHeading('schedule-format-heading', 'Competition')}
+          <Field><FieldLabel htmlFor="schedule-format" required>Format</FieldLabel>
             <Select value={format} disabled={pending} items={[{ value: 'single', label: 'Single round robin' }, { value: 'double', label: 'Double round robin' }]} onValueChange={(value) => { if (value === 'single' || value === 'double') { setFormat(value); changed() } }}>
               <SelectTrigger id="schedule-format" aria-required="true" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value="single">Single round robin</SelectItem><SelectItem value="double">Double round robin</SelectItem></SelectGroup></SelectContent>
             </Select>
-            <FieldDescription>{format === 'single' ? 'Each team plays every other team once.' : 'Each team plays every other team twice, switching home and away.'}</FieldDescription>
+            <FieldDescription>{format === 'single' ? 'Teams meet once.' : 'Teams meet twice, home and away.'}</FieldDescription>
           </Field>
           <div className="flex flex-col gap-3 border-t pt-4">
-            <label className="flex items-center gap-3 text-sm font-medium"><Checkbox checked={playoffs} disabled={pending} onCheckedChange={(checked) => { setPlayoffs(checked); if (!checked) setThirdPlace(false); changed() }} />Include playoffs</label>
-            <p className="pl-7 text-sm text-muted-foreground">Top four teams in eligible divisions advance to single-elimination playoffs.</p>
+            <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-0.5" checked={playoffs} disabled={pending} onCheckedChange={(checked) => { setPlayoffs(checked); if (!checked) setThirdPlace(false); changed() }} /><span className="flex flex-col gap-0.5"><span className="font-medium">Include playoffs</span><span className="text-muted-foreground">Top four teams advance to semifinals.</span></span></label>
             {playoffs && <label className="flex items-center gap-3 pl-7 text-sm"><Checkbox checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} />Include a third-place game</label>}
           </div>
-          {presentation === 'page' && <div className="border-t pt-4">{dateControls}</div>}
         </section>}
 
-        <section className={presentation === 'page' ? 'flex flex-col gap-4 rounded-lg border p-5' : 'flex flex-col gap-4 border-t pt-6'} aria-labelledby="schedule-courts-heading">
-          <div className="flex items-center justify-between gap-2"><h3 id="schedule-courts-heading" className="text-lg font-semibold">Courts</h3>{venueIds.length > 0 && <Badge variant="secondary">{venueIds.length} selected</Badge>}</div>
-          <FieldSet className="gap-2"><FieldLegend variant="label" className="mb-0" required>Venues</FieldLegend>{venues.length ? <div className="grid gap-3 sm:grid-cols-2">{venues.map((venue) => <label key={venue.id} className="flex items-center gap-2 text-sm"><Checkbox checked={venueIds.includes(venue.id)} disabled={pending} onCheckedChange={(checked) => { setVenueIds((current) => checked ? [...current, venue.id] : current.filter((id) => id !== venue.id)); changed() }} />{venue.name}</label>)}</div> : <p className="text-sm text-muted-foreground">Add a venue before generating a schedule.</p>}</FieldSet>
+        <section className={panel('flex flex-col gap-4 border-t pt-6')} aria-labelledby="schedule-dates-heading">
+          {panelHeading('schedule-dates-heading', 'Availability')}
+          {dateControls}
+          {windows.map((window, position) => <div key={window.id} className="flex flex-col gap-3 border-t pt-4">
+            <div className="flex min-h-7 items-center justify-between gap-3"><p className="text-sm font-medium">Playing window {position + 1} <span className="font-normal text-muted-foreground">· Weekly</span></p>{windows.length > 1 && <Button type="button" variant="ghost" size="icon-sm" disabled={pending} aria-label={'Remove playing window ' + (position + 1)} onClick={() => { setWindows((current) => current.filter((item) => item.id !== window.id)); changed() }}><Trash2Icon /></Button>}</div>
+            <FieldSet className="gap-2"><FieldLegend variant="label" className="mb-0" required>Playing days</FieldLegend>
+              <ToggleGroup multiple variant="outline" size="sm" disabled={pending} aria-label={'Playing days for window ' + (position + 1)} className="w-full flex-wrap" value={window.weekdays.map(String)} onValueChange={(values) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, weekdays: values.map(Number) } : item)); changed() }}>
+                {weekdays.map((day, index) => <ToggleGroupItem key={day} value={String(index)} aria-label={day} className="min-w-11 aria-pressed:border-primary aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 aria-pressed:hover:text-primary-foreground">{day}</ToggleGroupItem>)}
+              </ToggleGroup>
+            </FieldSet>
+            <div className={presentation === 'page' ? 'grid gap-4 2xl:grid-cols-2' : 'grid gap-4 sm:grid-cols-2'}>
+              <ScheduleTime id={'schedule-window-' + window.id + '-start'} label="Start time" value={window.startTime} disabled={pending} onChange={(value) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, startTime: value } : item)); changed() }} />
+              <ScheduleTime id={'schedule-window-' + window.id + '-end'} label="End time" value={window.endTime} disabled={pending} onChange={(value) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, endTime: value } : item)); changed() }} />
+            </div>
+          </div>)}
+          <div><Button type="button" variant="outline" size="sm" disabled={pending || windows.length >= 20} onClick={() => { const id = nextWindowId.current++; setWindows((current) => [...current, { id, weekdays: [], startTime: '09:00', endTime: '17:00' }]); changed() }}><PlusIcon data-icon="inline-start" />Add playing window</Button></div>
+          <details className="group border-t pt-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-sm text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <span className="flex items-center gap-1.5"><ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground transition-transform group-open:rotate-90" />More options</span>
+              <span className="truncate text-xs font-normal text-muted-foreground">{optionsSummary}</span>
+            </summary>
+            <div className="flex flex-col gap-5 pt-4">
+              <Field><FieldLabel htmlFor="schedule-zone" required>Time zone</FieldLabel><Input id="schedule-zone" aria-required="true" disabled={pending} value={timeZone} onChange={(e) => { setZoneOverride(e.target.value); changed() }} placeholder="Asia/Manila" /></Field>
+              <ScheduleDates id="schedule-blackout-dates" label="Blackout dates" values={blackoutDates} rangeStart={startDate} rangeEnd={endDate} disabled={pending} onChange={(values) => { setBlackoutDates(values); changed() }} />
+              <FieldSet className="gap-3">
+                <FieldLegend variant="label" className="mb-0">Team unavailable dates</FieldLegend>
+                {teamRows.map((row, position) => <div key={row.id} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-start">
+                  <Field><FieldLabel htmlFor={'schedule-team-' + row.id} className="sr-only">Team</FieldLabel>
+                    <Select value={row.teamId || null} disabled={pending} items={teamOptions} onValueChange={(value) => { if (value) { setTeamRows((current) => current.map((item) => item.id === row.id ? { ...item, teamId: value } : item)); changed() } }}>
+                      <SelectTrigger id={'schedule-team-' + row.id} className="w-full"><SelectValue placeholder="Choose a team" /></SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}><SelectGroup>{teamOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent>
+                    </Select>
+                  </Field>
+                  <ScheduleDates id={'schedule-team-dates-' + row.id} label="Unavailable dates" hideLabel values={row.dates} rangeStart={startDate} rangeEnd={endDate} disabled={pending} onChange={(values) => { setTeamRows((current) => current.map((item) => item.id === row.id ? { ...item, dates: values } : item)); changed() }} />
+                  <Button type="button" variant="ghost" size="icon-sm" className="sm:mt-1" disabled={pending} aria-label={'Remove team availability ' + (position + 1)} onClick={() => { setTeamRows((current) => current.filter((item) => item.id !== row.id)); changed() }}><Trash2Icon /></Button>
+                </div>)}
+                {status.isError && <p className="text-sm text-muted-foreground">Teams couldn’t be loaded.</p>}
+                <div><Button type="button" variant="outline" size="sm" disabled={pending || !teamOptions.length || teamRows.length >= 200} onClick={() => { const id = nextTeamRowId.current++; setTeamRows((current) => [...current, { id, teamId: '', dates: [] }]) }}><PlusIcon data-icon="inline-start" />Add team availability</Button></div>
+              </FieldSet>
+            </div>
+          </details>
         </section>
         </div>
+
         <div className={presentation === 'page' ? 'contents lg:flex lg:flex-col lg:gap-4' : 'contents'}>
-        <section className={presentation === 'page' ? 'flex flex-col gap-4 rounded-lg border p-5' : 'flex flex-col gap-4 border-t pt-6'} aria-labelledby="schedule-dates-heading">
-          <div><h3 id="schedule-dates-heading" className="text-lg font-semibold">Availability</h3></div>
-          {(presentation !== 'page' || mode !== 'preliminary') && dateControls}
-          <div className="flex flex-col gap-3">
-            {windows.map((window, position) => <div key={window.id} className="flex flex-col gap-3 border-b pb-4 last:border-b-0">
-              <div className="flex items-center justify-between gap-3"><p className="text-sm font-medium">Playing window {position + 1} <span className="font-normal text-muted-foreground">· Weekly</span></p>{windows.length > 1 && <Button type="button" variant="ghost" size="icon-sm" disabled={pending} aria-label={`Remove playing window ${position + 1}`} onClick={() => { setWindows((current) => current.filter((item) => item.id !== window.id)); changed() }}><Trash2Icon /></Button>}</div>
-              <FieldSet className="gap-2"><FieldLegend variant="label" className="mb-0" required>Playing days</FieldLegend>
-                <ToggleGroup multiple variant="outline" size="sm" disabled={pending} aria-label={`Playing days for window ${position + 1}`} className="w-full flex-wrap" value={window.weekdays.map(String)} onValueChange={(values) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, weekdays: values.map(Number) } : item)); changed() }}>
-                  {weekdays.map((day, index) => <ToggleGroupItem key={day} value={String(index)} aria-label={day}>{day}</ToggleGroupItem>)}
-                </ToggleGroup>
-              </FieldSet>
-              <div className={presentation === 'page' ? 'grid gap-4 2xl:grid-cols-2' : 'grid gap-4 sm:grid-cols-2'}>
-                <ScheduleTime id={`schedule-window-${window.id}-start`} label="Start time" value={window.startTime} disabled={pending} onChange={(value) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, startTime: value } : item)); changed() }} />
-                <ScheduleTime id={`schedule-window-${window.id}-end`} label="End time" value={window.endTime} disabled={pending} onChange={(value) => { setWindows((current) => current.map((item) => item.id === window.id ? { ...item, endTime: value } : item)); changed() }} />
-              </div>
-            </div>)}
-            <div><Button type="button" variant="outline" size="sm" disabled={pending || windows.length >= 20} onClick={() => { const id = nextWindowId.current++; setWindows((current) => [...current, { id, weekdays: [], startTime: '09:00', endTime: '17:00' }]); changed() }}><PlusIcon data-icon="inline-start" />Add playing window</Button></div>
-          </div>
-          <details className="group border-t pt-3"><summary className="cursor-pointer text-sm font-medium">More availability options</summary><div className="flex flex-col gap-4 pt-4">
-          <Field><FieldLabel htmlFor="schedule-zone" required>Time zone</FieldLabel><Input id="schedule-zone" aria-required="true" disabled={pending} value={timeZone} onChange={(e) => { setZoneOverride(e.target.value); changed() }} placeholder="Asia/Manila" /><FieldDescription>All playing windows and preview times use this IANA time zone.</FieldDescription></Field>
-          <div className="flex flex-col gap-1.5">
-            <ScheduleDates id="schedule-blackout-dates" label="Blackout dates" values={blackoutDates} rangeStart={startDate} rangeEnd={endDate} disabled={pending} onChange={(values) => { setBlackoutDates(values); changed() }} />
-            <p className="text-sm text-muted-foreground">No games are scheduled on these dates, such as holidays or venue closures.</p>
-          </div>
-          <FieldSet className="gap-3">
-            <FieldLegend variant="label" className="mb-0">Team availability</FieldLegend>
-            <p className="text-sm text-muted-foreground">Add dates when a team can’t play.</p>
-            {teamRows.map((row, position) => <div key={row.id} className="grid gap-4 rounded-lg border p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-start">
-              <Field><FieldLabel htmlFor={`schedule-team-${row.id}`}>Team</FieldLabel>
-                <Select value={row.teamId || null} disabled={pending} items={teamOptions} onValueChange={(value) => { if (value) { setTeamRows((current) => current.map((item) => item.id === row.id ? { ...item, teamId: value } : item)); changed() } }}>
-                  <SelectTrigger id={`schedule-team-${row.id}`} className="w-full"><SelectValue placeholder="Choose a team" /></SelectTrigger>
-                  <SelectContent alignItemWithTrigger={false}><SelectGroup>{teamOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectGroup></SelectContent>
-                </Select>
-              </Field>
-              <ScheduleDates id={`schedule-team-dates-${row.id}`} label="Unavailable dates" values={row.dates} rangeStart={startDate} rangeEnd={endDate} disabled={pending} onChange={(values) => { setTeamRows((current) => current.map((item) => item.id === row.id ? { ...item, dates: values } : item)); changed() }} />
-              <Button type="button" variant="ghost" size="icon-sm" className="sm:mt-6" disabled={pending} aria-label={`Remove team availability ${position + 1}`} onClick={() => { setTeamRows((current) => current.filter((item) => item.id !== row.id)); changed() }}><Trash2Icon /></Button>
-            </div>)}
-            {status.isError && <p className="text-sm text-muted-foreground">Teams couldn’t be loaded, so team availability can’t be added right now.</p>}
-            <div><Button type="button" variant="outline" size="sm" disabled={pending || !teamOptions.length || teamRows.length >= 200} onClick={() => { const id = nextTeamRowId.current++; setTeamRows((current) => [...current, { id, teamId: '', dates: [] }]) }}><PlusIcon data-icon="inline-start" />Add team availability</Button></div>
-          </FieldSet></div></details>
+        <section className={panel('flex flex-col gap-4 border-t pt-6')} aria-labelledby="schedule-courts-heading">
+          {panelHeading('schedule-courts-heading', 'Courts', venues.length > 0 && <div className="flex items-center gap-3 text-xs text-muted-foreground"><span className="tabular-nums">{venueIds.length} of {venues.length}</span><Button type="button" variant="link" size="sm" className="h-auto px-0 text-xs" disabled={pending} onClick={() => { setVenueIds(allVenuesSelected ? [] : venues.map((venue) => venue.id)); changed() }}>{allVenuesSelected ? 'Clear' : 'Select all'}</Button></div>)}
+          <FieldSet className="gap-0"><FieldLegend variant="label" className="sr-only" required>Venues</FieldLegend>
+            {venues.length ? <div className="flex flex-col divide-y border-y">{venues.map((venue) => <label key={venue.id} className="flex cursor-pointer items-center gap-3 py-2.5 text-sm"><Checkbox checked={venueIds.includes(venue.id)} disabled={pending} onCheckedChange={(checked) => { setVenueIds((current) => checked ? [...current, venue.id] : current.filter((id) => id !== venue.id)); changed() }} />{venue.name}</label>)}</div> : <p className="text-sm text-muted-foreground">Add a venue before generating a schedule.</p>}
+          </FieldSet>
         </section>
 
-        <section className={presentation === 'page' ? 'flex flex-col gap-4 rounded-lg border p-5' : 'flex flex-col gap-4 border-t pt-6'} aria-labelledby="schedule-settings-heading">
-          <h3 id="schedule-settings-heading" className="text-lg font-semibold">Game rules</h3>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field><FieldLabel htmlFor="schedule-duration" required>Game duration (minutes)</FieldLabel><Input id="schedule-duration" type="number" min="1" step="1" required disabled={pending} value={duration} onChange={(e) => { setDuration(e.target.value); changed() }} /></Field>
-            <Field><FieldLabel htmlFor="schedule-rest" required>Minimum rest (minutes)</FieldLabel><Input id="schedule-rest" type="number" min="0" step="1" required disabled={pending} value={rest} onChange={(e) => { setRest(e.target.value); changed() }} /></Field>
-          </div>
+        <section className={panel('flex flex-col gap-4 border-t pt-6')} aria-labelledby="schedule-settings-heading">
+          {panelHeading('schedule-settings-heading', 'Game rules')}
           <Field><div className="flex items-center gap-1.5"><FieldLabel htmlFor="schedule-pace" required>Pacing</FieldLabel>
             <Popover><PopoverTrigger openOnHover delay={200} closeDelay={150} render={<Button type="button" variant="ghost" size="icon-xs" aria-label="Explain pacing options" />}><CircleHelpIcon aria-hidden="true" /></PopoverTrigger>
               <PopoverContent align="start" side="top" aria-label="Pacing options" className="w-72 gap-2 text-xs">
@@ -624,14 +629,14 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               <SelectTrigger id="schedule-pace" aria-required="true" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent alignItemWithTrigger={false}><SelectGroup>{paces.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
             </Select>
-            <FieldDescription>{paces.find((item) => item.value === pace)?.description}</FieldDescription>
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field><FieldLabel htmlFor="schedule-max-per-day" required>Max games per team per day</FieldLabel><Input id="schedule-max-per-day" type="number" min="1" max="10" step="1" required disabled={pending} value={maxPerDay} onChange={(e) => { setMaxPerDay(e.target.value); changed() }} /></Field>
-            <Field><FieldLabel htmlFor="schedule-changeover" required>Court changeover (minutes)</FieldLabel><Input id="schedule-changeover" type="number" min="0" max="240" step="1" required disabled={pending} value={changeover} onChange={(e) => { setChangeover(e.target.value); changed() }} /><FieldDescription>Time to clear a court between games.</FieldDescription></Field>
+            <Field><FieldLabel htmlFor="schedule-duration" required>Game length (min)</FieldLabel><Input id="schedule-duration" type="number" min="1" step="1" required disabled={pending} value={duration} onChange={(e) => { setDuration(e.target.value); changed() }} /></Field>
+            <Field><FieldLabel htmlFor="schedule-rest" required>Minimum rest (min)</FieldLabel><Input id="schedule-rest" type="number" min="0" step="1" required disabled={pending} value={rest} onChange={(e) => { setRest(e.target.value); changed() }} /></Field>
+            <Field><FieldLabel htmlFor="schedule-max-per-day" required>Games per team per day</FieldLabel><Input id="schedule-max-per-day" type="number" min="1" max="10" step="1" required disabled={pending} value={maxPerDay} onChange={(e) => { setMaxPerDay(e.target.value); changed() }} /></Field>
+            <Field><FieldLabel htmlFor="schedule-changeover" required>Court changeover (min)</FieldLabel><Input id="schedule-changeover" type="number" min="0" max="240" step="1" required disabled={pending} value={changeover} onChange={(e) => { setChangeover(e.target.value); changed() }} /></Field>
           </div>
         </section>
-
         </div>
         </div>
 
@@ -754,14 +759,11 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
       </div>
       {(preview.isError || error || save.isError) && <div className="border-t px-6 py-3"><Alert variant="destructive" role="alert"><AlertTitle>Unable to continue</AlertTitle><AlertDescription>{error || (preview.isError ? preview.error.message : save.error?.message)}</AlertDescription></Alert></div>}
-      <DialogFooter className={presentation === 'page' ? 'sticky bottom-0 z-10 border-t bg-background py-4 sm:items-center' : 'border-t px-6 py-4'}>
-        {presentation === 'page' && !reviewing && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground sm:mr-auto">
-          <span className="font-medium text-foreground">Schedule summary</span>
-          <span>{format === 'single' ? 'Single round robin' : 'Double round robin'}</span>
-          <span>{summaryDates}</span>
-          <span>{venueIds.length} {venueIds.length === 1 ? 'court' : 'courts'}</span>
-          <span>{paces.find((item) => item.value === pace)?.label}</span>
-        </div>}
+      <DialogFooter className={presentation === 'page' ? 'sticky bottom-0 z-10 flex-row flex-wrap items-center justify-end border-t bg-background py-3 sm:py-4' : 'border-t px-6 py-4'}>
+        {presentation === 'page' && !reviewing && <p className="mr-auto hidden flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground md:flex">
+          {summaryItems.map((item, index) => <span key={index} className="flex items-center gap-2.5">{index > 0 && <span aria-hidden="true" className="size-1 rounded-full bg-border" />}<span className={index === 0 ? 'font-medium text-foreground' : undefined}>{item}</span></span>)}
+        </p>}
+
         <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
         {reviewing ? <Button type="button" variant="outline" disabled={pending} onClick={() => { if (confirmDiscardSchedulePreview()) { setDraft(null); setShowCapacity(false); preview.reset() } }}>Edit settings</Button> : <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending}>{estimate.isFetching ? 'Checking capacity…' : preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>}
         {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !!draft.unplaced.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
