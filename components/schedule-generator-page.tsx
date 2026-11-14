@@ -41,11 +41,11 @@ export function ScheduleGeneratorPage() {
   const loading = organizations.isLoading || (!!organization && leagues.isLoading) || (!!league && seasons.isLoading) || (!!league && venues.isLoading)
   const failed = [organizations, leagues, seasons, venues].find((query) => query.isError)
 
-  return <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 md:p-8">
+  return <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-4 md:p-8">
     <div className="flex flex-col gap-5 border-b pb-6">
       <Button type="button" variant="ghost" size="sm" className="-ml-2 w-fit" onClick={leave}><ArrowLeftIcon data-icon="inline-start" />Back to games</Button>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-1"><h1 className="text-2xl font-semibold tracking-tight">Generate preliminary schedule</h1><p className="text-sm text-muted-foreground">Set availability, check capacity, and review games before saving.</p></div>
+        <div className="flex flex-col gap-1"><h1 className="text-2xl font-semibold tracking-tight">Generate preliminary schedule</h1></div>
         {league && season && <Badge variant="outline">{league.name} · {season.name}</Badge>}
       </div>
     </div>
