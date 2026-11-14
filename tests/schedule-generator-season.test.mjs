@@ -145,7 +145,8 @@ test('capacity opens in a dialog only after requesting a preview and explains a 
   const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
   assert.match(text, /Schedule can’t be generated yet/)
   assert.match(text, /Not enough court time/)
-  assert.match(text, /These settings have 1 open court slot for 3 games, so 2 games can’t be placed\./)
+  assert.match(text, /2 games don’t fit in the selected dates, playing windows and courts\./)
+  assert.match(text, /2\s+short/)
   assert.match(text, /Select the other court and add playing time\./)
   assert.match(text, /Extend the end date by about \d+ weeks\./)
   assert.equal(h.calls.length, 0)
@@ -153,12 +154,15 @@ test('capacity opens in a dialog only after requesting a preview and explains a 
   assert.equal(capacityDialog(h.render()), false)
 })
 
-test('a quick fix in the capacity dialog changes the setting and closes the dialog', async () => {
+test('a quick fix in the capacity dialog changes the setting and rechecks capacity', async () => {
   const h = harness('preliminary', response, { capacity: 1 }); h.setup(); await h.preview()
   h.render().find((n) => n.type === 'Button' && nodes(n).includes('Select all courts')).props.onClick()
+  h.render()
+  await new Promise(setImmediate)
   const tree = h.render()
-  assert.equal(capacityDialog(tree), false)
+  assert.equal(capacityDialog(tree), true)
   assert.match(tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' '), /2\s+of\s+2/)
+  assert.equal(tree.some((n) => n.type === 'Button' && nodes(n).includes('Select all courts')), false)
 })
 
 test('the preview starts without a dialog when capacity is sufficient', async () => {
@@ -235,7 +239,9 @@ test('capacity check blocks a preview when pacing leaves too few dates', async (
   const h = harness('preliminary', response, { maxGamesPerTeam: 3, limitedBy: 'weekly', required: 28, divisions }); h.setup(); await h.preview()
   const text = h.render().filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
   assert.match(text, /Weekly pacing needs more weeks/)
-  assert.match(text, /18 under: each team plays 7 games, one per week, but only 3 weeks fit between Jan 1 and Feb 1, 2026\./)
+  assert.match(text, /Each team plays up to 7 games, one per week, but only 3 weeks fit between Jan 1 and Feb 1, 2026\./)
+  assert.match(text, /18 under/)
+  assert.match(text, /4 weeks short/)
   assert.match(text, /Extend the end date by 4 weeks\./)
   assert.equal(h.calls.length, 0)
 })

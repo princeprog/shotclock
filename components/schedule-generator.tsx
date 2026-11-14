@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { ArrowRightIcon, CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -148,53 +148,55 @@ function formatGameSlot(value: string): string {
 }
 
 // Each reason the capacity check blocks a preview, in plain terms, with the settings that would fix it.
-type CapacityBlocker = { title: string; detail: string; fixes: string[]; action?: { kind: 'spread' } | { kind: 'courts' } | { kind: 'daily'; value: number } }
+type CapacityFix = { text: string; action?: { kind: 'spread'; label: string } | { kind: 'courts'; label: string } | { kind: 'daily'; value: number; label: string } }
+type CapacityBlocker = { title: string; detail: string; short?: string; divisions?: string[]; fixes: CapacityFix[] }
 const plural = (count: number, word: string) => count.toLocaleString('en-US') + ' ' + word + (count === 1 ? '' : 's')
 function capacityBlockers(estimate: Estimate, context: { startDate: string; endDate: string; selectedCourts: number; totalCourts: number; maxPerDay: number }): CapacityBlocker[] {
   const blockers: CapacityBlocker[] = []
   const ready = estimate.divisions.filter((division) => division.reason === undefined)
   if (estimate.required === 0) {
     blockers.push({ title: 'No divisions are ready to schedule', detail: 'Each division needs at least two teams and no existing preliminary games.',
-      fixes: estimate.divisions.filter((division) => division.reason).map((division) => division.name + ': ' + division.reason) })
+      fixes: estimate.divisions.filter((division) => division.reason).map((division) => ({ text: division.name + ': ' + division.reason })) })
     return blockers
   }
   const start = parseISO(context.startDate)
   const end = parseISO(context.endDate)
   const days = isValid(start) && isValid(end) ? Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1 : 0
   const range = isValid(start) && isValid(end) ? formatDate(start, 'MMM d') + ' and ' + formatDate(end, 'MMM d, yyyy') : 'these dates'
+  const freeCourts = context.totalCourts - context.selectedCourts
+  const courtsFix = { kind: 'courts' as const, label: 'Select all courts' }
   if (estimate.capacity === 0) {
     blockers.push({ title: 'No open court time', detail: 'The selected dates, playing windows and courts don’t leave room for a single game.',
-      fixes: ['Make each playing window longer than one game plus changeover.', 'Choose playing days that fall between the start and end dates.', 'Check for blackout dates or existing games filling the selected courts.'] })
+      fixes: [{ text: 'Make each playing window longer than one game plus changeover.' }, { text: 'Choose playing days that fall between the start and end dates.' }, { text: 'Check for blackout dates or existing games filling the selected courts.' }] })
   } else if (estimate.capacity < estimate.required) {
     const shortfall = estimate.required - estimate.capacity
-    const fixes: string[] = []
-    let action: CapacityBlocker['action']
-    const perCourt = estimate.capacity / Math.max(1, context.selectedCourts)
-    const extraCourts = Math.ceil(shortfall / perCourt)
-    const freeCourts = context.totalCourts - context.selectedCourts
-    if (freeCourts > 0) {
-      fixes.push(extraCourts <= freeCourts ? 'Select ' + plural(extraCourts, 'more court') + '.' : freeCourts === 1 ? 'Select the other court and add playing time.' : 'Select all ' + context.totalCourts + ' courts and add playing time.')
-      action = { kind: 'courts' }
-    }
-    if (days >= 7) fixes.push('Extend the end date by about ' + plural(Math.ceil(shortfall / (estimate.capacity / (days / 7))), 'week') + '.')
-    fixes.push('Add playing days, lengthen playing windows or shorten games.')
-    blockers.push({ title: 'Not enough court time', detail: 'These settings have ' + plural(estimate.capacity, 'open court slot') + ' for ' + plural(estimate.required, 'game') + ', so ' + plural(shortfall, 'game') + ' can’t be placed.', fixes, action })
+    const fixes: CapacityFix[] = []
+    const extraCourts = Math.ceil(shortfall / (estimate.capacity / Math.max(1, context.selectedCourts)))
+    if (freeCourts > 0) fixes.push(extraCourts <= freeCourts ? { text: 'Select ' + plural(extraCourts, 'more court') + '.', action: courtsFix }
+      : { text: freeCourts === 1 ? 'Select the other court and add playing time.' : 'Select all ' + context.totalCourts + ' courts and add playing time.', action: courtsFix })
+    if (days >= 7) fixes.push({ text: 'Extend the end date by about ' + plural(Math.ceil(shortfall / (estimate.capacity / (days / 7))), 'week') + '.' })
+    fixes.push({ text: 'Add playing days, lengthen playing windows or shorten games.' })
+    blockers.push({ title: 'Not enough court time', detail: plural(shortfall, 'game') + (shortfall === 1 ? ' doesn’t' : ' don’t') + ' fit in the selected dates, playing windows and courts.', fixes })
   }
   const limit = estimate.maxGamesPerTeam
   if (limit !== null && limit !== undefined) {
     const short = ready.filter((division) => (division.gamesPerTeam ?? 0) > limit)
     if (short.length) {
       const most = Math.max(...short.map((division) => division.gamesPerTeam ?? 0))
-      const names = short.map((division) => division.name).join(', ')
+      const divisions = short.map((division) => division.name)
       if (estimate.limitedBy === 'weekly') {
-        blockers.push({ title: 'Weekly pacing needs more weeks', detail: names + ': each team plays ' + plural(most, 'game') + ', one per week, but only ' + plural(limit, 'week') + ' fit between ' + range + '.',
-          fixes: ['Extend the end date by ' + plural(most - limit, 'week') + '.', 'Or switch pacing to Spread across dates or As early as possible.'], action: { kind: 'spread' } })
+        blockers.push({ title: 'Weekly pacing needs more weeks', short: plural(most - limit, 'week') + ' short', divisions,
+          detail: 'Each team plays up to ' + plural(most, 'game') + ', one per week, but only ' + plural(limit, 'week') + ' fit between ' + range + '.',
+          fixes: [{ text: 'Extend the end date by ' + plural(most - limit, 'week') + '.' }, { text: 'Switch pacing to Spread across dates.', action: { kind: 'spread', label: 'Use Spread' } }] })
       } else {
-        const playingDays = Math.floor(limit / Math.max(1, context.maxPerDay))
-        const perDay = playingDays > 0 ? Math.ceil(most / playingDays) : 0
-        blockers.push({ title: 'Not enough playing days', detail: names + ': each team plays ' + plural(most, 'game') + ', but there are only ' + plural(playingDays, 'playing day') + ' at ' + context.maxPerDay + ' per team per day.',
-          fixes: ['Add playing days or extend the dates to reach ' + plural(Math.ceil(most / Math.max(1, context.maxPerDay)), 'playing day') + '.', ...(perDay > context.maxPerDay && perDay <= 10 ? ['Or allow ' + perDay + ' games per team per day.'] : [])],
-          action: perDay > context.maxPerDay && perDay <= 10 ? { kind: 'daily', value: perDay } : undefined })
+        const perDay = Math.max(1, context.maxPerDay)
+        const playingDays = Math.floor(limit / perDay)
+        const neededDays = Math.ceil(most / perDay)
+        const raise = playingDays > 0 ? Math.ceil(most / playingDays) : 0
+        blockers.push({ title: 'Not enough playing days', short: plural(neededDays - playingDays, 'day') + ' short', divisions,
+          detail: 'Each team plays up to ' + plural(most, 'game') + ', but these dates have ' + plural(playingDays, 'playing day') + ' at ' + perDay + ' per team per day.',
+          fixes: [{ text: 'Add playing days or extend the dates to reach ' + plural(neededDays, 'playing day') + '.' },
+            ...(raise > perDay && raise <= 10 ? [{ text: 'Allow ' + raise + ' games per team per day.', action: { kind: 'daily' as const, value: raise, label: 'Allow ' + raise } }] : [])] })
       }
     }
   }
@@ -421,6 +423,25 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     wasPreviewed.current = !!draft
   }, [draft])
 
+  // A quick fix updates the setting, then reruns the capacity check with the new settings once they render.
+  const recheckCapacity = useRef(false)
+  useEffect(() => {
+    if (!recheckCapacity.current || !settingsKey) return
+    recheckCapacity.current = false
+    void checkCapacity()
+  })
+  function applyFix(action: NonNullable<CapacityFix['action']>) {
+    if (action.kind === 'spread') setPace('spread')
+    else if (action.kind === 'courts') setVenueIds(venues.map((venue) => venue.id))
+    else setMaxPerDay(String(action.value))
+    setDraft(null)
+    setSuggestions({})
+    setError('')
+    preview.reset()
+    save.reset()
+    recheckCapacity.current = true
+  }
+
   function changed() {
     setDraft(null)
     setSuggestions({})
@@ -444,13 +465,6 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     if (!timeZone.trim()) { setError('Enter a valid IANA time zone.'); return }
     if (!settingsKey) { setError('Check the scheduling settings and try again.'); return }
     await checkCapacity()
-  }
-
-  function applyFix(action: NonNullable<CapacityBlocker['action']>) {
-    if (action.kind === 'spread') setPace('spread')
-    else if (action.kind === 'courts') setVenueIds(venues.map((venue) => venue.id))
-    else setMaxPerDay(String(action.value))
-    changed()
   }
 
   // The capacity dialog stays open only when something blocks the preview; otherwise the preview starts right away.
@@ -802,36 +816,42 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       </DialogFooter>
     </form>
     {showCapacity && <Dialog open onOpenChange={(open) => { if (!open && !estimate.isFetching) setShowCapacity(false) }}>
-      <DialogContent showCloseButton={!estimate.isFetching} aria-labelledby="schedule-capacity-heading" className="max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto sm:max-w-lg">
-        <DialogHeader className="pr-8">
-          <DialogTitle id="schedule-capacity-heading">{estimate.isFetching ? 'Checking capacity' : estimate.isError ? 'Capacity check unavailable' : blockers.length ? 'Schedule can’t be generated yet' : 'Capacity looks good'}</DialogTitle>
-          <DialogDescription>{estimate.isFetching ? 'Comparing the games needed with open court time.' : estimate.isError ? estimate.error.message : blockers.length ? (blockers.length === 1 ? 'Fix this issue, then preview again.' : 'Fix these ' + blockers.length + ' issues, then preview again.') : 'Generating the preview.'}</DialogDescription>
+      <DialogContent showCloseButton={!estimate.isFetching} aria-labelledby="schedule-capacity-heading" className="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto p-0 sm:max-w-lg">
+        <DialogHeader className="gap-1.5 px-6 pt-6 pr-12 pb-5">
+          <DialogTitle id="schedule-capacity-heading" className="text-lg font-semibold">{estimate.isFetching ? 'Checking capacity' : estimate.isError ? 'Capacity check unavailable' : blockers.length ? 'Schedule can’t be generated yet' : 'Capacity looks good'}</DialogTitle>
+          <DialogDescription>{estimate.isFetching ? 'Comparing the games needed with open court time.' : estimate.isError ? estimate.error.message : blockers.length ? (blockers.length === 1 ? 'One setting needs to change before the preview.' : blockers.length + ' settings need to change before the preview.') : 'Generating the preview.'}</DialogDescription>
         </DialogHeader>
-        {estimate.isFetching && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />Checking capacity…</p>}
-        {estimateReady && estimate.data && blockers.length > 0 && <>
-          {estimate.data.required > 0 && <dl className="grid grid-cols-2 divide-x rounded-lg border text-sm">
-            <div className="flex flex-col gap-1 p-3"><dt className="text-muted-foreground">Games needed</dt><dd className="text-xl font-semibold tabular-nums">{estimate.data.required.toLocaleString('en-US')}</dd></div>
-            <div className="flex flex-col gap-1 p-3"><dt className="text-muted-foreground">Open court slots</dt><dd className={estimate.data.capacity < estimate.data.required ? 'text-xl font-semibold tabular-nums text-destructive' : 'text-xl font-semibold tabular-nums'}>{estimate.data.capacity.toLocaleString('en-US')}</dd></div>
+        {estimate.isFetching && <div role="status" className="flex items-center gap-2.5 px-6 pb-6 text-sm text-muted-foreground"><LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />This takes a moment.</div>}
+        {estimateReady && estimate.data && blockers.length > 0 && <div className="flex flex-col gap-5 px-6 pb-6">
+          {estimate.data.required > 0 && <dl className="grid grid-cols-2 overflow-hidden rounded-lg bg-muted/60">
+            <div className="flex flex-col gap-1 px-4 py-3"><dt className="text-xs text-muted-foreground">Games needed</dt><dd className="text-2xl font-semibold tabular-nums">{estimate.data.required.toLocaleString('en-US')}</dd></div>
+            <div className="flex flex-col gap-1 border-l border-background px-4 py-3"><dt className="text-xs text-muted-foreground">Open court slots</dt><dd className="flex items-baseline gap-2"><span className="text-2xl font-semibold tabular-nums">{estimate.data.capacity.toLocaleString('en-US')}</span>{estimate.data.capacity < estimate.data.required ? <span className="text-xs font-medium text-destructive">{(estimate.data.required - estimate.data.capacity).toLocaleString('en-US')} short</span> : <span className="text-xs text-muted-foreground">Enough</span>}</dd></div>
           </dl>}
           <ul aria-label="What’s blocking the schedule" className="flex flex-col divide-y">
-            {blockers.map((blocker) => <li key={blocker.title} className="flex gap-3 py-4 first:pt-0 last:pb-0">
-              <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-destructive" />
-              <div className="flex min-w-0 flex-col gap-2">
-                <p className="text-sm font-medium">{blocker.title}</p>
-                <p className="text-sm text-muted-foreground">{blocker.detail}</p>
-                {blocker.fixes.length > 0 && <ul className="flex flex-col gap-1 text-sm">{blocker.fixes.map((fix) => <li key={fix} className="flex gap-2"><ArrowRightIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />{fix}</li>)}</ul>}
-                {blocker.action && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => applyFix(blocker.action!)}>{blocker.action.kind === 'spread' ? 'Use Spread across dates' : blocker.action.kind === 'courts' ? 'Select all courts' : 'Allow ' + blocker.action.value + ' games per day'}</Button>}
+            {blockers.map((blocker) => <li key={blocker.title} className="flex flex-col gap-2 py-4 first:pt-0 last:pb-0">
+              <div className="flex items-start justify-between gap-3">
+                <h4 className="flex items-center gap-2.5 text-sm font-semibold"><CircleAlertIcon aria-hidden="true" className="size-4 shrink-0 text-destructive" />{blocker.title}</h4>
+                {blocker.short && <span className="shrink-0 text-xs font-medium text-destructive">{blocker.short}</span>}
               </div>
+              <p className="pl-6.5 text-sm text-muted-foreground">{blocker.detail}</p>
+              {blocker.divisions && <ul aria-label="Affected divisions" className="flex flex-wrap gap-1.5 pl-6.5">{blocker.divisions.map((name) => <li key={name}><Badge variant="secondary">{name}</Badge></li>)}</ul>}
+              {blocker.fixes.length > 0 && <ul aria-label="How to fix" className="mt-1 flex flex-col gap-1.5 pl-6.5">{blocker.fixes.map((fix) => <li key={fix.text} className="flex min-h-9 items-center justify-between gap-3 rounded-md bg-muted/50 py-1.5 pr-1.5 pl-3 text-sm">
+                <span>{fix.text}</span>
+                {fix.action && <Button type="button" variant="outline" size="sm" className="shrink-0 bg-background" onClick={() => applyFix(fix.action!)}>{fix.action.label}</Button>}
+              </li>)}</ul>}
             </li>)}
           </ul>
-          {estimate.data.required > 0 && estimate.data.divisions.some((division) => division.reason) && <p className="text-xs text-muted-foreground">Not included: {estimate.data.divisions.filter((division) => division.reason).map((division) => division.name + ' (' + division.reason + ')').join(', ')}</p>}
-        </>}
-        <DialogFooter>
+          {estimate.data.required > 0 && estimate.data.divisions.some((division) => division.reason) && <div className="flex flex-col gap-1.5 border-t pt-4 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">Not included</p>
+            <ul className="flex flex-col gap-1">{estimate.data.divisions.filter((division) => division.reason).map((division) => <li key={division.id}>{division.name} · {division.reason}</li>)}</ul>
+          </div>}
+        </div>}
+        {!estimate.isFetching && (estimate.isError || blockers.length > 0) && <DialogFooter className="rounded-b-xl border-t bg-muted/40 px-6 py-4">
           {estimate.isError ? <>
             <Button type="button" variant="outline" onClick={() => setShowCapacity(false)}>Close</Button>
             <Button type="button" onClick={() => void checkCapacity()}>Try again</Button>
-          </> : <Button type="button" disabled={estimate.isFetching} onClick={() => setShowCapacity(false)}>Edit settings</Button>}
-        </DialogFooter>
+          </> : <Button type="button" onClick={() => setShowCapacity(false)}>Edit settings</Button>}
+        </DialogFooter>}
       </DialogContent>
     </Dialog>}
   </>
