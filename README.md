@@ -15,3 +15,15 @@ Run the lightweight security checks with `node --test tests/auth-security.test.t
 TanStack Query manages client-side server state, and Redux Toolkit manages shared mutable client UI state. `components/app-providers.tsx` supplies both providers. The session-restore status check uses TanStack Query without caching credentials or retrying requests; Redux currently controls the dashboard sidebar. Sign-in and sign-out clear the query cache and reset shared UI state. Passwords and tokens must not be placed in Redux or query/mutation caches.
 
 Run focused state checks with `node --test tests/client-state.test.ts tests/client-session.test.ts`.
+
+## Security
+
+- Every page response carries a per-request nonce Content-Security-Policy from `proxy.ts`; `next.config.mjs` adds nosniff, frame denial, a strict referrer policy, a permissions policy and, in production, HSTS. Scripts without the nonce are blocked.
+- New package versions install only after they are a day old (`minimumReleaseAge`), except Next.js security releases.
+- CI fails on high or critical `pnpm audit` findings; CodeQL, gitleaks and Dependabot run on GitHub.
+
+### Production checklist
+
+- Serve over HTTPS with `APP_ORIGIN` and `AUTH_API_URL` set to HTTPS origins.
+- Configure `AUTH_GATEWAY_SECRET` and `AUTH_TRUSTED_CLIENT_IP_HEADER` behind an ingress that writes one verified client IP, and the matching API settings, so rate limits apply per client.
+- Keep the API reachable only from the web app's network.

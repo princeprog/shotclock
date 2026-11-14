@@ -10,3 +10,13 @@ When available, consult `../docs/agent-skills.md` and read relevant available sk
 - The user prefers a clean, professional interface. The existing login uses restrained basketball-court linework and the reusable Shotclock logo; extend the current design intentionally.
 - For small changes, use changed-file lint and relevant tests instead of a full-project typecheck. Run a full typecheck only for shared types, API contracts, many files, or an explicit request; run it alone with `NODE_OPTIONS=--max-old-space-size=2048` and the local `node_modules/.bin/tsc`. Report only errors in touched files. After stopping a long-running check, confirm its Node process exited.
 - Preserve existing uncommitted changes and never print secrets or tokens. Update the relevant workspace docs and `PROJECT_CONTEXT.md` when durable project facts change.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
