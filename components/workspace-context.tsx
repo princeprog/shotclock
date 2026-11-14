@@ -12,7 +12,7 @@ import { selectDivision, selectLeague, selectSeason } from '@/lib/ui-slice'
 import { parseWorkspaceSelection, readWorkspaceSelection, resolveWorkspaceDivision, resolveWorkspaceLeague, resolveWorkspaceSeason, saveWorkspaceSelection, subscribeWorkspaceSelection } from '@/lib/workspace-selection'
 
 type Organization = { id: string; name: string }
-type League = { id: string; name: string; location: string | null }
+type League = { id: string; name: string; location: string | null; time_zone?: string | null }
 type Season = { id: string; name: string; status: 'draft' | 'active' | 'completed'; start_date: string | null; end_date: string | null }
 type Division = { id: string; season_id: string; name: string; min_age: number | null; max_age: number | null }
 

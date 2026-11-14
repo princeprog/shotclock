@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
+import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
 import { CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, ListIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
@@ -18,6 +19,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { leagueRequest } from '@/lib/league-client'
+import { browserTimeZone, formatInZone, resolveZonedTime } from '@/lib/league-time'
 import { confirmDiscardSchedulePreview } from '@/lib/schedule-navigation-guard'
 import { SchedulePreviewCalendar } from '@/components/schedule-preview-calendar'
 
@@ -87,37 +89,8 @@ type Props = {
   onPendingChange?: (pending: boolean) => void
   onUnsavedChange?: (unsaved: boolean) => void
   presentation?: 'dialog' | 'page'
-}
-
-// A datetime-local value is a wall time, not an instant in the browser's zone.
-function formatInZone(iso: string, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).formatToParts(new Date(iso))
-  const part = (name: string) => parts.find((item) => item.type === name)?.value ?? ''
-  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`
-}
-
-// Find all possible offsets around the date. Reject skipped or repeated wall times.
-function resolveZonedTime(value: string, timeZone: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return null
-  const guess = Date.parse(`${value}:00Z`)
-  if (!Number.isFinite(guess)) return null
-  const offsets = new Set<number>()
-  try {
-    for (let hours = -48; hours <= 48; hours += 3) {
-      const sample = guess + hours * 60 * 60 * 1000
-      const wall = formatInZone(new Date(sample).toISOString(), timeZone)
-      offsets.add(Date.parse(`${wall}:00Z`) - sample)
-    }
-    const candidates = [...offsets]
-      .map((offset) => guess - offset)
-      .filter((instant) => formatInZone(new Date(instant).toISOString(), timeZone) === value)
-    return candidates.length === 1 ? new Date(candidates[0]).toISOString() : null
-  } catch {
-    return null
-  }
+  // The league's time zone; without one the browser's zone is used.
+  timeZone?: string | null
 }
 
 function fixtureKey(game: Pick<ScheduleGame, 'divisionId' | 'stage' | 'round' | 'homeTeamId' | 'awayTeamId'>): string {
@@ -237,7 +210,6 @@ function isWhole(value: string, minimum: number, maximum: number): boolean {
 const hours = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, '0'))
 const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'))
 const subscribe = () => () => {}
-const browserTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 const serverTimeZone = () => ''
 
 function useDebouncedValue(value: string, delay = 500) {
@@ -309,11 +281,10 @@ function ScheduleDates({ id, label, hideLabel = false, values, rangeStart, range
   </Field>
 }
 
-export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd, venues, mode, onClose, onSaved, onPendingChange, onUnsavedChange, presentation = 'dialog' }: Props) {
+export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd, venues, mode, onClose, onSaved, onPendingChange, onUnsavedChange, presentation = 'dialog', timeZone: leagueTimeZone }: Props) {
   const client = useQueryClient()
   const defaultZone = useSyncExternalStore(subscribe, browserTimeZone, serverTimeZone)
-  const [zoneOverride, setZoneOverride] = useState<string | null>(null)
-  const timeZone = zoneOverride ?? defaultZone
+  const timeZone = leagueTimeZone || defaultZone
   const [startDate, setStartDate] = useState(seasonStart?.slice(0, 10) ?? '')
   const [endDate, setEndDate] = useState(seasonEnd?.slice(0, 10) ?? '')
   const nextWindowId = useRef(1)
@@ -663,7 +634,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               <span className="truncate text-xs font-normal text-muted-foreground">{optionsSummary}</span>
             </summary>
             <div className="flex flex-col gap-5 pt-4">
-              <Field><FieldLabel htmlFor="schedule-zone" required>Time zone</FieldLabel><Input id="schedule-zone" aria-required="true" disabled={pending} value={timeZone} onChange={(e) => { setZoneOverride(e.target.value); changed() }} placeholder="Asia/Manila" /></Field>
+              <Field><FieldLabel htmlFor="schedule-zone">Time zone</FieldLabel><div className="flex h-9 items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 text-sm"><output id="schedule-zone" className="truncate">{timeZone}</output><Link href="/manage/leagues" className="shrink-0 text-xs font-medium underline-offset-4 hover:underline">Change</Link></div></Field>
               <ScheduleDates id="schedule-blackout-dates" label="Blackout dates" values={blackoutDates} rangeStart={startDate} rangeEnd={endDate} disabled={pending} onChange={(values) => { setBlackoutDates(values); changed() }} />
               <FieldSet className="gap-3">
                 <FieldLegend variant="label" className="mb-0">Team unavailable dates</FieldLegend>

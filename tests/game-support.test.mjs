@@ -19,6 +19,7 @@ function loadComponent(file, { selection = '', query = {}, request = async () =>
       useMutation: ({ mutationFn }) => ({ isPending: false, isError: false, mutateAsync: mutationFn }),
     }
     if (name === '@/lib/league-client') return { leagueRequest: request }
+    if (name === '@/lib/league-time') return require('../lib/league-time.ts')
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     return require(name)
   } }

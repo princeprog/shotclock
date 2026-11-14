@@ -3,15 +3,19 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const { formatInZone, resolveZonedTime } = require('../lib/league-time.ts')
 
 const source = readFileSync(new URL('../components/schedule-generator.tsx', import.meta.url), 'utf8')
 const file = ts.createSourceFile('schedule-generator.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-const names = new Set(['formatInZone', 'resolveZonedTime', 'gameForSave', 'isOutsideSeason', 'formatWallTime', 'validateWindows'])
+const names = new Set(['gameForSave', 'isOutsideSeason', 'formatWallTime', 'validateWindows'])
 const helpers = file.statements.filter((statement) => ts.isFunctionDeclaration(statement) && statement.name && names.has(statement.name.text)).map((statement) => statement.getText(file)).join('\n')
-const code = ts.transpileModule(`${helpers}\nglobalThis.helpers = { formatInZone, resolveZonedTime, gameForSave, isOutsideSeason, formatWallTime, validateWindows }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const code = ts.transpileModule(`${helpers}\nglobalThis.helpers = { gameForSave, isOutsideSeason, formatWallTime, validateWindows }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const context = vm.createContext({ Intl, Date, Set })
 vm.runInContext(code, context)
-const { formatInZone, resolveZonedTime, gameForSave, isOutsideSeason, formatWallTime, validateWindows } = context.helpers
+const { gameForSave, isOutsideSeason, formatWallTime, validateWindows } = context.helpers
 
 test('preview summaries retain wall time across the browser daylight-saving transition', () => {
   const previous = process.env.TZ

@@ -2,6 +2,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { leagueRequest } from '@/lib/league-client'
+import { formatGameDateTime } from '@/lib/league-time'
 import { Button } from '@/components/ui/button'
 import { DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
@@ -16,17 +17,13 @@ type ScheduleChange = {
   new_duration_minutes: number | null
 }
 
-function localDate(value: string | null) {
-  if (!value) return 'Not scheduled'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? 'Date unavailable' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-}
 
 function duration(value: number | null) {
   return value == null ? 'Not specified' : `${value} min`
 }
 
-export function GameScheduleHistory({ gameId }: { gameId: string }) {
+export function GameScheduleHistory({ gameId, timeZone }: { gameId: string; timeZone?: string | null }) {
+  const localDate = (value: string | null) => value ? formatGameDateTime(value, timeZone) : 'Not scheduled'
   const client = useQueryClient()
   const path = `games/${gameId}/schedule-history`
   const history = useQuery({ queryKey: ['league', path], queryFn: () => leagueRequest<ScheduleChange[]>(path, client), retry: false })

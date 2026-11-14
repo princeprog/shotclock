@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { TrophyIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { leagueRequest } from '@/lib/league-client'
+import { formatGameDateTime } from '@/lib/league-time'
 import { Button } from '@/components/ui/button'
 import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -24,7 +25,7 @@ type ScoreGame = {
 
 const scoreValue = (value: string) => (/^\d{1,4}$/.test(value) ? Number(value) : null)
 
-export function GameScoreDialog({ game, stage, onClose, onSaved, onPendingChange }: { game: ScoreGame; stage?: string | null; onClose: () => void; onSaved: () => void; onPendingChange?: (pending: boolean) => void }) {
+export function GameScoreDialog({ game, stage, timeZone, onClose, onSaved, onPendingChange }: { game: ScoreGame; stage?: string | null; timeZone?: string | null; onClose: () => void; onSaved: () => void; onPendingChange?: (pending: boolean) => void }) {
   const client = useQueryClient()
   const [scores, setScores] = useState({ home: game.home_score?.toString() ?? '', away: game.away_score?.toString() ?? '' })
   const submitting = useRef(false)
@@ -35,7 +36,7 @@ export function GameScoreDialog({ game, stage, onClose, onSaved, onPendingChange
   const winner = home === null || away === null || tied ? null : home > away ? 'home' : 'away'
   const correcting = game.status === 'completed'
   const unchanged = correcting && !game.forfeited_by_season_team_id && home === game.home_score && away === game.away_score
-  const when = game.scheduled_at ? new Date(game.scheduled_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
+  const when = game.scheduled_at ? formatGameDateTime(game.scheduled_at, timeZone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
   const details = [game.division_name, stage, when, game.venue_name].filter(Boolean).join(' · ')
   const change = (side: 'home' | 'away') => (event: { target: { value: string } }) => {
     const value = event.target.value.replace(/\D/g, '').slice(0, 4)
