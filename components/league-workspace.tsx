@@ -15,7 +15,7 @@ import { VenuesWorkspace } from '@/components/venues-workspace'
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
 import { DataPagination } from '@/components/data-pagination'
-import { requirePaginatedResult } from '@/lib/pagination'
+import { requirePaginatedResult, type PaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
 import { teamListHref, type TeamFilters } from '@/lib/team-filter-links'
@@ -460,7 +460,8 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   }
   const gamesQuery = (gamePath: string) => ({ queryKey: ['league', gamePath], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(gamePath, client)), retry: false })
   const path = gamesPath(status, page, pageSize)
-  const games = useQuery(gamesQuery(path))
+  // While a filter or page change loads, keep showing this tab's current list instead of a loading state.
+  const games = useQuery({ ...gamesQuery(path), placeholderData: (previous: PaginatedResult<Game> | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && new URLSearchParams(String(previousQuery.queryKey[1]).split('?')[1]).get('status') === status ? previous : undefined })
   // Load the other tab's first page in the background so switching tabs shows games right away.
   const otherTabPath = gamesPath(status === 'completed' ? 'scheduled' : 'completed', 1, 10)
   useEffect(() => { void client.prefetchQuery({ ...gamesQuery(otherTabPath), staleTime: 30_000 }) }, [otherTabPath]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -561,7 +562,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
           </>}
         </div>
       </div>
-      <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none">{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</div></TabsContent>
+      <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none"><div aria-busy={games.isPlaceholderData || undefined} className={games.isPlaceholderData ? "pointer-events-none opacity-60 transition-opacity duration-200 motion-reduce:transition-none" : "transition-opacity duration-200 motion-reduce:transition-none"}>{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</div></div></TabsContent>
     </Tabs>
     <Dialog open={confirmStart} onOpenChange={(open) => { if (!startSeason.isPending) setConfirmStart(open) }}>
       <DialogContent showCloseButton={!startSeason.isPending} className="sm:max-w-md">
