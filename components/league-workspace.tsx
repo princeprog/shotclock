@@ -467,6 +467,13 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
     mutationFn: (id: string) => leagueRequest(`games/${id}`, client, 'DELETE'),
     onSuccess: () => { setDialog(null); setPage(1); toast.success('Game removed.') },
   })
+  const [confirmStart, setConfirmStart] = useState(false)
+  const startSeason = useMutation({
+    mutationFn: () => leagueRequest(`seasons/${season.id}/status`, client, 'POST', { status: 'active' }),
+    onSuccess: () => { setConfirmStart(false); toast.success('Season started.') },
+    onError: (error) => toast.error(error.message),
+  })
+  const seasonHint = season.status === 'draft' ? 'Scores can be recorded after the season starts.' : season.status === 'completed' ? 'Scheduling is closed. Final scores can still be corrected.' : ''
   const resetPage = () => { setPage(1); setPageSize(10) }
   const clearDates = () => { setDates(undefined); resetPage() }
   const editable = season.status !== 'completed'
@@ -506,6 +513,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
             <TableCell className="pr-3 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.home_name} vs ${row.away_name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
               {canEdit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'edit', game: row })}><PencilIcon />Edit schedule</DropdownMenuItem>}
               {canScore && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'score', game: row })}><CircleCheckIcon />{row.status === 'completed' ? 'Correct score' : 'Record final score'}</DropdownMenuItem>}
+              {editable && season.status === 'draft' && row.status === 'scheduled' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Start the season first</span></span></DropdownMenuItem>}
               {canForfeit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'forfeit', game: row })}><FlagIcon />{row.forfeited_by_season_team_id ? 'Correct forfeit' : 'Mark as forfeit'}</DropdownMenuItem>}
               <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'history', game: row })}><HistoryIcon />Schedule history</DropdownMenuItem>
             </DropdownMenuGroup>{canEdit && <><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="whitespace-nowrap py-2" onClick={() => { removeGame.reset(); setDialog({ kind: 'remove', game: row }) }}><Trash2Icon />Remove game</DropdownMenuItem></DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu></TableCell>
@@ -517,11 +525,16 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   return <div className="flex flex-col gap-8">
     {editable && scheduleStatus.isError && <Alert variant="destructive"><AlertTitle>Couldn’t load schedule status</AlertTitle><AlertDescription><p>{scheduleStatus.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void scheduleStatus.refetch()}>Try again</Button></AlertDescription></Alert>}
     {editable && scheduleStatus.isSuccess && !scheduleDivisions.some((item) => item.teamCount >= 2) && <Alert><AlertTitle>Register teams to schedule games</AlertTitle><AlertDescription><p>Add at least two teams to a division before scheduling a matchup.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/teams" />}>Manage teams</Button></AlertDescription></Alert>}
-    {season.status === 'draft' && <Alert><AlertTitle>Season is in draft</AlertTitle><AlertDescription>You can schedule games now. Start the season before recording final scores.</AlertDescription></Alert>}
-    {season.status === 'completed' && <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>Scheduling is closed. Final scores can still be corrected.</AlertDescription></Alert>}
     <Tabs value={status} onValueChange={(value) => { if (typeof value === 'string') { setStatus(value); resetPage() } }}>
       <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-4">
-        <TabsList><TabsTrigger value="scheduled">Scheduled</TabsTrigger><TabsTrigger value="completed">Final results</TabsTrigger></TabsList>
+        <div className="flex flex-wrap items-center gap-3">
+          <TabsList><TabsTrigger value="scheduled">Scheduled</TabsTrigger><TabsTrigger value="completed">Final results</TabsTrigger></TabsList>
+          {seasonHint ? <Tooltip>
+            <TooltipTrigger render={<span tabIndex={0} aria-label={`${season.status === 'draft' ? 'Draft' : 'Completed'} season. ${seasonHint}`} className="inline-flex rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}><SeasonStatusBadge status={season.status} includeSeason /></TooltipTrigger>
+            <TooltipContent side="bottom" align="start">{seasonHint}</TooltipContent>
+          </Tooltip> : <SeasonStatusBadge status={season.status} includeSeason />}
+          {editable && season.status === 'draft' && <Button type="button" variant="ghost" size="sm" disabled={startSeason.isPending} onClick={() => { startSeason.reset(); setConfirmStart(true) }}><PlayIcon data-icon="inline-start" />Start season</Button>}
+        </div>
         <div className="flex flex-wrap items-end gap-2">
           <Choice label="Division" value={divisionFilter} options={divisions} emptyLabel="All divisions" onChange={(value) => { setDivisionFilter(value); setPage(1) }} />
           <Popover><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dates?.from ? dates.to ? `${format(dates.from, 'MMM d')} – ${format(dates.to, 'MMM d, yyyy')}` : `From ${format(dates.from, 'MMM d, yyyy')}` : 'All dates'}</PopoverTrigger><PopoverContent align="end" className="w-auto p-0"><Calendar mode="range" selected={dates} onSelect={(value) => { setDates(value); resetPage() }} autoFocus />{dates?.from && <Button type="button" variant="ghost" className="mx-3 mb-3" onClick={clearDates}>Clear dates</Button>}</PopoverContent></Popover>
@@ -543,6 +556,12 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
       </div>
       <TabsContent value={status} className="pt-5">{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</TabsContent>
     </Tabs>
+    <Dialog open={confirmStart} onOpenChange={(open) => { if (!startSeason.isPending) setConfirmStart(open) }}>
+      <DialogContent showCloseButton={!startSeason.isPending} className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Start {season.name}?</DialogTitle><DialogDescription>Final scores can be recorded once the season starts. Team registrations can no longer be corrected or removed.</DialogDescription></DialogHeader>
+        <DialogFooter><Button type="button" variant="outline" disabled={startSeason.isPending} onClick={() => setConfirmStart(false)}>Cancel</Button><Button type="button" disabled={startSeason.isPending} onClick={() => startSeason.mutate()}>{startSeason.isPending ? 'Starting…' : 'Start season'}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : dialog?.kind === 'score' ? `${game?.home_name} vs ${game?.away_name} · ${season.name}${game?.forfeited_by_season_team_id ? '. Saving a score records a played result instead of a forfeit.' : ''}` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
       {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} mode={dialog.mode} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
       {dialog?.kind === 'forfeit' && <GameForfeitDialog game={dialog.game} onClose={closeDialog} onSaved={() => saved('Forfeit recorded.')} onPendingChange={setPending} />}
