@@ -22,7 +22,7 @@ function harness(statuses = divisionStatuses) {
   const paths = []
   const submissions = []
   const context = { exports: {}, URLSearchParams, FormData: class { constructor(form) { this.form = form } get(key) { return this.form[key] ?? null } }, document: { getElementById() { return null } }, require(name) {
-    if (name === 'react') return { ...require('react'), useState(initial) { const target = activeStates; const i = index++; if (!(i in target)) target[i] = typeof initial === 'function' ? initial() : initial; return [target[i], (next) => { target[i] = typeof next === 'function' ? next(target[i]) : next }] } }
+    if (name === 'react') return { ...require('react'), useEffect() {}, useState(initial) { const target = activeStates; const i = index++; if (!(i in target)) target[i] = typeof initial === 'function' ? initial() : initial; return [target[i], (next) => { target[i] = typeof next === 'function' ? next(target[i]) : next }] } }
     if (name === '@tanstack/react-query') return { useQueryClient: () => ({}), useMutation: () => ({ reset() {}, async mutateAsync(body) { submissions.push(body) } }), useQuery: ({ queryKey, enabled }) => { const path = queryKey[1]; if (enabled !== false) paths.push(path); if (path.includes('/schedule/status')) return { isSuccess: true, data: { divisions: statuses } }; if (path.includes('/teams?')) return { isSuccess: true, data: registrations }; return { isSuccess: true, data: { items: [game], total: 1, page: 1, pageSize: 10 } } } }
     if (name === '@/lib/league-client') return { leagueRequest() {} }
     if (name === '@/lib/pagination') return { requirePaginatedResult: (value) => value }

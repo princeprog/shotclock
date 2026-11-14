@@ -38,7 +38,7 @@ import { RegisterExistingTeamDialog, CorrectTeamRegistrationDialog, RemoveTeamRe
 import { Separator } from '@/components/ui/separator'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsIndicator, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export type Section = 'dashboard' | 'leagues' | 'seasons' | 'divisions' | 'teams' | 'venues' | 'games' | 'standings'
@@ -450,13 +450,20 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const client = useQueryClient()
-  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sort: status === 'completed' ? 'desc' : 'asc', status })
-  if (divisionFilter) params.set('divisionId', divisionFilter)
-  else params.set('scope', 'season')
-  if (dates?.from) params.set('from', startOfDay(dates.from).toISOString())
-  if (dates?.to) params.set('to', startOfDay(addDays(dates.to, 1)).toISOString())
-  const path = `seasons/${season.id}/games?${params}`
-  const games = useQuery({ queryKey: ['league', path], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(path, client)), retry: false })
+  const gamesPath = (tab: string, tabPage: number, tabPageSize: number) => {
+    const params = new URLSearchParams({ page: String(tabPage), pageSize: String(tabPageSize), sort: tab === 'completed' ? 'desc' : 'asc', status: tab })
+    if (divisionFilter) params.set('divisionId', divisionFilter)
+    else params.set('scope', 'season')
+    if (dates?.from) params.set('from', startOfDay(dates.from).toISOString())
+    if (dates?.to) params.set('to', startOfDay(addDays(dates.to, 1)).toISOString())
+    return `seasons/${season.id}/games?${params}`
+  }
+  const gamesQuery = (gamePath: string) => ({ queryKey: ['league', gamePath], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(gamePath, client)), retry: false })
+  const path = gamesPath(status, page, pageSize)
+  const games = useQuery(gamesQuery(path))
+  // Load the other tab's first page in the background so switching tabs shows games right away.
+  const otherTabPath = gamesPath(status === 'completed' ? 'scheduled' : 'completed', 1, 10)
+  useEffect(() => { void client.prefetchQuery({ ...gamesQuery(otherTabPath), staleTime: 30_000 }) }, [otherTabPath]) // eslint-disable-line react-hooks/exhaustive-deps
   const scheduleStatus = useLeagueQuery<{ divisions: ScheduleStatus[] }>(`seasons/${season.id}/schedule/status`)
   const scheduleDivisions = scheduleStatus.data?.divisions ?? []
   const teamDivision = dialog?.kind === 'edit' ? dialog.game.division_id : dialog?.kind === 'schedule' ? scheduleDivision : ''
@@ -528,7 +535,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
     <Tabs value={status} onValueChange={(value) => { if (typeof value === 'string') { setStatus(value); resetPage() } }}>
       <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-4">
         <div className="flex flex-wrap items-center gap-3">
-          <TabsList><TabsTrigger value="scheduled">Scheduled</TabsTrigger><TabsTrigger value="completed">Final results</TabsTrigger></TabsList>
+          <TabsList className="relative"><TabsIndicator /><TabsTrigger value="scheduled" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Scheduled</TabsTrigger><TabsTrigger value="completed" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Final results</TabsTrigger></TabsList>
           {seasonHint ? <Tooltip>
             <TooltipTrigger render={<span tabIndex={0} aria-label={`${season.status === 'draft' ? 'Draft' : 'Completed'} season. ${seasonHint}`} className="inline-flex rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}><SeasonStatusBadge status={season.status} includeSeason /></TooltipTrigger>
             <TooltipContent side="bottom" align="start">{seasonHint}</TooltipContent>
@@ -554,7 +561,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
           </>}
         </div>
       </div>
-      <TabsContent value={status} className="pt-5">{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</TabsContent>
+      <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none">{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</div></TabsContent>
     </Tabs>
     <Dialog open={confirmStart} onOpenChange={(open) => { if (!startSeason.isPending) setConfirmStart(open) }}>
       <DialogContent showCloseButton={!startSeason.isPending} className="sm:max-w-md">
