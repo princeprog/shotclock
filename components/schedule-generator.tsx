@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, ListIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -334,6 +334,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [error, setError] = useState('')
   const [showCapacity, setShowCapacity] = useState(false)
   const [expandedGame, setExpandedGame] = useState<string | null>(null)
+  const [reviewView, setReviewView] = useState<'list' | 'calendar'>('list')
+  const [divisionFilter, setDivisionFilter] = useState('all')
   const [suggestions, setSuggestions] = useState<Record<string, Suggestions>>({})
   const previewHeading = useRef<HTMLHeadingElement>(null)
   const wasPreviewed = useRef(false)
@@ -511,7 +513,11 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         : !validationReady ? <Badge variant="secondary"><LoaderCircleIcon data-icon="inline-start" className="animate-spin" />Checking</Badge>
           : conflictCount ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />{conflictCount} {conflictCount === 1 ? 'conflict' : 'conflicts'}</Badge>
             : <Badge variant="secondary"><CircleCheckIcon data-icon="inline-start" />No conflicts</Badge>
+  const includedDivisions = draft?.divisions.filter((division) => division.reason === undefined) ?? []
+  const activeDivision = includedDivisions.some((division) => division.id === divisionFilter) ? divisionFilter : 'all'
   function focusGame(index: number) {
+    setReviewView('list')
+    if (draft && activeDivision !== 'all' && draft.games[index]?.game.divisionId !== activeDivision) setDivisionFilter('all')
     setExpandedGame(String(index))
     window.setTimeout(() => document.getElementById(`schedule-game-trigger-${index}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 0)
   }
@@ -710,11 +716,11 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         </div>
         </div>
 
-        {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className={reviewing ? 'flex flex-col gap-6' : 'flex flex-col gap-6 border-t pt-6'}>
-          <div className="flex flex-col divide-y rounded-lg border">
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
-              <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-                <h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 text-base font-semibold tabular-nums">{totalGames} {totalGames === 1 ? 'game' : 'games'}</h3>
+        {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className={reviewing ? 'flex flex-col gap-5' : 'flex flex-col gap-5 border-t pt-6'}>
+          <div className="flex flex-col divide-y rounded-xl border bg-card">
+            <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 p-5">
+              <div className="flex min-w-0 flex-col gap-1">
+                <h3 ref={previewHeading} id="schedule-preview-heading" className="scroll-mt-2 text-xl font-semibold tracking-tight tabular-nums">{totalGames} {totalGames === 1 ? 'game' : 'games'}</h3>
                 <p className="text-sm text-muted-foreground">{reviewFacts}</p>
               </div>
               <div role="status" className="flex flex-wrap items-center gap-2">
@@ -722,21 +728,21 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
                 {reviewStatus}
               </div>
             </div>
-            {issueGroups.length > 0 && <ul aria-label="Conflicts by type" className="flex flex-wrap gap-2 px-4 py-3">{issueGroups.map(([type, indexes]) => <li key={type}>
+            {issueGroups.length > 0 && <ul aria-label="Conflicts by type" className="flex flex-wrap gap-2 px-5 py-3">{issueGroups.map(([type, indexes]) => <li key={type}>
               <Button type="button" variant="outline" size="sm" aria-label={`${issueLabels[type as IssueType] ?? 'Other'}: ${indexes.length} ${indexes.length === 1 ? 'game' : 'games'}`} onClick={() => focusGame(indexes[0])}>
                 <span className="size-1.5 rounded-full bg-destructive" aria-hidden="true" />{issueLabels[type as IssueType] ?? 'Other'}<span className="tabular-nums text-muted-foreground">{indexes.length}</span>
               </Button>
             </li>)}</ul>}
-            {keptCount > 0 && <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+            {keptCount > 0 && <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-2 text-sm">
               <span className="text-muted-foreground">{keptCount} kept in place</span>
               <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={regenerate}><RefreshCwIcon data-icon="inline-start" />Regenerate other games</Button>
             </div>}
-            {notices.length > 0 && <ul className="flex flex-col gap-1 px-4 py-3 text-sm text-muted-foreground">{notices.map((notice) => <li key={notice} className="flex items-start gap-2"><CircleAlertIcon className="mt-0.5 size-4 shrink-0" />{notice}</li>)}</ul>}
+            {notices.length > 0 && <ul className="flex flex-col gap-1 px-5 py-3 text-sm text-muted-foreground">{notices.map((notice) => <li key={notice} className="flex items-start gap-2"><CircleAlertIcon className="mt-0.5 size-4 shrink-0" />{notice}</li>)}</ul>}
           </div>
           {!draft.games.length && !draft.unplaced.length && <p className="text-sm text-muted-foreground">No games were returned for these settings.</p>}
           {draft.unplaced.length > 0 && <section aria-labelledby="schedule-unplaced-heading" className="flex flex-col gap-2">
             <h4 id="schedule-unplaced-heading" className="text-sm font-semibold">Not scheduled</h4>
-            <ul className="divide-y rounded-lg border border-dashed">{draft.unplaced.map((item, position) => <li key={`${item.divisionId}-${item.round}-${item.homeTeamId}-${item.awayTeamId}`} className="flex flex-col gap-2 px-4 py-3">
+            <ul className="divide-y rounded-xl border border-dashed bg-card">{draft.unplaced.map((item, position) => <li key={`${item.divisionId}-${item.round}-${item.homeTeamId}-${item.awayTeamId}`} className="flex flex-col gap-2 px-5 py-3">
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                 <div className="min-w-0"><p className="text-sm font-medium">{item.homeName} vs {item.awayName}</p><p className="text-xs text-muted-foreground">{item.divisionName} · Round {item.round} · <span title={item.reason}>{unplacedReasons[item.reasonCode ?? ''] ?? item.reason}</span></p></div>
                 <Button type="button" variant="outline" size="sm" disabled={pending || suggestions[`unplaced-${position}`]?.status === 'loading'} onClick={() => void findSlots(`unplaced-${position}`, { game: { divisionId: item.divisionId, homeTeamId: item.homeTeamId, awayTeamId: item.awayTeamId, round: item.round, stage: item.stage } })}><CalendarSearchIcon data-icon="inline-start" />Find open slots</Button>
@@ -744,30 +750,43 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               {slotList(`unplaced-${position}`, (slot) => placeGame(position, slot))}
             </li>)}</ul>
           </section>}
-          <SchedulePreviewCalendar games={draft.games.map((item, index) => ({ index, localTime: item.localTime, homeName: item.game.homeName, awayName: item.game.awayName, divisionName: item.game.divisionName, venueName: venueName(item.venueId), conflict: invalidGameIndexes.includes(index) || issues.some((issue) => issue.index === index) }))}
-            bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venueName(game.venueId) }))}
-            loading={calendar.isFetching} error={calendar.isError ? calendar.error.message : ''} onRetry={() => void calendar.refetch()}
-            initialDate={reviewDates[0] ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
-            onSelect={focusGame} onMove={moveToDay} />
-          <div className="flex flex-col gap-8">{draft.divisions.map((division) => {
-            const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
-            const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
-            const note = division.reason !== undefined ? `Skipped · ${division.reason}`
-              : mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount < 4 ? 'Round robin only (fewer than four teams)'
+          {draft.games.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3">
+            <ToggleGroup variant="outline" size="sm" spacing={0} aria-label="Review view" value={[reviewView]} onValueChange={(values) => { if (values[0] === 'list' || values[0] === 'calendar') setReviewView(values[0]) }}>
+              <ToggleGroupItem value="list" className="gap-1.5 px-3 aria-pressed:bg-muted aria-pressed:text-foreground"><ListIcon />List</ToggleGroupItem>
+              <ToggleGroupItem value="calendar" className="gap-1.5 px-3 aria-pressed:bg-muted aria-pressed:text-foreground"><CalendarDaysIcon />Calendar</ToggleGroupItem>
+            </ToggleGroup>
+            {includedDivisions.length > 1 && <Select value={activeDivision} items={[{ value: 'all', label: 'All divisions' }, ...includedDivisions.map((division) => ({ value: division.id, label: division.name }))]} onValueChange={(value) => { if (value) setDivisionFilter(value) }}>
+              <SelectTrigger aria-label="Filter by division" className="w-full sm:w-56"><SelectValue /></SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value="all">All divisions</SelectItem>{includedDivisions.map((division) => <SelectItem key={division.id} value={division.id}>{division.name}</SelectItem>)}</SelectGroup></SelectContent>
+            </Select>}
+          </div>}
+          <div hidden={reviewView !== 'calendar'}>
+            <SchedulePreviewCalendar games={draft.games.map((item, index) => ({ index, localTime: item.localTime, homeName: item.game.homeName, awayName: item.game.awayName, divisionName: item.game.divisionName, venueName: venueName(item.venueId), conflict: invalidGameIndexes.includes(index) || issues.some((issue) => issue.index === index) })).filter((game) => activeDivision === 'all' || draft.games[game.index].game.divisionId === activeDivision)}
+              bookings={(calendar.data?.games ?? []).map((game) => ({ ...game, localTime: formatInZone(game.scheduledAt, draft.input.availability.timeZone), endDate: formatInZone(new Date(Date.parse(game.scheduledAt) + game.durationMinutes * 60_000 - 1).toISOString(), draft.input.availability.timeZone).slice(0, 10), venueName: venueName(game.venueId) }))}
+              loading={calendar.isFetching} error={calendar.isError ? calendar.error.message : ''} onRetry={() => void calendar.refetch()}
+              initialDate={reviewDates[0] ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
+              onSelect={focusGame} onMove={moveToDay} />
+          </div>
+          <div hidden={reviewView !== 'list'} className="flex flex-col gap-4">
+            {draft.divisions.filter((division) => division.reason === undefined && (activeDivision === 'all' || division.id === activeDivision)).map((division) => {
+              const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
+              if (!divisionGames.length) return null
+              const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
+              const note = mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount < 4 ? 'Round robin only (fewer than four teams)'
                 : mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.playoffs === false ? 'No playoffs'
                   : mode === 'playoffs' && division.playoffStage ? stageLabels[division.playoffStage as ScheduleGame['stage']] ?? '' : ''
-            return <section key={division.id} className="flex flex-col gap-3" aria-labelledby={`schedule-division-${division.id}`}>
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b pb-2">
-                <h4 id={`schedule-division-${division.id}`} className="font-semibold">{division.name}</h4>
-                <p className="text-sm text-muted-foreground">{[note, division.reason === undefined ? `${divisionGames.length} ${divisionGames.length === 1 ? 'game' : 'games'}` : ''].filter(Boolean).join(' · ')}</p>
-              </div>
-              {rounds.map((round) => <div key={round} className="flex flex-col gap-1.5">
-                <h5 className="text-xs font-medium text-muted-foreground">Round {round}</h5>
-                <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} className="overflow-hidden rounded-lg border">{divisionGames.filter(({ item }) => item.game.round === round).sort((a, b) => a.item.localTime.localeCompare(b.item.localTime)).map(({ item, index }) => {
+              return <section key={division.id} className="overflow-hidden rounded-xl border bg-card" aria-labelledby={'schedule-division-' + division.id}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-5 py-3.5">
+                  <h4 id={'schedule-division-' + division.id} className="font-semibold">{division.name}</h4>
+                  <p className="text-sm text-muted-foreground">{[note, plural(divisionGames.length, 'game')].filter(Boolean).join(' · ')}</p>
+                </div>
+                <div>{rounds.map((round) => <div key={round} className="border-t first:border-t-0">
+                  <h5 className="border-b bg-muted/40 px-5 py-1.5 text-xs font-medium text-muted-foreground">Round {round}</h5>
+                  <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} >{divisionGames.filter(({ item }) => item.game.round === round).sort((a, b) => a.item.localTime.localeCompare(b.item.localTime)).map(({ item, index }) => {
                   const gameIssues = issues.filter((issue) => issue.index === index)
                   const invalid = invalidGameIndexes.includes(index)
                   return <AccordionItem key={index} value={String(index)}>
-                    <AccordionTrigger id={`schedule-game-trigger-${index}`} className="items-center gap-3 px-4 py-2.5 hover:no-underline">
+                    <AccordionTrigger id={`schedule-game-trigger-${index}`} className="items-center gap-3 px-5 py-3 hover:bg-muted/40 hover:no-underline">
                       <span className="grid min-w-0 flex-1 gap-x-4 gap-y-0.5 text-left sm:grid-cols-[10.5rem_minmax(0,1fr)_7rem] sm:items-center">
                         <span className="text-sm font-normal tabular-nums text-muted-foreground">{formatGameSlot(item.localTime)}</span>
                         <span className="flex min-w-0 items-center gap-2 font-medium"><span className="truncate">{item.game.homeName} vs {item.game.awayName}</span>{item.game.stage !== 'preliminary' && <Badge variant="secondary">{stageLabels[item.game.stage]}</Badge>}{item.kept && <Badge variant="outline">Kept</Badge>}
@@ -775,7 +794,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
                         <span className="truncate text-sm font-normal text-muted-foreground">{venueName(item.venueId)}</span>
                       </span>
                     </AccordionTrigger>
-                    <AccordionContent className="flex flex-col gap-4 px-4 pb-4">
+                    <AccordionContent className="flex flex-col gap-4 bg-muted/20 px-5 pt-1 pb-5">
                       {(invalid || gameIssues.length > 0) && <ul aria-label="Conflicts" className="flex flex-col gap-2 rounded-md bg-destructive/5 px-3 py-2 text-sm">
                         {invalid && <li className="text-destructive">Choose a valid time and an available venue.</li>}
                         {gameIssues.map((issue, position) => <li key={position}><p className="text-destructive">{issue.message}</p>{issueDetail(issue) && <p className="text-xs text-muted-foreground">{issueDetail(issue)}</p>}</li>)}
@@ -798,9 +817,11 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
                     </AccordionContent>
                   </AccordionItem>
                 })}</Accordion>
-              </div>)}
-            </section>
-          })}</div>
+                </div>)}</div>
+              </section>
+            })}
+            {draft.divisions.some((division) => division.reason !== undefined) && <p className="text-xs text-muted-foreground">Not included: {draft.divisions.filter((division) => division.reason !== undefined).map((division) => division.name + ' (' + division.reason + ')').join(', ')}</p>}
+          </div>
         </section>}
 
       </div>
