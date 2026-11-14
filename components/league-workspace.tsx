@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO, startOfDay } from 'date-fns'
@@ -298,6 +298,52 @@ function WorkspacePrompt({ leagueCount, leagueSelected, seasonCount }: { leagueC
   return <Panel title="Choose a season" description="Select a season in the workspace control at the top of the page." />
 }
 function NoData({ children }: { children: React.ReactNode }) { return <p className="text-sm text-muted-foreground">{children}</p> }
+// Page clicks update the pager at once but fetch after a short pause, so rapid next/previous clicks request one page.
+function useDebouncedPage(page: number, scope: string, commit: (page: number) => void) {
+  const [pending, setPending] = useState<{ page: number; scope: string } | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { window.clearTimeout(timer.current); setPending(null) }, [scope])
+  const go = (next: number) => {
+    window.clearTimeout(timer.current)
+    setPending({ page: next, scope })
+    timer.current = window.setTimeout(() => { setPending(null); commit(next) }, 300)
+  }
+  return { displayPage: pending?.scope === scope ? pending.page : page, go }
+}
+function withoutPage(path: string) { const [base, query = ''] = path.split('?'); const params = new URLSearchParams(query); params.delete('page'); return `${base}?${params}` }
+// Reuses the previous page only while paging within the same filtered list.
+function keepPagedList<T>(path: string) { return (previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && withoutPage(String(previousQuery.queryKey[1])) === withoutPage(path) ? previous : undefined }
+function skeletonRows(meta: PaginatedResult<unknown> | undefined, page: number) { return meta ? Math.max(1, Math.min(meta.pageSize, meta.total - (page - 1) * meta.pageSize)) : 5 }
+function SeasonsSkeleton({ rows, header, footer }: { rows: number; header: ReactNode; footer: ReactNode }) {
+  return <Card role="status" aria-label="Loading seasons" className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed">{header}
+    <TableBody>{Array.from({ length: rows }, (_, row) => <TableRow key={row} className="hover:bg-transparent">
+      <TableCell className="py-3 pl-5"><Skeleton className="h-4 w-40 max-w-full" /><div className="mt-2 flex flex-col gap-1.5 md:hidden"><Skeleton className="h-3 w-28" /><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-24" /></div></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-32 max-w-full" /></TableCell>
+      <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24 max-w-full" /></TableCell>
+      <TableCell className="pr-4"><Skeleton className="ml-auto size-8 rounded-md" /></TableCell>
+    </TableRow>)}</TableBody>
+  </Table>{footer}</CardContent></Card>
+}
+function TeamsSkeleton({ rows, view, header }: { rows: number; view: string; header: ReactNode }) {
+  if (view !== 'table') return <div role="status" aria-label="Loading teams" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    {Array.from({ length: rows }, (_, card) => <div key={card} className="flex min-w-0 flex-col rounded-xl border bg-card p-5">
+      <div className="flex items-start gap-3"><Skeleton className="size-11 shrink-0 rounded-lg" /><div className="flex min-w-0 flex-1 flex-col gap-2 pt-0.5"><Skeleton className="h-5 w-32 max-w-full" /><Skeleton className="h-4 w-24 max-w-full" /></div><Skeleton className="size-8 rounded-md" /></div>
+      <div className="mt-5 flex flex-col items-start gap-2"><Skeleton className="h-5 w-24 rounded-full" /><Skeleton className="h-4 w-40 max-w-full" /></div>
+    </div>)}
+  </div>
+  return <Card role="status" aria-label="Loading teams" className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed">{header}
+    <TableBody>{Array.from({ length: rows }, (_, row) => <TableRow key={row} className="hover:bg-transparent">
+      <TableCell className="py-3 pl-5"><Skeleton className="h-4 w-36 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-5 w-24 rounded-full" /></TableCell>
+      <TableCell className="pr-3"><Skeleton className="ml-auto size-8 rounded-md" /></TableCell>
+    </TableRow>)}</TableBody>
+  </Table></CardContent></Card>
+}
 // Mirrors the games agenda (date heading, date tile and table columns) so loading doesn't shift the layout.
 function GamesSkeleton() {
   return <div role="status" aria-label="Loading games" className="flex flex-col gap-8">
@@ -688,8 +734,15 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const seasonQuery = seasonFilters.toString()
   const filtersActive = !!(seasonSearch.trim() || seasonStatus || selectedSeasonLeague)
   const queryClient = useQueryClient()
+  const seasonPathFor = (pageNumber: number) => { const params = new URLSearchParams(seasonFilters); params.set('page', String(pageNumber)); return `organizations/${org}/seasons?${params}` }
   const seasonPagePath = `organizations/${org}/seasons?${seasonQuery}`
-  const seasonPage = useQuery({ queryKey: ['league', seasonPagePath], queryFn: async () => requirePaginatedResult<SeasonListItem>(await leagueRequest<unknown>(seasonPagePath, queryClient)), enabled: !!org && section === 'seasons' && !searchPending, retry: false })
+  const seasonPage = useQuery({ queryKey: ['league', seasonPagePath], queryFn: async () => requirePaginatedResult<SeasonListItem>(await leagueRequest<unknown>(seasonPagePath, queryClient)), enabled: !!org && section === 'seasons' && !searchPending, retry: false, placeholderData: keepPagedList<PaginatedResult<SeasonListItem>>(seasonPagePath) })
+  const seasonPaging = useDebouncedPage(seasonPageNumber, withoutPage(seasonPagePath), setSeasonPageNumber)
+  const seasonPagePending = seasonPaging.displayPage !== seasonPageNumber
+  const cachedSeasonPage = seasonPagePending ? queryClient.getQueryData<PaginatedResult<SeasonListItem>>(['league', seasonPathFor(seasonPaging.displayPage)]) : undefined
+  const seasonList = cachedSeasonPage ?? seasonPage.data
+  const seasonsLoading = !cachedSeasonPage && (searchPending || seasonPage.isLoading || seasonPage.isPlaceholderData || seasonPagePending)
+  const seasonMeta = seasonList && (seasonPage.isPlaceholderData || seasonPagePending ? { ...seasonList, page: seasonPaging.displayPage } : seasonList)
   const teamFilters = new URLSearchParams()
   if (teamLeagueFilter) teamFilters.set('leagueId', teamLeagueFilter)
   if (teamSeasonFilter) teamFilters.set('seasonId', teamSeasonFilter)
@@ -698,8 +751,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   teamFilters.set('page', String(teamPage))
   teamFilters.set('pageSize', String(teamPagination.pageSize))
   const teamSearchPending = section === 'teams' && teamSearch.trim() !== debouncedTeamSearch
+  const teamPathFor = (pageNumber: number) => { const params = new URLSearchParams(teamFilters); params.set('page', String(pageNumber)); return `organizations/${org}/teams?${params}` }
   const teamPagePath = `organizations/${org}/teams?${teamFilters}`
-  const organizationTeams = useQuery({ queryKey: ['league', teamPagePath], queryFn: async () => requirePaginatedResult<OrganizationTeamRow>(await leagueRequest<unknown>(teamPagePath, queryClient)), enabled: !!org && section === 'teams' && !teamSearchPending && !!league && !!season && divisions.isSuccess, retry: false })
+  const organizationTeams = useQuery({ queryKey: ['league', teamPagePath], queryFn: async () => requirePaginatedResult<OrganizationTeamRow>(await leagueRequest<unknown>(teamPagePath, queryClient)), enabled: !!org && section === 'teams' && !teamSearchPending && !!league && !!season && divisions.isSuccess, retry: false, placeholderData: keepPagedList<PaginatedResult<OrganizationTeamRow>>(teamPagePath) })
   // Sync the requested page with workspace changes and server-side clamping after data changes.
   useEffect(() => {
     if (teamPagination.scope !== teamPageScope) {
@@ -711,7 +765,13 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
       setTeamPagination((current) => current.scope === teamPageScope && current.page === teamPage ? { ...current, page: organizationTeams.data!.page } : current)
     }
   }, [teamPageScope, teamPagination.scope, teamPage, teamSearchPending, organizationTeams.data, organizationTeams.isFetching])
-  const teamRows = organizationTeams.data?.items ?? []
+  const teamPaging = useDebouncedPage(teamPage, withoutPage(teamPagePath), setTeamPage)
+  const teamPagePending = teamPaging.displayPage !== teamPage
+  const cachedTeamPage = teamPagePending ? queryClient.getQueryData<PaginatedResult<OrganizationTeamRow>>(['league', teamPathFor(teamPaging.displayPage)]) : undefined
+  const teamList = cachedTeamPage ?? organizationTeams.data
+  const teamsLoading = !cachedTeamPage && (teamSearchPending || organizationTeams.isLoading || organizationTeams.isPlaceholderData || teamPagePending)
+  const teamMeta = teamList && (organizationTeams.isPlaceholderData || teamPagePending ? { ...teamList, page: teamPaging.displayPage } : teamList)
+  const teamRows = teamList?.items ?? []
   const teamFiltersActive = !!teamSearch.trim() || !!selectedTeamDivision
   const teamReturnQuery = teamListHref({ search: teamSearch, leagueId: '', seasonId: '', divisionId: selectedTeamDivision }).slice('/manage/teams'.length)
   const rosterAction = (team: OrganizationTeamRow) => {
@@ -735,7 +795,13 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const [teamToRemove, setTeamToRemove] = useState<OrganizationTeamRow | null>(null)
   const relevantQueries = [leagues, ...(section === 'seasons' ? [seasonPage] : ['dashboard', 'games', 'standings', 'teams', 'divisions'].includes(section) ? [seasons, divisions] : []), ...(section === 'teams' ? [organizationTeams] : []), ...(section === 'games' ? [venues] : []), ...(section === 'dashboard' ? [seasonTeams, venues, dashboard] : []), ...(section === 'standings' ? [standings] : [])]
   const failedQuery = searchPending || teamSearchPending ? undefined : relevantQueries.find((query) => query.isError)
-  const loading = searchPending || teamSearchPending || relevantQueries.some((query) => query.isLoading)
+  // Seasons and teams show their own list skeletons.
+  const loading = relevantQueries.some((query) => query !== seasonPage && query !== organizationTeams && query.isLoading)
+  const seasonsHeader = <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="w-24 text-muted-foreground sm:w-32">Status</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Start date</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">End date</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+  const teamsHeader = <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+  const createSeasonButton = <div className="flex justify-end"><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
+  const seasonPager = seasonMeta && <DataPagination meta={seasonMeta} onPageChange={seasonPaging.go} onPageSizeChange={(size) => { setSeasonPageNumber(1); setSeasonPageSize(size) }} />
+  const teamPager = teamMeta && <DataPagination meta={teamMeta} onPageChange={teamPaging.go} onPageSizeChange={(pageSize) => setTeamPagination({ scope: teamPageScope, page: 1, pageSize })} />
   const nameField = (value?: string): InputField[] => [{ name: 'name', label: 'Name', required: true, value }]
   const dateFields = (s?: Season): InputField[] => [...nameField(s?.name), { name: 'startDate', label: 'Start date', type: 'date', value: dateValue(s?.start_date ?? null) }, { name: 'endDate', label: 'End date', type: 'date', value: dateValue(s?.end_date ?? null) }]
   const seasonData = (v: Record<string, string>) => ({ name: v.name, startDate: optional(v.startDate), endDate: optional(v.endDate) })
@@ -797,14 +863,17 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </CardContent></Card>)}
     {section === 'seasons' && (!leagues.data?.length ? <Panel title="A league is needed" description="Create a league before setting up a season."><Button className="self-start" nativeButton={false} render={<Link href="/manage/leagues" />}>Set up a league</Button></Panel> : <>
       <Dialog open={createSeasonOpen} onOpenChange={setCreateSeasonOpen}>
-        {seasonPage.data?.items.length ? <section aria-label="Seasons" className="flex flex-col gap-4">
-          <div className="flex justify-end"><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
+        {seasonsLoading ? <section aria-label="Seasons" aria-busy="true" className="flex flex-col gap-4">
+          {createSeasonButton}
+          <SeasonsSkeleton rows={skeletonRows(seasonMeta, seasonPaging.displayPage)} header={seasonsHeader} footer={seasonPager ?? <PaginationSkeleton />} />
+        </section> : seasonList?.items.length ? <section aria-label="Seasons" className="flex flex-col gap-4">
+          {createSeasonButton}
           <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Seasons in this organization</caption>
-            <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="w-24 text-muted-foreground sm:w-32">Status</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Start date</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">End date</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-            <TableBody>{seasonPage.data.items.map((item) => <Fragment key={item.id}>
+            {seasonsHeader}
+            <TableBody>{seasonList.items.map((item) => <Fragment key={item.id}>
               <TableRow><TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><div className="mt-1 flex flex-col gap-1 break-words text-xs text-muted-foreground md:hidden"><span>{item.league_name}</span><span>Start: {readableDate(item.start_date)}</span><span>End: {readableDate(item.end_date)}</span></div></TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{item.league_name}</TableCell><TableCell><SeasonStatusBadge status={item.status} /></TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.start_date)}</TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.end_date)}</TableCell><TableCell className="pr-4 text-right"><SeasonActions season={item} onEdit={() => setSeasonToEdit(item)} /></TableCell></TableRow>
             </Fragment>)}</TableBody>
-          </Table><DataPagination meta={seasonPage.data} onPageChange={setSeasonPageNumber} onPageSizeChange={(size) => { setSeasonPageNumber(1); setSeasonPageSize(size) }} /></CardContent></Card>
+          </Table>{seasonPager}</CardContent></Card>
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{filtersActive ? 'No matching seasons' : 'No seasons yet'}</h3></EmptyTitle><EmptyDescription>{filtersActive ? 'Try different filters or create a season.' : 'Create your first season to start organizing teams and games.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{filtersActive && <Button variant="outline" onClick={() => { setSeasonSearch(''); setSeasonStatus(''); setSeasonLeagueFilter(''); setSeasonPageNumber(1); setSeasonPageSize(10) }}>Clear filters</Button>}<DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />{filtersActive ? 'Create season' : 'Create your first season'}</DialogTrigger></div></EmptyContent></Empty></CardContent></Card>}
         <DialogContent><DialogHeader><DialogTitle>Create a season</DialogTitle><DialogDescription>{selectedLeague ? `Add a name and optional dates for ${selectedLeague.name}.` : 'Close this dialog and select a league in the header before creating a season.'}</DialogDescription></DialogHeader>{selectedLeague && <Editor key={selectedLeague.id} title="Season details" path={`leagues/${selectedLeague.id}/seasons`} fields={dateFields()} transform={seasonData} submitLabel="Create season" alignActions="end" onSaved={() => setCreateSeasonOpen(false)} />}</DialogContent>
       </Dialog>
@@ -812,8 +881,11 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>)}
     {section === 'teams' && (!leagues.data?.length || !league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <>
       <Dialog open={createTeamOpen} onOpenChange={(open) => { if (!createTeamPending) setCreateTeamOpen(open) }}>
-        {teamRows.length ? <section aria-label="Teams" className="flex flex-col gap-4">
-          {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption><TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+        {teamsLoading ? <section aria-label="Teams" aria-busy="true" className="flex flex-col gap-4">
+          <TeamsSkeleton rows={skeletonRows(teamMeta, teamPaging.displayPage)} view={teamView} header={teamsHeader} />
+          {teamPager ?? <PaginationSkeleton />}
+        </section> : teamRows.length ? <section aria-label="Teams" className="flex flex-col gap-4">
+          {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption>{teamsHeader}
             <TableBody>{teamRows.map((team) => {
               const canRegister = season.status !== 'completed' && team.season_id === season.id
               return <TableRow key={team.season_team_id ?? team.id}>
@@ -850,7 +922,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
               </li>
             })}
           </ul>}
-          {organizationTeams.data && <DataPagination meta={organizationTeams.data} onPageChange={setTeamPage} onPageSizeChange={(pageSize) => setTeamPagination({ scope: teamPageScope, page: 1, pageSize })} />}
+          {teamPager}
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{teamFiltersActive ? 'No matching teams' : 'No teams in this season'}</h3></EmptyTitle><EmptyDescription>{teamFiltersActive ? 'Try a different search or division.' : 'Register an existing team or create a team to start building rosters for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{teamFiltersActive && <Button variant="outline" onClick={() => { setTeamPage(1); setTeamSearch(''); setDebouncedTeamSearch(''); setTeamDivisionSelection({ id: '', seasonId: teamSeasonFilter }) }}>Clear filters</Button>}</div></EmptyContent></Empty></CardContent></Card>}
         <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="pr-8"><DialogTitle>Create a team</DialogTitle><DialogDescription>Enter team details and choose divisions in the current season.</DialogDescription></DialogHeader><CreateTeamForm key={`${league}-${season.id}`} leagueId={league} season={season} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivisions) => { changeWorkspace(nextLeague, nextSeason, nextDivisions[0]); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivisions.length > 1 || nextDivisions[0] !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamPage(1); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
       </Dialog>
