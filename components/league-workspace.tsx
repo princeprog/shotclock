@@ -3,8 +3,8 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addDays, format, isValid, parseISO, startOfDay } from 'date-fns'
-import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
+import { addDays, format, isValid, parseISO } from 'date-fns'
+import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
@@ -13,12 +13,15 @@ import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
 import { GameScoreDialog } from '@/components/game-score-dialog'
 import { GameScheduleHistory } from '@/components/game-schedule-history'
 import { VenuesWorkspace } from '@/components/venues-workspace'
+import { TimeZonePicker } from '@/components/time-zone-picker'
+import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/components/record-actions'
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
 import { DataPagination } from '@/components/data-pagination'
 import { requirePaginatedResult, type PaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
+import { browserTimeZone, formatGameDateTime, formatGameTime, zonedDate, zonedDayStart, zonedInput, zonedInstant } from '@/lib/league-time'
 import { teamListHref, type TeamFilters } from '@/lib/team-filter-links'
 import { readTeamView, saveTeamView, subscribeTeamView, availableTeamDivisions } from '@/lib/team-view'
 import { useWorkspace } from '@/components/workspace-context'
@@ -175,7 +178,7 @@ function Editor({ title, path, method = 'POST', fields, submitLabel = 'Save', tr
             {!field.required && <SelectItem value={null}>No {field.label.toLowerCase()} selected</SelectItem>}
             {field.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
           </SelectGroup></SelectContent>
-        </Select> : field.type === 'date' ? <DatePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} label={field.label} value={field.value} required={field.required} disabled={mutation.isPending} invalid={mutation.isError} /> : <Input id={`${path}-${field.name}`} name={field.name} type={field.type ?? 'text'} defaultValue={field.value ?? ''} required={field.required} min={field.type === 'number' ? field.min ?? 0 : undefined} max={field.max} disabled={mutation.isPending} aria-invalid={mutation.isError} />}
+        </Select> : field.type === 'timezone' ? <TimeZonePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} defaultValue={field.value ? String(field.value) : ''} disabled={mutation.isPending} invalid={mutation.isError} /> : field.type === 'date' ? <DatePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} label={field.label} value={field.value} required={field.required} disabled={mutation.isPending} invalid={mutation.isError} /> : <Input id={`${path}-${field.name}`} name={field.name} type={field.type ?? 'text'} defaultValue={field.value ?? ''} required={field.required} min={field.type === 'number' ? field.min ?? 0 : undefined} max={field.max} disabled={mutation.isPending} aria-invalid={mutation.isError} />}
         {field.description && <FieldDescription>{field.description}</FieldDescription>}
       </Field>)}
     </FieldGroup>
@@ -185,29 +188,34 @@ function Editor({ title, path, method = 'POST', fields, submitLabel = 'Save', tr
   </form>
 }
 
-function SeasonActions({ season, onEdit }: { season: Season; onEdit: () => void }) {
+function SeasonActions({ season, archived, onEdit, onDelete }: { season: Season; archived: boolean; onEdit: () => void; onDelete: () => void }) {
   const client = useQueryClient()
+  const archiveAction = useArchiveAction()
   const nextStatus = season.status === 'draft' ? 'active' : 'completed'
   const mutation = useMutation({
-    mutationFn: () => leagueRequest(`seasons/${season.id}/status`, client, 'POST', { status: nextStatus }),
-    onSuccess: () => { toast.success(nextStatus === 'active' ? 'Season started.' : 'Season completed.') },
+    mutationFn: (status: string) => leagueRequest(`seasons/${season.id}/status`, client, 'POST', { status }),
+    onSuccess: (_data, status) => { toast.success(status === 'active' ? 'Season started.' : status === 'draft' ? 'Season returned to draft.' : 'Season completed.') },
     onError: (error) => toast.error(error.message),
   })
-  if (season.status === 'completed') return null
-  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${season.name}`} disabled={mutation.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
-    <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit season</DropdownMenuItem>
-    <DropdownMenuItem className="py-2" disabled={mutation.isPending} onClick={() => mutation.mutate()}>{season.status === 'draft' ? <><PlayIcon />Start season</> : <><CircleCheckIcon />Complete season</>}</DropdownMenuItem>
-  </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
+  const busy = mutation.isPending || archiveAction.isPending
+  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${season.name}`} disabled={busy} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+    {archived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `seasons/${season.id}/restore`, message: 'Season restored.' })}><ArchiveRestoreIcon />Restore season</DropdownMenuItem> : <>
+      {season.status !== 'completed' && <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit season</DropdownMenuItem>}
+      {season.status !== 'completed' && <DropdownMenuItem className="py-2" disabled={busy} onClick={() => mutation.mutate(nextStatus)}>{season.status === 'draft' ? <><PlayIcon />Start season</> : <><CircleCheckIcon />Complete season</>}</DropdownMenuItem>}
+      {season.status === 'active' && <DropdownMenuItem className="py-2" disabled={busy} onClick={() => mutation.mutate('draft')}><Undo2Icon />Return to draft</DropdownMenuItem>}
+      <DropdownMenuItem className="py-2" disabled={busy} onClick={() => archiveAction.mutate({ path: `seasons/${season.id}/archive`, message: 'Season archived.', undoPath: `seasons/${season.id}/restore` })}><ArchiveIcon />Archive season</DropdownMenuItem>
+    </>}
+  </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={onDelete}><Trash2Icon />{archived ? 'Delete permanently' : 'Delete season'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
 }
 
-function TeamActions({ team, roster, onEdit, onRegister, onCorrect, onRemove, canRegister }: { team: Team; roster?: { href: string; onClick: () => void }; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; onRemove?: () => void; canRegister: boolean }) {
+function TeamActions({ team, roster, onEdit, onRegister, onCorrect, onRemove, onDelete, canRegister }: { team: Team; roster?: { href: string; onClick: () => void }; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; onRemove?: () => void; onDelete?: () => void; canRegister: boolean }) {
   return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${team.name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
     {roster && <DropdownMenuItem className="py-2" render={<Link href={roster.href} onClick={roster.onClick} />}><ClipboardListIcon />View roster</DropdownMenuItem>}
     <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit team</DropdownMenuItem>
   </DropdownMenuGroup>{(canRegister || onCorrect) && <><DropdownMenuSeparator /><DropdownMenuGroup>
     {canRegister && <DropdownMenuItem className="py-2" onClick={onRegister}><CalendarPlusIcon />Add to division</DropdownMenuItem>}
     {onCorrect && <DropdownMenuItem className="py-2" onClick={onCorrect}><ClipboardPenLineIcon />Change division</DropdownMenuItem>}
-  </DropdownMenuGroup></>}{onRemove && <><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={onRemove}><Trash2Icon />Remove team</DropdownMenuItem></DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu>
+  </DropdownMenuGroup></>}{(onRemove || onDelete) && <><DropdownMenuSeparator /><DropdownMenuGroup>{onRemove && <DropdownMenuItem variant="destructive" className="py-2" onClick={onRemove}><Trash2Icon />Remove from division</DropdownMenuItem>}{onDelete && <DropdownMenuItem variant="destructive" className="py-2" onClick={onDelete}><Trash2Icon />Delete team</DropdownMenuItem>}</DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu>
 }
 
 function RegisterTeamForm({ team, organizationId, seasonId, onClose }: { team: Team; organizationId: string; seasonId: string; onClose: () => void }) {
@@ -377,8 +385,6 @@ function Choice({ label, value, options, onChange, emptyLabel }: { label: string
 }
 function dateValue(value: string | null) { return value ? value.slice(0, 10) : '' }
 function readableDate(date: string | null) { return date ? format(parseISO(dateValue(date)), 'MMM d, yyyy') : 'Not set' }
-function dateTime(value: string | null) { return value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Date not scheduled' }
-function localInput(value: string | null) { if (!value) return ''; const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 const names = (items: Item[]): Option[] => items.map((item) => ({ value: item.id, label: item.name }))
 const optional = (v: string) => v.trim() || null
 const gameStage = (game: Game) => {
@@ -388,18 +394,18 @@ const gameStage = (game: Game) => {
 }
 
 
-function GamesList({ games, season, teams, venues }: { games: Game[]; season: Season; teams: SeasonTeam[]; venues: Item[] }) {
+function GamesList({ games, season, teams, venues, timeZone }: { games: Game[]; season: Season; teams: SeasonTeam[]; venues: Item[]; timeZone?: string | null }) {
   const fields = (game: Game): InputField[] => [
     { name: 'homeTeamId', label: 'Home team', required: true, value: game.home_season_team_id, options: names(teams) },
     { name: 'awayTeamId', label: 'Away team', required: true, value: game.away_season_team_id, options: names(teams) },
-    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: localInput(game.scheduled_at) },
+    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: zonedInput(game.scheduled_at, timeZone) },
     { name: 'venueId', label: 'Venue', value: game.venue_id, options: names(venues) },
     { name: 'durationMinutes', label: 'Game duration (minutes)', type: 'number', required: true, min: 1, max: 1440, value: game.duration_minutes ?? 60, description: game.duration_minutes === null ? 'Confirm the game duration for conflict checks.' : undefined },
   ]
   return <div className="flex flex-col gap-4">{games.length === 0 && <NoData>No games to show yet.</NoData>}{games.map((game) => <div key={game.id} className="flex flex-col gap-2 border-b pb-4 last:border-0 last:pb-0">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{game.home_name} <span className="tabular-nums">{game.home_score !== null && game.away_score !== null ? `${game.home_score} – ${game.away_score}` : 'vs'}</span> {game.away_name}</p><Badge variant="secondary" className="capitalize">{game.forfeited_by_season_team_id ? 'Forfeit' : game.status}</Badge></div>
-    <p className="text-sm text-muted-foreground">{dateTime(game.scheduled_at)}{game.venue_name ? ` · ${game.venue_name}` : ''}{gameStage(game) ? ` · ${gameStage(game)}` : ''}</p>
-    {game.status === 'scheduled' && season.status !== 'completed' && <details><summary className="cursor-pointer text-sm underline">Edit schedule</summary><div className="pt-3"><Editor title="Edit game" path={`games/${game.id}`} method="PATCH" fields={fields(game)} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} /></div></details>}
+    <p className="text-sm text-muted-foreground">{formatGameDateTime(game.scheduled_at, timeZone)}{game.venue_name ? ` · ${game.venue_name}` : ''}{gameStage(game) ? ` · ${gameStage(game)}` : ''}</p>
+    {game.status === 'scheduled' && season.status !== 'completed' && <details><summary className="cursor-pointer text-sm underline">Edit schedule</summary><div className="pt-3"><Editor title="Edit game" path={`games/${game.id}`} method="PATCH" fields={fields(game)} transform={(v) => ({ ...v, scheduledAt: zonedInstant(v.scheduledAt, timeZone), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} /></div></details>}
     {(season.status === 'active' || (season.status === 'completed' && game.status === 'completed')) && <details><summary className="cursor-pointer text-sm underline">{game.status === 'completed' ? 'Correct score' : 'Record final score'}</summary><div className="pt-3">{game.forfeited_by_season_team_id && <p className="mb-3 text-sm text-muted-foreground">Saving a score records a played result instead of a forfeit.</p>}<Editor title="Final score" path={`games/${game.id}/score`} fields={[{ name: 'homeScore', label: `${game.home_name} score`, type: 'number', required: true, value: game.home_score }, { name: 'awayScore', label: `${game.away_name} score`, type: 'number', required: true, value: game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} /></div></details>}
   </div>)}</div>
 }
@@ -440,8 +446,8 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
 
 type GameDialog = { kind: 'schedule' } | { kind: 'generator'; mode: 'preliminary' | 'playoffs' } | { kind: 'edit' | 'score' | 'remove' | 'forfeit' | 'history'; game: Game }
 
-function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, teams, teamsLoading, teamsError, onRetryTeams, venues, onClose, onSaved, onPendingChange }: {
-  seasonId: string; divisions: Division[]; divisionId: string; onDivisionChange: (id: string) => void; teams: SeasonTeam[]; teamsLoading: boolean; teamsError: string | null; onRetryTeams: () => void; venues: Item[]; onClose: () => void; onSaved: () => void; onPendingChange: (pending: boolean) => void
+function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, teams, teamsLoading, teamsError, onRetryTeams, venues, onClose, onSaved, onPendingChange, timeZone }: {
+  seasonId: string; divisions: Division[]; divisionId: string; onDivisionChange: (id: string) => void; teams: SeasonTeam[]; teamsLoading: boolean; teamsError: string | null; onRetryTeams: () => void; venues: Item[]; onClose: () => void; onSaved: () => void; onPendingChange: (pending: boolean) => void; timeZone?: string | null
 }) {
   const client = useQueryClient()
   const [homeTeam, setHomeTeam] = useState('')
@@ -466,11 +472,11 @@ function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, t
     const time = String(values.get('gameTime') ?? '')
     if (!date) { setMissingDate(true); document.getElementById('schedule-game-date')?.focus(); return }
     if (!time) { setMissingTime(true); document.getElementById('schedule-game-time-hour')?.focus(); return }
-    const scheduledAt = new Date(`${date}T${time}`)
-    if (!Number.isFinite(scheduledAt.getTime())) { setError('Choose a valid date and time.'); return }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) { setError('Choose a valid date and time.'); return }
+    const scheduledAt = zonedInstant(`${date}T${time}`, timeZone)
     try {
       onPendingChange(true)
-      await mutation.mutateAsync({ homeTeamId: homeTeam, awayTeamId: awayTeam, scheduledAt: scheduledAt.toISOString(), venueId: optional(venue) })
+      await mutation.mutateAsync({ homeTeamId: homeTeam, awayTeamId: awayTeam, scheduledAt, venueId: optional(venue) })
     } catch { onPendingChange(false) }
   }
 
@@ -512,7 +518,7 @@ function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, t
   </form>
 }
 
-function GamesManager({ season, divisions, venues }: { season: Season; divisions: Division[]; venues: Item[] }) {
+function GamesManager({ season, divisions, venues, timeZone }: { season: Season; divisions: Division[]; venues: Item[]; timeZone?: string | null }) {
   const [dialog, setDialog] = useState<GameDialog | null>(null)
   const [pending, setPending] = useState(false)
   const [divisionFilter, setDivisionFilter] = useState('')
@@ -538,8 +544,9 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
     const params = new URLSearchParams({ page: String(tabPage), pageSize: String(tabPageSize), sort: tab === 'completed' ? 'desc' : 'asc', status: tab })
     if (divisionFilter) params.set('divisionId', divisionFilter)
     else params.set('scope', 'season')
-    if (dates?.from) params.set('from', startOfDay(dates.from).toISOString())
-    if (dates?.to) params.set('to', startOfDay(addDays(dates.to, 1)).toISOString())
+    // Date filters cover whole days in the league's time zone.
+    if (dates?.from) params.set('from', zonedDayStart(format(dates.from, 'yyyy-MM-dd'), timeZone))
+    if (dates?.to) params.set('to', zonedDayStart(format(addDays(dates.to, 1), 'yyyy-MM-dd'), timeZone))
     return `seasons/${season.id}/games?${params}`
   }
   const gamesQuery = (gamePath: string) => ({ queryKey: ['league', gamePath], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(gamePath, client)), retry: false })
@@ -599,7 +606,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   const gameFields: InputField[] = [
     { name: 'homeTeamId', label: 'Home team', required: true, value: game?.home_season_team_id, options: names(teams) },
     { name: 'awayTeamId', label: 'Away team', required: true, value: game?.away_season_team_id, options: names(teams) },
-    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: localInput(game?.scheduled_at ?? null) },
+    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: zonedInput(game?.scheduled_at, timeZone) },
     { name: 'venueId', label: 'Venue', value: game?.venue_id, options: names(venues) },
     ...(dialog?.kind === 'edit' ? [{ name: 'durationMinutes', label: 'Game duration (minutes)', type: 'number', required: true, min: 1, max: 1440, value: game?.duration_minutes ?? 60, description: game?.duration_minutes == null ? 'No duration was recorded for this game. Check the duration to detect schedule conflicts.' : 'Used to check for team and venue conflicts.' }] : []),
   ]
@@ -607,8 +614,8 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   const saved = (message: string) => { closeDialog(); toast.success(message) }
   const groups = new Map<string, { day: Date | null; rows: Game[] }>()
   for (const row of listData?.items ?? []) {
-    const day = row.scheduled_at ? new Date(row.scheduled_at) : null
-    const key = day ? format(day, 'yyyy-MM-dd') : 'unscheduled'
+    const key = row.scheduled_at ? zonedDate(row.scheduled_at, timeZone) : 'unscheduled'
+    const day = row.scheduled_at ? parseISO(key) : null
     if (!groups.has(key)) groups.set(key, { day, rows: [] })
     groups.get(key)!.rows.push(row)
   }
@@ -624,7 +631,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
           const canScore = (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
           const canForfeit = (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
           return <TableRow key={row.id}>
-            <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? new Date(row.scheduled_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '—'}</TableCell>
+            <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? formatGameTime(row.scheduled_at, timeZone) : '—'}</TableCell>
             <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium">{row.home_name} <span className="font-normal text-muted-foreground">vs</span> {row.away_name}</span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 lg:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground md:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
             <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground md:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
             <TableCell className="hidden w-32 lg:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
@@ -651,6 +658,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
             <TooltipTrigger render={<span tabIndex={0} aria-label={`${season.status === 'draft' ? 'Draft' : 'Completed'} season. ${seasonHint}`} className="inline-flex rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}><SeasonStatusBadge status={season.status} includeSeason /></TooltipTrigger>
             <TooltipContent side="bottom" align="start">{seasonHint}</TooltipContent>
           </Tooltip> : <SeasonStatusBadge status={season.status} includeSeason />}
+          {timeZone && timeZone !== browserTimeZone() && <span className="text-xs text-muted-foreground">Times in {timeZone.replaceAll('_', ' ')}</span>}
           {editable && season.status === 'draft' && <Button type="button" variant="ghost" size="sm" disabled={startSeason.isPending} onClick={() => { startSeason.reset(); setConfirmStart(true) }}><PlayIcon data-icon="inline-start" />Start season</Button>}
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -680,17 +688,57 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
         <DialogFooter><Button type="button" variant="outline" disabled={startSeason.isPending} onClick={() => setConfirmStart(false)}>Cancel</Button><Button type="button" disabled={startSeason.isPending} onClick={() => startSeason.mutate()}>{startSeason.isPending ? 'Starting…' : 'Start season'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && dialog?.kind !== 'score' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : dialog?.kind === 'score' ? `${game?.home_name} vs ${game?.away_name} · ${season.name}${game?.forfeited_by_season_team_id ? '. Saving a score records a played result instead of a forfeit.' : ''}` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
-      {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} mode={dialog.mode} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
+    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && dialog?.kind !== 'score' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
+      {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} mode={dialog.mode} timeZone={timeZone} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
       {dialog?.kind === 'forfeit' && <GameForfeitDialog game={dialog.game} onClose={closeDialog} onSaved={() => saved('Forfeit recorded.')} onPendingChange={setPending} />}
-      {dialog?.kind === 'history' && <GameScheduleHistory gameId={dialog.game.id} />}
+      {dialog?.kind === 'history' && <GameScheduleHistory gameId={dialog.game.id} timeZone={timeZone} />}
       {dialog?.kind === 'remove' && <><p className="text-sm text-muted-foreground">This removes the game from the schedule. Games with dependent playoff games or records may be blocked.</p>{removeGame.isError && <p role="alert" className="text-sm text-destructive">{removeGame.error.message}</p>}<DialogFooter><Button type="button" variant="outline" disabled={removeGame.isPending} onClick={closeDialog}>Cancel</Button><Button type="button" variant="destructive" disabled={removeGame.isPending} onClick={() => removeGame.mutate(dialog.game.id)}>{removeGame.isPending ? 'Removing…' : 'Remove game'}</Button></DialogFooter></>}
-      {dialog?.kind === 'schedule' && <ScheduleGameForm seasonId={season.id} divisions={divisions} divisionId={scheduleDivision} onDivisionChange={setScheduleDivision} teams={teams} teamsLoading={!!scheduleDivision && registrations.isFetching} teamsError={registrations.isError ? registrations.error.message : null} onRetryTeams={() => void registrations.refetch()} venues={venues} onClose={closeDialog} onSaved={() => saved('Game scheduled.')} onPendingChange={setPending} />}
-      {dialog?.kind === 'edit' && teamDivision && (registrations.isLoading ? <p>Loading teams…</p> : registrations.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load teams</AlertTitle><AlertDescription><p>{registrations.error.message}</p><Button variant="outline" size="sm" onClick={() => void registrations.refetch()}>Try again</Button></AlertDescription></Alert> : teams.length < 2 ? <p className="text-sm text-muted-foreground">Register at least two teams in this division to schedule a game.</p> : <Editor key={`${dialog.kind}-${teamDivision}-${game?.id ?? ''}`} title="Game details" path={`games/${dialog.game.id}`} method="PATCH" fields={gameFields} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} submitLabel="Save changes" alignActions="end" onSaved={() => saved('Schedule updated.')} onCancel={closeDialog} onPendingChange={setPending} />)}
-      {dialog?.kind === 'score' && <GameScoreDialog key={dialog.game.id} game={dialog.game} stage={gameStage(dialog.game)} onClose={closeDialog} onSaved={() => saved('Final score saved.')} onPendingChange={setPending} />}
+      {dialog?.kind === 'schedule' && <ScheduleGameForm seasonId={season.id} divisions={divisions} divisionId={scheduleDivision} onDivisionChange={setScheduleDivision} teams={teams} teamsLoading={!!scheduleDivision && registrations.isFetching} teamsError={registrations.isError ? registrations.error.message : null} onRetryTeams={() => void registrations.refetch()} venues={venues} onClose={closeDialog} onSaved={() => saved('Game scheduled.')} onPendingChange={setPending} timeZone={timeZone} />}
+      {dialog?.kind === 'edit' && teamDivision && (registrations.isLoading ? <p>Loading teams…</p> : registrations.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load teams</AlertTitle><AlertDescription><p>{registrations.error.message}</p><Button variant="outline" size="sm" onClick={() => void registrations.refetch()}>Try again</Button></AlertDescription></Alert> : teams.length < 2 ? <p className="text-sm text-muted-foreground">Register at least two teams in this division to schedule a game.</p> : <Editor key={`${dialog.kind}-${teamDivision}-${game?.id ?? ''}`} title="Game details" path={`games/${dialog.game.id}`} method="PATCH" fields={gameFields} transform={(v) => ({ ...v, scheduledAt: zonedInstant(v.scheduledAt, timeZone), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} submitLabel="Save changes" alignActions="end" onSaved={() => saved('Schedule updated.')} onCancel={closeDialog} onPendingChange={setPending} />)}
+      {dialog?.kind === 'score' && <GameScoreDialog key={dialog.game.id} game={dialog.game} stage={gameStage(dialog.game)} timeZone={timeZone} onClose={closeDialog} onSaved={() => saved('Final score saved.')} onPendingChange={setPending} />}
     </DialogContent></Dialog>
   </div>
 }
+
+type LeagueRow = Item & { location: string | null; time_zone?: string | null }
+// Active leagues come from the workspace; archived ones load only when the archive is shown.
+function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId: string; leagues: LeagueRow[]; onDelete: (target: DeleteTarget) => void }) {
+  const [view, setView] = useState('')
+  const [editing, setEditing] = useState('')
+  const archiveAction = useArchiveAction()
+  const showingArchived = view === 'archived'
+  const archived = useLeagueQuery<LeagueRow[]>(`organizations/${organizationId}/leagues?archived=true`, !!organizationId && showingArchived)
+  const rows = showingArchived ? archived.data ?? [] : leagues
+  const deleteLeague = (item: LeagueRow) => onDelete(showingArchived
+    ? { path: `leagues/${item.id}`, title: 'Delete league permanently?', description: `This removes ${item.name} with all of its seasons, teams, games and results. This can’t be undone.`, confirmName: item.name, submitLabel: 'Delete permanently', success: 'League deleted.' }
+    : { path: `leagues/${item.id}`, title: 'Delete league?', description: `This removes ${item.name} with its seasons, teams and venues. Leagues with recorded results need to be archived instead.`, confirmName: item.name, submitLabel: 'Delete league', success: 'League deleted.' })
+  const toolbar = <div className="flex flex-wrap items-end justify-between gap-3"><Choice label="Show" value={view} options={[{ id: 'archived', name: 'Archived' }]} emptyLabel="Active" onChange={(value) => { setView(value); setEditing('') }} />{!showingArchived && <CreateLeagueDialog organizationId={organizationId} />}</div>
+  if (!showingArchived && !leagues.length) return <Card className="mx-auto w-full max-w-3xl"><CardContent>
+    <Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No leagues yet</h3></EmptyTitle><EmptyDescription>Create your first league to start organizing seasons, teams, and games.</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2"><CreateLeagueDialog organizationId={organizationId} first /><Button variant="ghost" onClick={() => setView('archived')}><ArchiveIcon data-icon="inline-start" />View archived</Button></div></EmptyContent></Empty>
+  </CardContent></Card>
+  return <section aria-label="Leagues" className="flex flex-col gap-4">
+    {toolbar}
+    {showingArchived && archived.isLoading ? <LoadingContent /> : showingArchived && archived.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load archived leagues</AlertTitle><AlertDescription><p>{archived.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void archived.refetch()}>Try again</Button></AlertDescription></Alert> : !rows.length ? <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><ArchiveIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No archived leagues</h3></EmptyTitle><EmptyDescription>Archived leagues appear here and can be restored.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
+    : <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">{showingArchived ? 'Archived leagues' : 'Leagues in this organization'}</caption>
+      <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Time zone</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+      <TableBody>{rows.map((item) => <Fragment key={item.id}>
+        <TableRow>
+          <TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><p className="mt-1 break-words text-xs text-muted-foreground sm:hidden">{item.location || 'No location added'}</p></TableCell>
+          <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
+          <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground md:table-cell"><span className="break-words">{item.time_zone ? item.time_zone.replaceAll('_', ' ') : 'Not set'}</span></TableCell>
+          <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+            {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
+              <DropdownMenuItem className="py-2" onClick={() => setEditing(editing === item.id ? '' : item.id)}><PencilIcon />{editing === item.id ? 'Close editor' : 'Edit league'}</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/archive`, message: 'League archived.', undoPath: `leagues/${item.id}/restore` })}><ArchiveIcon />Archive league</DropdownMenuItem>
+            </>}
+          </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
+        </TableRow>
+        {!showingArchived && editing === item.id && <TableRow><TableCell colSpan={4} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[{ name: 'name', label: 'Name', required: true, value: item.name }, { name: 'location', label: 'Location', value: item.location }, { name: 'timeZone', label: 'Time zone', type: 'timezone', value: item.time_zone ?? browserTimeZone(), description: 'Game times show in this zone.' }]} transform={(v) => ({ name: v.name, location: optional(v.location), timeZone: v.timeZone || null })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
+      </Fragment>)}</TableBody>
+    </Table></CardContent></Card>}
+  </section>
+}
+
 
 export function LeagueWorkspace({ section, initialTeamFilters }: { section: Section; initialTeamFilters?: TeamFilters }) {
   const { organizations, organization, leagues, league: selectedLeague, seasons, season, divisions, division, changeDivision, changeWorkspace } = useWorkspace()
@@ -729,7 +777,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const searchPending = section === 'seasons' && seasonSearch.trim() !== debouncedSearch
   const seasonFilters = new URLSearchParams()
   if (section === 'seasons' && debouncedSearch) seasonFilters.set('search', debouncedSearch)
-  if (section === 'seasons' && seasonStatus) seasonFilters.set('status', seasonStatus)
+  if (section === 'seasons' && seasonStatus) seasonFilters.set(seasonStatus === 'archived' ? 'archived' : 'status', seasonStatus === 'archived' ? 'true' : seasonStatus)
   if (section === 'seasons' && selectedSeasonLeague) seasonFilters.set('leagueId', selectedSeasonLeague)
   if (section === 'seasons') { seasonFilters.set('page', String(seasonPageNumber)); seasonFilters.set('pageSize', String(seasonPageSize)) }
   const seasonQuery = seasonFilters.toString()
@@ -784,7 +832,6 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const venues = useLeagueQuery<Item[]>(`leagues/${league}/venues`, !!league && ['dashboard', 'games'].includes(section))
   const dashboard = useLeagueQuery<Dashboard>(`seasons/${season?.id}/dashboard?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'dashboard')
   const standings = useLeagueQuery<Standing[]>(`seasons/${season?.id}/standings?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'standings')
-  const [editing, setEditing] = useState('')
   const [seasonToEdit, setSeasonToEdit] = useState<Season | null>(null)
   const [createSeasonOpen, setCreateSeasonOpen] = useState(false)
   const [createTeamOpen, setCreateTeamOpen] = useState(false)
@@ -794,6 +841,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const [registerExistingOpen, setRegisterExistingOpen] = useState(false)
   const [teamToCorrect, setTeamToCorrect] = useState<OrganizationTeamRow | null>(null)
   const [teamToRemove, setTeamToRemove] = useState<OrganizationTeamRow | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const relevantQueries = [leagues, ...(section === 'seasons' ? [seasonPage] : ['dashboard', 'games', 'standings', 'teams', 'divisions'].includes(section) ? [seasons, divisions] : []), ...(section === 'teams' ? [organizationTeams] : []), ...(section === 'games' ? [venues] : []), ...(section === 'dashboard' ? [seasonTeams, venues, dashboard] : []), ...(section === 'standings' ? [standings] : [])]
   const failedQuery = searchPending || teamSearchPending ? undefined : relevantQueries.find((query) => query.isError)
   // Seasons and teams show their own list skeletons.
@@ -823,7 +871,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
         <Field className="w-full sm:w-64"><FieldLabel htmlFor="season-search">Search seasons</FieldLabel><Input id="season-search" type="search" placeholder="Search by name" maxLength={120} value={seasonSearch} onChange={(event) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonSearch(event.target.value) }} /></Field>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <Choice label="League" value={selectedSeasonLeague} options={leagues.data ?? []} emptyLabel="All Leagues" onChange={(v) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonLeagueFilter(v) }} />
-        <Field className="w-full sm:w-52"><FieldLabel htmlFor="season-status">Status</FieldLabel><Select value={seasonStatus || null} onValueChange={(value) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonStatus(value ?? '') }} items={[{ value: null, label: 'All statuses' }, { value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }]}><SelectTrigger id="season-status" className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>All statuses</SelectItem><SelectItem value="draft">Draft</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="completed">Completed</SelectItem></SelectGroup></SelectContent></Select></Field>
+        <Field className="w-full sm:w-52"><FieldLabel htmlFor="season-status">Status</FieldLabel><Select value={seasonStatus || null} onValueChange={(value) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonStatus(value ?? '') }} items={[{ value: null, label: 'All statuses' }, { value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }, { value: 'archived', label: 'Archived' }]}><SelectTrigger id="season-status" className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>All statuses</SelectItem><SelectItem value="draft">Draft</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="archived">Archived</SelectItem></SelectGroup></SelectContent></Select></Field>
         </div>
       </div> : section === 'teams' ? <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end"><Field className="w-full sm:w-64"><FieldLabel htmlFor="team-search">Search teams</FieldLabel><Input id="team-search" type="search" placeholder="Search by team name" maxLength={120} value={teamSearch} onChange={(event) => { setTeamPage(1); setTeamSearch(event.target.value) }} /></Field><Choice label="Division" value={selectedTeamDivision} options={divisions.data ?? []} emptyLabel="All divisions" onChange={(value) => { setTeamPage(1); setTeamDivisionSelection({ id: value, seasonId: teamSeasonFilter }) }} /></div>
@@ -837,31 +885,16 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
       {['dashboard', 'standings'].includes(section) && season && <div className="flex flex-wrap items-end justify-between gap-4"><Field className="w-full sm:w-56"><FieldLabel htmlFor="page-division">Division</FieldLabel><Select value={division?.id ?? null} onValueChange={(value) => { if (value) changeDivision(value) }} items={(divisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={!divisions.data?.length}><SelectTrigger id="page-division" className="w-full"><SelectValue placeholder={divisions.isLoading ? 'Loading divisions…' : divisions.isError ? 'Divisions unavailable' : divisions.data?.length ? 'Choose division' : 'No divisions'} /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{divisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{section === 'standings' && <Button nativeButton={false} variant="outline" render={<Link href="/manage/games" />}><CalendarDaysIcon data-icon="inline-start" />View games</Button>}</div>}
     </div>
     {failedQuery ? <Alert variant="destructive"><AlertTitle>Couldn’t load this page</AlertTitle><AlertDescription><p>{failedQuery.error?.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void failedQuery.refetch()}>Try again</Button></AlertDescription></Alert> : loading ? <LoadingContent /> : <>
+    <DeleteRecordDialog target={deleteTarget} onClose={() => setDeleteTarget(null)} />
+    {['dashboard', 'games'].includes(section) && selectedLeague && !selectedLeague.time_zone && <Alert><Clock3Icon /><AlertTitle>Set {selectedLeague.name}’s time zone</AlertTitle><AlertDescription><p>Until it’s set, game times follow each viewer’s device.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/leagues" />}>Set time zone</Button></AlertDescription></Alert>}
     {section === 'dashboard' && <>
       {!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : !division ? <NoData>Choose a division to view the dashboard.</NoData> : <>
         <Panel title={season.name} description={`${division?.name ?? 'Division'} · Season ${season.status} · ${dashboard.data?.teamCount ?? 0} registered teams`}><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/teams" />}>Manage teams</Button></Panel>
-        <div className="grid gap-4 lg:grid-cols-2"><Panel title="Upcoming games"><GamesList games={dashboard.data?.upcoming ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/games" />}>Manage games</Button></Panel><Panel title="Recent results"><GamesList games={dashboard.data?.recent ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /></Panel></div>
+        <div className="grid gap-4 lg:grid-cols-2"><Panel title="Upcoming games"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.upcoming ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/games" />}>Manage games</Button></Panel><Panel title="Recent results"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.recent ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /></Panel></div>
         <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><TableHead>Team</TableHead><TableHead>Wins</TableHead><TableHead>Losses</TableHead><TableHead>Point difference</TableHead></TableRow></TableHeader><TableBody>{dashboard.data.standings.map((row) => <TableRow key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</TableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
       </>}
     </>}
-    {section === 'leagues' && (leagues.data?.length ? <section aria-label="Leagues" className="flex flex-col gap-4">
-      <div className="flex justify-end"><CreateLeagueDialog organizationId={org} /></div>
-      <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Leagues in this organization</caption>
-        <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-        <TableBody>{leagues.data.map((item) => <Fragment key={item.id}>
-          <TableRow>
-            <TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><p className="mt-1 break-words text-xs text-muted-foreground sm:hidden">{item.location || 'No location added'}</p></TableCell>
-            <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
-            <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => setEditing(editing === item.id ? '' : item.id)}><PencilIcon />{editing === item.id ? 'Close editor' : 'Edit league'}</DropdownMenuItem>
-            </DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
-          </TableRow>
-          {editing === item.id && <TableRow><TableCell colSpan={3} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[...nameField(item.name), { name: 'location', label: 'Location', value: item.location }]} transform={(v) => ({ name: v.name, location: optional(v.location) })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
-        </Fragment>)}</TableBody>
-      </Table></CardContent></Card>
-    </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent>
-      <Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No leagues yet</h3></EmptyTitle><EmptyDescription>Create your first league to start organizing seasons, teams, and games.</EmptyDescription></EmptyHeader><EmptyContent><CreateLeagueDialog organizationId={org} first /></EmptyContent></Empty>
-    </CardContent></Card>)}
+    {section === 'leagues' && <LeaguesSection organizationId={org} leagues={leagues.data ?? []} onDelete={setDeleteTarget} />}
     {section === 'seasons' && (!leagues.data?.length ? <Panel title="A league is needed" description="Create a league before setting up a season."><Button className="self-start" nativeButton={false} render={<Link href="/manage/leagues" />}>Set up a league</Button></Panel> : <>
       <Dialog open={createSeasonOpen} onOpenChange={setCreateSeasonOpen}>
         {seasonsLoading ? <section aria-label="Seasons" aria-busy="true" className="flex flex-col gap-4">
@@ -872,7 +905,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
           <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Seasons in this organization</caption>
             {seasonsHeader}
             <TableBody>{seasonList.items.map((item) => <Fragment key={item.id}>
-              <TableRow><TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><div className="mt-1 flex flex-col gap-1 break-words text-xs text-muted-foreground md:hidden"><span>{item.league_name}</span><span>Start: {readableDate(item.start_date)}</span><span>End: {readableDate(item.end_date)}</span></div></TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{item.league_name}</TableCell><TableCell><SeasonStatusBadge status={item.status} /></TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.start_date)}</TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.end_date)}</TableCell><TableCell className="pr-4 text-right"><SeasonActions season={item} onEdit={() => setSeasonToEdit(item)} /></TableCell></TableRow>
+              <TableRow><TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><div className="mt-1 flex flex-col gap-1 break-words text-xs text-muted-foreground md:hidden"><span>{item.league_name}</span><span>Start: {readableDate(item.start_date)}</span><span>End: {readableDate(item.end_date)}</span></div></TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{item.league_name}</TableCell><TableCell><SeasonStatusBadge status={item.status} /></TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.start_date)}</TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.end_date)}</TableCell><TableCell className="pr-4 text-right"><SeasonActions season={item} archived={seasonStatus === 'archived'} onEdit={() => setSeasonToEdit(item)} onDelete={() => setDeleteTarget(seasonStatus === 'archived' ? { path: `seasons/${item.id}`, title: 'Delete season permanently?', description: `This removes ${item.name} with all of its games, results and registrations. This can’t be undone.`, confirmName: item.name, submitLabel: 'Delete permanently', success: 'Season deleted.' } : { path: `seasons/${item.id}`, title: 'Delete season?', description: `This removes ${item.name} with its divisions, registrations and unplayed games. Seasons with recorded results need to be archived instead.`, confirmName: item.name, submitLabel: 'Delete season', success: 'Season deleted.' })} /></TableCell></TableRow>
             </Fragment>)}</TableBody>
           </Table>{seasonPager}</CardContent></Card>
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{filtersActive ? 'No matching seasons' : 'No seasons yet'}</h3></EmptyTitle><EmptyDescription>{filtersActive ? 'Try different filters or create a season.' : 'Create your first season to start organizing teams and games.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{filtersActive && <Button variant="outline" onClick={() => { setSeasonSearch(''); setSeasonStatus(''); setSeasonLeagueFilter(''); setSeasonPageNumber(1); setSeasonPageSize(10) }}>Clear filters</Button>}<DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />{filtersActive ? 'Create season' : 'Create your first season'}</DialogTrigger></div></EmptyContent></Empty></CardContent></Card>}
@@ -903,7 +936,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.league_name}</TableCell>
                 <TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.season_name ?? '—'}</TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.division_name ?? '—'}</TableCell>
                 <TableCell className="hidden md:table-cell"><Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge></TableCell>
-                <TableCell className="pr-3 text-right"><TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} /></TableCell>
+                <TableCell className="pr-3 text-right"><TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} onDelete={() => setDeleteTarget({ path: `teams/${team.id}`, title: 'Delete team?', description: `This removes ${team.name} and its registrations. Teams with games can’t be deleted.`, submitLabel: 'Delete team', success: 'Team deleted.' })} /></TableCell>
               </TableRow>
             })}</TableBody>
           </Table></CardContent></Card> : <ul aria-label="Teams and their season registrations" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -914,7 +947,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <div className="flex items-start gap-3">
                   <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-[#E67145]/10 text-sm font-semibold text-[#A64320] dark:text-[#FFAE88]">{initials}</span>
                   <div className="min-w-0 flex-1"><h4 className="break-words font-semibold leading-snug">{team.name}</h4><p className="mt-1 break-words text-sm text-muted-foreground">{team.league_name}</p></div>
-                  <TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} />
+                  <TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} onDelete={() => setDeleteTarget({ path: `teams/${team.id}`, title: 'Delete team?', description: `This removes ${team.name} and its registrations. Teams with games can’t be deleted.`, submitLabel: 'Delete team', success: 'Team deleted.' })} />
                 </div>
                 <div className="mt-5 flex flex-1 flex-col items-start gap-2 text-sm">
                   <Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge>
@@ -936,7 +969,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     {section === 'divisions' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <DivisionsWorkspace key={season.id} season={season} divisions={divisions.data ?? []} />)}
     {section === 'venues' && <VenuesWorkspace key={org} organizationId={org} leagues={leagues.data ?? []} selectedLeagueId={league} />}
     {section === 'standings' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : !division ? <NoData>Choose a division to view standings.</NoData> : standings.data?.length ? <StandingsView season={season} division={division} rows={standings.data} /> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No teams in this division</h3></EmptyTitle><EmptyDescription>Register teams to see their standings here.</EmptyDescription></EmptyHeader><EmptyContent><Button nativeButton={false} render={<Link href="/manage/teams" />}>Manage teams</Button></EmptyContent></Empty></CardContent></Card>)}
-    {section === 'games' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <GamesManager key={season.id} season={season} divisions={divisions.data ?? []} venues={venues.data ?? []} />)}
+    {section === 'games' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <GamesManager key={season.id} timeZone={selectedLeague?.time_zone} season={season} divisions={divisions.data ?? []} venues={venues.data ?? []} />)}
     </>}
   </main>
 }

@@ -26,6 +26,7 @@ function harness(statuses = divisionStatuses) {
     if (name === '@tanstack/react-query') return { useQueryClient: () => ({ getQueryData: () => undefined }), useMutation: () => ({ reset() {}, async mutateAsync(body) { submissions.push(body) } }), useQuery: ({ queryKey, enabled }) => { const path = queryKey[1]; if (enabled !== false) paths.push(path); if (path.includes('/schedule/status')) return { isSuccess: true, data: { divisions: statuses } }; if (path.includes('/teams?')) return { isSuccess: true, data: registrations }; return { isSuccess: true, data: { items: [game], total: 1, page: 1, pageSize: 10 } } } }
     if (name === '@/lib/league-client') return { leagueRequest() {} }
     if (name === '@/lib/pagination') return { requirePaginatedResult: (value) => value }
+    if (name === '@/lib/league-time') return require('../lib/league-time.ts')
     if (name.startsWith('@/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === 'next/link') return { __esModule: true, default: 'Link' }
     return require(name)

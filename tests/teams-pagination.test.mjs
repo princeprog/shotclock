@@ -22,6 +22,7 @@ function harness() {
     if (name === '@/lib/team-filter-links') return { teamListHref: ({ search, divisionId }) => '/manage/teams?' + new URLSearchParams({ search, divisionId }) }
     if (name === '@/lib/league-client') return { leagueRequest: async () => ({ items: [], page: 1, pageSize: 10, total: 0, totalPages: 1 }) }
     if (name === '@/lib/pagination') return { requirePaginatedResult: (value) => { if (!Array.isArray(value.items)) throw Error('invalid page'); return value } }
+    if (name === '@/lib/league-time') return require('../lib/league-time.ts')
     if (name.startsWith('@/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === 'next/link') return { __esModule: true, default: 'Link' }
     return require(name)
