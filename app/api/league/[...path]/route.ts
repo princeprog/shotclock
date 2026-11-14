@@ -5,9 +5,9 @@ import { isTrustedMutation } from '@/lib/auth-security'
 const uuid = '[0-9a-fA-F-]{36}'
 const routes: Record<string, RegExp[]> = {
   GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions|schedule/status)|teams/${uuid}|season-teams/${uuid}(/roster)?|games/${uuid}/schedule-history|divisions/${uuid}/schedule/status)$`)],
-  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/(score|forfeit)|(divisions|seasons)/${uuid}/(schedule|playoffs)(/preview)?|seasons/${uuid}/(schedule|playoffs)/(estimate|validate|suggest)|seasons/${uuid}/schedule/calendar)$`)],
+  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork|archive|restore)|(leagues|seasons)/${uuid}/(archive|restore)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/(score|forfeit)|(divisions|seasons)/${uuid}/(schedule|playoffs)(/preview)?|seasons/${uuid}/(schedule|playoffs)/(estimate|validate|suggest)|seasons/${uuid}/schedule/calendar)$`)],
   PATCH: [new RegExp(`^(organizations|leagues|seasons|teams|season-teams|rosters|games|venues|divisions|players)/${uuid}$`)],
-  DELETE: [new RegExp(`^(divisions|season-teams|rosters|games)/${uuid}$`)],
+  DELETE: [new RegExp(`^((divisions|season-teams|rosters|games|teams|venues|organizations|leagues|seasons)/${uuid}|organizations/${uuid}/players/${uuid})$`)],
 }
 
 async function readBoundedBody(request: NextRequest, limit: number): Promise<string | null> {
@@ -34,7 +34,8 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
   if (!access) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   let body: string | undefined
   if (request.method !== 'GET') {
-    if (request.method !== 'DELETE') {
+    // Deletes normally have no body; the typed-name confirmation for organizations, leagues and seasons is sent as JSON.
+    if (request.method !== 'DELETE' || request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {
       if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) return NextResponse.json({ error: 'Invalid request' }, { status: 415 })
       const saveSchedule = request.method === 'POST' && new RegExp(`^(divisions|seasons)/${uuid}/(schedule|playoffs)(?:/validate)?$`).exec(route)
       // Season previews, estimates and suggestions can carry team availability and the whole draft, so they share the season save limit.
@@ -42,13 +43,15 @@ async function forward(request: NextRequest, context: { params: Promise<{ path: 
       const limit = saveSchedule ? (saveSchedule[1] === 'seasons' ? 2 * 1024 * 1024 : 256 * 1024) : seasonPlanning ? 2 * 1024 * 1024 : 8192
       const boundedBody = await readBoundedBody(request, limit)
       if (boundedBody === null) return NextResponse.json({ error: 'Request too large' }, { status: 413 })
-      body = boundedBody
-      try { const parsed: unknown = JSON.parse(body); if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error() }
-      catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }) }
+      body = request.method === 'DELETE' && !boundedBody ? undefined : boundedBody
+      if (body !== undefined) {
+        try { const parsed: unknown = JSON.parse(body); if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error() }
+        catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }) }
+      }
     }
   }
   try {
-    const query = request.method === 'GET' && new RegExp(`^((leagues|organizations)/${uuid}/seasons|organizations/${uuid}/(teams|venues|players)|season-teams/${uuid}/roster|seasons/${uuid}/(games|teams|standings|dashboard))$`).test(route) ? request.nextUrl.search : ''
+    const query = request.method === 'GET' && new RegExp(`^(organizations|organizations/${uuid}/leagues|(leagues|organizations)/${uuid}/seasons|organizations/${uuid}/(teams|venues|players)|season-teams/${uuid}/roster|seasons/${uuid}/(games|teams|standings|dashboard))$`).test(route) ? request.nextUrl.search : ''
     const upstream = await apiFetch(`/league/${route}${query}`, { method: request.method, headers: { authorization: `Bearer ${access}`, ...(body ? { 'content-type': 'application/json' } : {}) }, body })
     const data = await upstream.json().catch(() => ({})) as { message?: string | string[] }
     if (!upstream.ok) {

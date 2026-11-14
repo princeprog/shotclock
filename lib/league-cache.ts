@@ -50,7 +50,10 @@ export function leagueChangeForMutation(client: QueryClient, path: string, metho
   const input = record(body)
   const [resource, id, child] = parts
   let change: LeagueChange = { kind: 'unknown', action: method === 'POST' ? 'create' : 'edit' }
-  if (resource === 'organizations' && !child) change = { kind: 'organization', action: id ? 'edit' : 'create', organizationId: id ?? stringValue(value.id) }
+  // Archiving, restoring and deleting whole records can change many lists and the workspace selection, so refresh everything.
+  const removesRecord = method === 'DELETE' && ['organizations', 'leagues', 'seasons', 'teams', 'venues'].includes(resource)
+  if (removesRecord || child === 'archive' || child === 'restore' || (resource === 'organizations' && child === 'players' && method === 'DELETE')) change = { kind: 'unknown', action: 'edit' }
+  else if (resource === 'organizations' && !child) change = { kind: 'organization', action: id ? 'edit' : 'create', organizationId: id ?? stringValue(value.id) }
   else if (resource === 'organizations' && child === 'leagues') change = { kind: 'league', action: 'create', organizationId: id, leagueId: stringValue(value.id) }
   else if (resource === 'leagues' && !child) change = { kind: 'league', action: 'edit', leagueId: id, organizationId: stringValue(value.organization_id) }
   else if (resource === 'leagues' && child === 'seasons') change = { kind: 'season', action: 'create', leagueId: id, seasonId: stringValue(value.id) }

@@ -21,11 +21,12 @@ function harness(statuses = divisionStatuses) {
   let index = 0
   const paths = []
   const submissions = []
-  const context = { exports: {}, URLSearchParams, FormData: class { constructor(form) { this.form = form } get(key) { return this.form[key] ?? null } }, document: { getElementById() { return null } }, require(name) {
-    if (name === 'react') return { ...require('react'), useState(initial) { const target = activeStates; const i = index++; if (!(i in target)) target[i] = typeof initial === 'function' ? initial() : initial; return [target[i], (next) => { target[i] = typeof next === 'function' ? next(target[i]) : next }] } }
-    if (name === '@tanstack/react-query') return { useQueryClient: () => ({}), useMutation: () => ({ reset() {}, async mutateAsync(body) { submissions.push(body) } }), useQuery: ({ queryKey, enabled }) => { const path = queryKey[1]; if (enabled !== false) paths.push(path); if (path.includes('/schedule/status')) return { isSuccess: true, data: { divisions: statuses } }; if (path.includes('/teams?')) return { isSuccess: true, data: registrations }; return { isSuccess: true, data: { items: [game], total: 1, page: 1, pageSize: 10 } } } }
+  const context = { exports: {}, URLSearchParams, setTimeout, clearTimeout, FormData: class { constructor(form) { this.form = form } get(key) { return this.form[key] ?? null } }, document: { getElementById() { return null } }, require(name) {
+    if (name === 'react') return { ...require('react'), useEffect() {}, useRef(initial) { const target = activeStates; const i = index++; if (!(i in target)) target[i] = { current: initial }; return target[i] }, useState(initial) { const target = activeStates; const i = index++; if (!(i in target)) target[i] = typeof initial === 'function' ? initial() : initial; return [target[i], (next) => { target[i] = typeof next === 'function' ? next(target[i]) : next }] } }
+    if (name === '@tanstack/react-query') return { useQueryClient: () => ({ getQueryData: () => undefined }), useMutation: () => ({ reset() {}, async mutateAsync(body) { submissions.push(body) } }), useQuery: ({ queryKey, enabled }) => { const path = queryKey[1]; if (enabled !== false) paths.push(path); if (path.includes('/schedule/status')) return { isSuccess: true, data: { divisions: statuses } }; if (path.includes('/teams?')) return { isSuccess: true, data: registrations }; return { isSuccess: true, data: { items: [game], total: 1, page: 1, pageSize: 10 } } } }
     if (name === '@/lib/league-client') return { leagueRequest() {} }
     if (name === '@/lib/pagination') return { requirePaginatedResult: (value) => value }
+    if (name === '@/lib/league-time') return require('../lib/league-time.ts')
     if (name.startsWith('@/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === 'next/link') return { __esModule: true, default: 'Link' }
     return require(name)
@@ -151,7 +152,7 @@ test('opening manual scheduling defaults to the filter and a later filter change
   assert.ok(find(tree, (node) => node.type === h.ScheduleGameForm))
 })
 
-test('unavailable season controls explain each division’s eligibility', () => {
+test('unavailable schedule generation explains each division in a tooltip, without a playoffs message', () => {
   const statuses = [
     { ...divisionStatuses[0], preliminaryReason: 'Needs another team', playoffs: true, playoffReason: 'Finish semifinals' },
     { ...divisionStatuses[1], canGeneratePreliminary: false, preliminaryReason: 'Already scheduled', playoffStage: null, playoffReason: 'Finish preliminary games' },
@@ -159,10 +160,24 @@ test('unavailable season controls explain each division’s eligibility', () => 
   const tree = harness(statuses).render()
   assert.match(text(tree), /Needs another team/)
   assert.match(text(tree), /Already scheduled/)
-  assert.match(text(tree), /Finish semifinals/)
-  assert.match(text(tree), /Finish preliminary games/)
+  assert.ok(find(tree, (node) => node.type === 'TooltipContent'))
+  assert.doesNotMatch(text(tree), /Finish semifinals|Finish preliminary games|Playoffs not ready/)
   assert.equal(find(tree, (node) => node.props?.children?.includes?.('Generate schedule')).props.disabled, true)
   assert.equal(find(tree, (node) => node.props?.children?.includes?.('Schedule playoffs')).props.disabled, true)
+})
+
+test('rapid next-page clicks show the newest page at once and fetch it once clicking settles', async () => {
+  const h = harness()
+  let tree = h.render()
+  find(tree, (node) => node.type === 'DataPagination').props.onPageChange(2)
+  tree = h.render()
+  find(tree, (node) => node.type === 'DataPagination').props.onPageChange(3)
+  tree = h.render()
+  assert.match(h.paths.find((value) => value.includes('/games?')), /page=1&/)
+  assert.ok(find(tree, (node) => typeof node.type === 'function' && node.type.name === 'GamesSkeleton'))
+  await new Promise((resolve) => setTimeout(resolve, 350))
+  h.render()
+  assert.match(h.paths.find((value) => value.includes('/games?')), /page=3&/)
 })
 
 test('the division filter applies to final results and game actions remain available', () => {

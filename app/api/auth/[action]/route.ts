@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ACCESS_COOKIE, REFRESH_COOKIE, apiFetch, appOrigin } from '@/lib/auth-server'
 import { isTrustedMutation, trustedClientHeaders } from '@/lib/auth-security'
 
-const actions = new Set(['login', 'register', 'verify-email', 'resend-verification', 'forgot-password', 'reset-password', 'refresh', 'logout'])
+const actions = new Set(['login', 'register', 'verify-email', 'resend-verification', 'forgot-password', 'reset-password', 'refresh', 'logout', 'change-password', 'change-email', 'confirm-email-change', 'sign-out-others'])
+// Account actions act on the signed-in user, so they need the session and show the API's own validation messages.
+const accountActions = new Set(['change-password', 'change-email', 'sign-out-others', 'me'])
+const messageActions = new Set([...accountActions, 'confirm-email-change'])
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' as const, path: '/' }
 
 function clearCookies(response: NextResponse) {
@@ -27,6 +30,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ action: string }> }) {
   const { action } = await params
   if (!actions.has(action)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return mutate(request, action, 'POST')
+}
+
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ action: string }> }) {
+  const { action } = await params
+  if (action !== 'me') return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return mutate(request, action, 'PATCH')
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ action: string }> }) {
+  const { action } = await params
+  if (action !== 'me') return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return mutate(request, action, 'DELETE')
+}
+
+async function mutate(request: NextRequest, action: string, method: 'POST' | 'PATCH' | 'DELETE') {
   try {
     if (!isTrustedMutation(request.headers.get('origin'), request.headers.get('x-requested-with'), appOrigin())) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) return NextResponse.json({ error: 'Invalid request' }, { status: 415 })
@@ -41,21 +60,24 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     if (action === 'refresh' || action === 'logout') body = { refreshToken: request.cookies.get(REFRESH_COOKIE)?.value }
     const access = request.cookies.get(ACCESS_COOKIE)?.value
-    const upstream = await apiFetch(`/auth/${action}`, { method: 'POST', headers: { 'content-type': 'application/json', ...trustedClientHeaders(request.headers, process.env.AUTH_GATEWAY_SECRET, process.env.AUTH_TRUSTED_CLIENT_IP_HEADER), ...(access && action === 'logout' ? { authorization: `Bearer ${access}` } : {}) }, body: JSON.stringify(body) })
+    const account = accountActions.has(action)
+    if (account && !access) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    const upstream = await apiFetch(`/auth/${action}`, { method, headers: { 'content-type': 'application/json', ...trustedClientHeaders(request.headers, process.env.AUTH_GATEWAY_SECRET, process.env.AUTH_TRUSTED_CLIENT_IP_HEADER), ...(access && (action === 'logout' || account) ? { authorization: `Bearer ${access}` } : {}) }, body: JSON.stringify(body) })
     if (!upstream.ok) {
       const status = upstream.status === 429 ? 429 : upstream.status >= 500 ? 503 : upstream.status
-      const response = NextResponse.json({ error: status === 429 ? 'Too many attempts. Please try again later.' : status === 503 ? 'Service unavailable. Please try again.' : 'Unable to complete your request.' }, { status })
+      const detail = messageActions.has(action) && (status === 400 || status === 409) ? await upstream.json().then((value: { message?: string | string[] }) => Array.isArray(value.message) ? value.message.join('. ') : value.message).catch(() => undefined) : undefined
+      const response = NextResponse.json({ error: status === 429 ? 'Too many attempts. Please try again later.' : status === 503 ? 'Service unavailable. Please try again.' : status === 401 ? 'Not authenticated' : detail || 'Unable to complete your request.' }, { status })
       if (action === 'refresh' && upstream.status === 401) clearCookies(response)
       return response
     }
     const data = await upstream.json().catch(() => ({})) as { accessToken?: string; refreshToken?: string; user?: unknown }
     if ((action === 'login' || action === 'refresh') && (!data.accessToken || !data.refreshToken || !data.user)) return NextResponse.json({ error: 'Service unavailable' }, { status: 503 })
-    const response = NextResponse.json(action === 'login' || action === 'refresh' ? { user: data.user } : { ok: true }, { headers: { 'Cache-Control': 'no-store' } })
+    const response = NextResponse.json(action === 'login' || action === 'refresh' || (action === 'me' && method === 'PATCH') ? { user: data.user } : { ok: true }, { headers: { 'Cache-Control': 'no-store' } })
     if (data.accessToken && data.refreshToken && (action === 'login' || action === 'refresh')) {
       response.cookies.set(ACCESS_COOKIE, data.accessToken, { ...cookieOptions, maxAge: 15 * 60 })
       response.cookies.set(REFRESH_COOKIE, data.refreshToken, { ...cookieOptions, maxAge: 7 * 24 * 60 * 60 })
     }
-    if (action === 'logout') clearCookies(response)
+    if (action === 'logout' || (action === 'me' && method === 'DELETE')) clearCookies(response)
     return response
   } catch {
     return NextResponse.json({ error: 'Service unavailable. Please try again.' }, { status: 503 })

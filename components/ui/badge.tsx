@@ -14,6 +14,7 @@ const badgeVariants = cva(
         seasonDraft: "bg-amber-300 text-slate-950",
         seasonActive: "bg-emerald-700 text-white",
         seasonCompleted: "bg-slate-600 text-white",
+        gameScheduled: "bg-sky-100 text-sky-900 dark:bg-sky-900/40 dark:text-sky-100",
         destructive:
           "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
         outline:

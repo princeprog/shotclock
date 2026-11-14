@@ -1,23 +1,27 @@
 'use client'
 
-import { Fragment, useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addDays, format, parseISO, startOfDay } from 'date-fns'
-import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
+import { addDays, format, isValid, parseISO } from 'date-fns'
+import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
 import { ScheduleGenerator } from '@/components/schedule-generator'
 import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
+import { GameScoreDialog } from '@/components/game-score-dialog'
 import { GameScheduleHistory } from '@/components/game-schedule-history'
 import { VenuesWorkspace } from '@/components/venues-workspace'
+import { TimeZonePicker } from '@/components/time-zone-picker'
+import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/components/record-actions'
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
 import { DataPagination } from '@/components/data-pagination'
-import { requirePaginatedResult } from '@/lib/pagination'
+import { requirePaginatedResult, type PaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
+import { browserTimeZone, formatGameDateTime, formatGameTime, zonedDate, zonedDayStart, zonedInput, zonedInstant } from '@/lib/league-time'
 import { teamListHref, type TeamFilters } from '@/lib/team-filter-links'
 import { readTeamView, saveTeamView, subscribeTeamView, availableTeamDivisions } from '@/lib/team-view'
 import { useWorkspace } from '@/components/workspace-context'
@@ -38,7 +42,8 @@ import { RegisterExistingTeamDialog, CorrectTeamRegistrationDialog, RemoveTeamRe
 import { Separator } from '@/components/ui/separator'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsIndicator, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export type Section = 'dashboard' | 'leagues' | 'seasons' | 'divisions' | 'teams' | 'venues' | 'games' | 'standings'
 type Item = { id: string; name: string }
@@ -54,6 +59,23 @@ type Standing = Item & { wins: number; losses: number; pointDifference: number }
 type Dashboard = { teamCount: number; upcoming: Game[]; recent: Game[]; standings: Standing[] }
 type Option = { value: string; label: string }
 type InputField = { name: string; label: string; type?: string; required?: boolean; min?: number; max?: number; description?: string; value?: string | number | null; options?: Option[] }
+
+// Why schedule generation is unavailable, with divisions grouped by reason so a shared reason appears once.
+function scheduleReason(reason: string, several: boolean): string {
+  const text = reason.replace(/^This division /i, '').replace(/^already has /i, several ? 'already have ' : 'already has ').trim()
+  return /[.!?]$/.test(text) ? text : text + '.'
+}
+
+function generationBlockers(items: { name: string; reason: string }[]) {
+  const groups = new Map<string, string[]>()
+  for (const item of items) groups.set(item.reason, [...(groups.get(item.reason) ?? []), item.name])
+  return <div className="flex flex-col gap-1.5">
+    <p className="font-medium">Schedule generation unavailable</p>
+    <ul className="flex flex-col gap-1">{[...groups].map(([reason, names]) => <li key={reason}>
+      <span className="font-medium">{names.length > 1 && names.length === items.length ? 'All divisions' : names.join(', ')}:</span> {scheduleReason(reason, names.length > 1)}
+    </li>)}</ul>
+  </div>
+}
 
 const pageCopy: Record<Section, { title: string; description: string }> = {
   dashboard: { title: 'Season overview', description: 'Follow your season, upcoming games, and standings in one place.' },
@@ -156,7 +178,7 @@ function Editor({ title, path, method = 'POST', fields, submitLabel = 'Save', tr
             {!field.required && <SelectItem value={null}>No {field.label.toLowerCase()} selected</SelectItem>}
             {field.options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
           </SelectGroup></SelectContent>
-        </Select> : field.type === 'date' ? <DatePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} label={field.label} value={field.value} required={field.required} disabled={mutation.isPending} invalid={mutation.isError} /> : <Input id={`${path}-${field.name}`} name={field.name} type={field.type ?? 'text'} defaultValue={field.value ?? ''} required={field.required} min={field.type === 'number' ? field.min ?? 0 : undefined} max={field.max} disabled={mutation.isPending} aria-invalid={mutation.isError} />}
+        </Select> : field.type === 'timezone' ? <TimeZonePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} defaultValue={field.value ? String(field.value) : ''} disabled={mutation.isPending} invalid={mutation.isError} /> : field.type === 'date' ? <DatePicker key={resetCount} id={`${path}-${field.name}`} name={field.name} label={field.label} value={field.value} required={field.required} disabled={mutation.isPending} invalid={mutation.isError} /> : <Input id={`${path}-${field.name}`} name={field.name} type={field.type ?? 'text'} defaultValue={field.value ?? ''} required={field.required} min={field.type === 'number' ? field.min ?? 0 : undefined} max={field.max} disabled={mutation.isPending} aria-invalid={mutation.isError} />}
         {field.description && <FieldDescription>{field.description}</FieldDescription>}
       </Field>)}
     </FieldGroup>
@@ -166,29 +188,34 @@ function Editor({ title, path, method = 'POST', fields, submitLabel = 'Save', tr
   </form>
 }
 
-function SeasonActions({ season, onEdit }: { season: Season; onEdit: () => void }) {
+function SeasonActions({ season, archived, onEdit, onDelete }: { season: Season; archived: boolean; onEdit: () => void; onDelete: () => void }) {
   const client = useQueryClient()
+  const archiveAction = useArchiveAction()
   const nextStatus = season.status === 'draft' ? 'active' : 'completed'
   const mutation = useMutation({
-    mutationFn: () => leagueRequest(`seasons/${season.id}/status`, client, 'POST', { status: nextStatus }),
-    onSuccess: () => { toast.success(nextStatus === 'active' ? 'Season started.' : 'Season completed.') },
+    mutationFn: (status: string) => leagueRequest(`seasons/${season.id}/status`, client, 'POST', { status }),
+    onSuccess: (_data, status) => { toast.success(status === 'active' ? 'Season started.' : status === 'draft' ? 'Season returned to draft.' : 'Season completed.') },
     onError: (error) => toast.error(error.message),
   })
-  if (season.status === 'completed') return null
-  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${season.name}`} disabled={mutation.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
-    <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit season</DropdownMenuItem>
-    <DropdownMenuItem className="py-2" disabled={mutation.isPending} onClick={() => mutation.mutate()}>{season.status === 'draft' ? <><PlayIcon />Start season</> : <><CircleCheckIcon />Complete season</>}</DropdownMenuItem>
-  </DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
+  const busy = mutation.isPending || archiveAction.isPending
+  return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${season.name}`} disabled={busy} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+    {archived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `seasons/${season.id}/restore`, message: 'Season restored.' })}><ArchiveRestoreIcon />Restore season</DropdownMenuItem> : <>
+      {season.status !== 'completed' && <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit season</DropdownMenuItem>}
+      {season.status !== 'completed' && <DropdownMenuItem className="py-2" disabled={busy} onClick={() => mutation.mutate(nextStatus)}>{season.status === 'draft' ? <><PlayIcon />Start season</> : <><CircleCheckIcon />Complete season</>}</DropdownMenuItem>}
+      {season.status === 'active' && <DropdownMenuItem className="py-2" disabled={busy} onClick={() => mutation.mutate('draft')}><Undo2Icon />Return to draft</DropdownMenuItem>}
+      <DropdownMenuItem className="py-2" disabled={busy} onClick={() => archiveAction.mutate({ path: `seasons/${season.id}/archive`, message: 'Season archived.', undoPath: `seasons/${season.id}/restore` })}><ArchiveIcon />Archive season</DropdownMenuItem>
+    </>}
+  </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={onDelete}><Trash2Icon />{archived ? 'Delete permanently' : 'Delete season'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
 }
 
-function TeamActions({ team, roster, onEdit, onRegister, onCorrect, onRemove, canRegister }: { team: Team; roster?: { href: string; onClick: () => void }; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; onRemove?: () => void; canRegister: boolean }) {
+function TeamActions({ team, roster, onEdit, onRegister, onCorrect, onRemove, onDelete, canRegister }: { team: Team; roster?: { href: string; onClick: () => void }; onEdit: () => void; onRegister: () => void; onCorrect?: () => void; onRemove?: () => void; onDelete?: () => void; canRegister: boolean }) {
   return <DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${team.name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
     {roster && <DropdownMenuItem className="py-2" render={<Link href={roster.href} onClick={roster.onClick} />}><ClipboardListIcon />View roster</DropdownMenuItem>}
     <DropdownMenuItem className="py-2" onClick={onEdit}><PencilIcon />Edit team</DropdownMenuItem>
   </DropdownMenuGroup>{(canRegister || onCorrect) && <><DropdownMenuSeparator /><DropdownMenuGroup>
     {canRegister && <DropdownMenuItem className="py-2" onClick={onRegister}><CalendarPlusIcon />Add to division</DropdownMenuItem>}
     {onCorrect && <DropdownMenuItem className="py-2" onClick={onCorrect}><ClipboardPenLineIcon />Change division</DropdownMenuItem>}
-  </DropdownMenuGroup></>}{onRemove && <><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={onRemove}><Trash2Icon />Remove team</DropdownMenuItem></DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu>
+  </DropdownMenuGroup></>}{(onRemove || onDelete) && <><DropdownMenuSeparator /><DropdownMenuGroup>{onRemove && <DropdownMenuItem variant="destructive" className="py-2" onClick={onRemove}><Trash2Icon />Remove from division</DropdownMenuItem>}{onDelete && <DropdownMenuItem variant="destructive" className="py-2" onClick={onDelete}><Trash2Icon />Delete team</DropdownMenuItem>}</DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu>
 }
 
 function RegisterTeamForm({ team, organizationId, seasonId, onClose }: { team: Team; organizationId: string; seasonId: string; onClose: () => void }) {
@@ -280,6 +307,77 @@ function WorkspacePrompt({ leagueCount, leagueSelected, seasonCount }: { leagueC
   return <Panel title="Choose a season" description="Select a season in the workspace control at the top of the page." />
 }
 function NoData({ children }: { children: React.ReactNode }) { return <p className="text-sm text-muted-foreground">{children}</p> }
+// Page clicks update the pager at once but fetch after a short pause, so rapid next/previous clicks request one page.
+function useDebouncedPage(page: number, scope: string, commit: (page: number) => void) {
+  const [pending, setPending] = useState<{ page: number; scope: string } | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { window.clearTimeout(timer.current); setPending(null) }, [scope])
+  const go = (next: number) => {
+    window.clearTimeout(timer.current)
+    setPending({ page: next, scope })
+    timer.current = window.setTimeout(() => { setPending(null); commit(next) }, 300)
+  }
+  return { displayPage: pending?.scope === scope ? pending.page : page, go }
+}
+function withoutPage(path: string) { const [base, query = ''] = path.split('?'); const params = new URLSearchParams(query); params.delete('page'); return `${base}?${params}` }
+// Reuses the previous page only while paging within the same filtered list.
+function keepPagedList<T>(path: string) { return (previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && withoutPage(String(previousQuery.queryKey[1])) === withoutPage(path) ? previous : undefined }
+function skeletonRows(meta: PaginatedResult<unknown> | undefined, page: number) { return meta ? Math.max(1, Math.min(meta.pageSize, meta.total - (page - 1) * meta.pageSize)) : 5 }
+function SeasonsSkeleton({ rows, header, footer }: { rows: number; header: ReactNode; footer: ReactNode }) {
+  return <Card role="status" aria-label="Loading seasons" className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed">{header}
+    <TableBody>{Array.from({ length: rows }, (_, row) => <TableRow key={row} className="hover:bg-transparent">
+      <TableCell className="py-3 pl-5"><Skeleton className="h-4 w-40 max-w-full" /><div className="mt-2 flex flex-col gap-1.5 md:hidden"><Skeleton className="h-3 w-28" /><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-24" /></div></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-32 max-w-full" /></TableCell>
+      <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24 max-w-full" /></TableCell>
+      <TableCell className="pr-4"><Skeleton className="ml-auto size-8 rounded-md" /></TableCell>
+    </TableRow>)}</TableBody>
+  </Table>{footer}</CardContent></Card>
+}
+function TeamsSkeleton({ rows, view, header }: { rows: number; view: string; header: ReactNode }) {
+  if (view !== 'table') return <div role="status" aria-label="Loading teams" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    {Array.from({ length: rows }, (_, card) => <div key={card} className="flex min-w-0 flex-col rounded-xl border bg-card p-5">
+      <div className="flex items-start gap-3"><Skeleton className="size-11 shrink-0 rounded-lg" /><div className="flex min-w-0 flex-1 flex-col gap-2 pt-0.5"><Skeleton className="h-5 w-32 max-w-full" /><Skeleton className="h-4 w-24 max-w-full" /></div><Skeleton className="size-8 rounded-md" /></div>
+      <div className="mt-5 flex flex-col items-start gap-2"><Skeleton className="h-5 w-24 rounded-full" /><Skeleton className="h-4 w-40 max-w-full" /></div>
+    </div>)}
+  </div>
+  return <Card role="status" aria-label="Loading teams" className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed">{header}
+    <TableBody>{Array.from({ length: rows }, (_, row) => <TableRow key={row} className="hover:bg-transparent">
+      <TableCell className="py-3 pl-5"><Skeleton className="h-4 w-36 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-28 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-20 max-w-full" /></TableCell>
+      <TableCell className="hidden md:table-cell"><Skeleton className="h-5 w-24 rounded-full" /></TableCell>
+      <TableCell className="pr-3"><Skeleton className="ml-auto size-8 rounded-md" /></TableCell>
+    </TableRow>)}</TableBody>
+  </Table></CardContent></Card>
+}
+// Mirrors the games agenda (date heading, date tile and table columns) so loading doesn't shift the layout.
+function GamesSkeleton() {
+  return <div role="status" aria-label="Loading games" className="flex flex-col gap-8">
+    {[2, 3].map((rows, group) => <div key={group} className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-baseline gap-3"><Skeleton className="h-7 w-44" /><Skeleton className="h-4 w-14" /></div>
+      <div className="flex items-start gap-4 sm:gap-6">
+        <div aria-hidden="true" className="hidden w-20 shrink-0 flex-col items-center gap-1.5 rounded-lg border bg-card px-2 py-3 sm:flex"><Skeleton className="h-3 w-7" /><Skeleton className="h-7 w-8" /><Skeleton className="h-3 w-7" /></div>
+        <Table className="table-fixed border-y">
+          <colgroup><col className="w-24 sm:w-28" /><col /><col className="hidden w-48 md:table-column" /><col className="hidden w-32 lg:table-column" /><col className="w-12" /></colgroup>
+          <TableBody>{Array.from({ length: rows }, (_, row) => <TableRow key={row} className="hover:bg-transparent">
+            <TableCell className="py-4"><Skeleton className="h-4 w-16" /></TableCell>
+            <TableCell><div className="flex flex-col gap-2"><Skeleton className="h-4 w-44 max-w-full" /><Skeleton className="h-3 w-56 max-w-full" /></div></TableCell>
+            <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
+            <TableCell className="hidden lg:table-cell"><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+            <TableCell className="pr-3"><Skeleton className="ml-auto size-7 rounded-md" /></TableCell>
+          </TableRow>)}</TableBody>
+        </Table>
+      </div>
+    </div>)}
+  </div>
+}
+
+function PaginationSkeleton() {
+  return <div aria-hidden="true" className="flex flex-wrap items-center justify-between gap-4 border-t px-5 py-3"><Skeleton className="h-4 w-24" /><div className="flex items-center gap-3"><Skeleton className="h-4 w-20" /><Skeleton className="h-4 w-20" /><Skeleton className="size-8 rounded-md" /><Skeleton className="size-8 rounded-md" /></div></div>
+}
 function LoadingContent() { return <div role="status" aria-label="Loading page content" className="flex flex-col gap-3"><Skeleton className="h-10 w-48" /><Skeleton className="h-32 w-full" /></div> }
 function Choice({ label, value, options, onChange, emptyLabel }: { label: string; value: string; options: Item[]; onChange: (value: string) => void; emptyLabel?: string }) {
   const empty = emptyLabel ?? `No ${label.toLowerCase()} selected`
@@ -287,8 +385,6 @@ function Choice({ label, value, options, onChange, emptyLabel }: { label: string
 }
 function dateValue(value: string | null) { return value ? value.slice(0, 10) : '' }
 function readableDate(date: string | null) { return date ? format(parseISO(dateValue(date)), 'MMM d, yyyy') : 'Not set' }
-function dateTime(value: string | null) { return value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Date not scheduled' }
-function localInput(value: string | null) { if (!value) return ''; const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16) }
 const names = (items: Item[]): Option[] => items.map((item) => ({ value: item.id, label: item.name }))
 const optional = (v: string) => v.trim() || null
 const gameStage = (game: Game) => {
@@ -298,18 +394,18 @@ const gameStage = (game: Game) => {
 }
 
 
-function GamesList({ games, season, teams, venues }: { games: Game[]; season: Season; teams: SeasonTeam[]; venues: Item[] }) {
+function GamesList({ games, season, teams, venues, timeZone }: { games: Game[]; season: Season; teams: SeasonTeam[]; venues: Item[]; timeZone?: string | null }) {
   const fields = (game: Game): InputField[] => [
     { name: 'homeTeamId', label: 'Home team', required: true, value: game.home_season_team_id, options: names(teams) },
     { name: 'awayTeamId', label: 'Away team', required: true, value: game.away_season_team_id, options: names(teams) },
-    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: localInput(game.scheduled_at) },
+    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: zonedInput(game.scheduled_at, timeZone) },
     { name: 'venueId', label: 'Venue', value: game.venue_id, options: names(venues) },
     { name: 'durationMinutes', label: 'Game duration (minutes)', type: 'number', required: true, min: 1, max: 1440, value: game.duration_minutes ?? 60, description: game.duration_minutes === null ? 'Confirm the game duration for conflict checks.' : undefined },
   ]
   return <div className="flex flex-col gap-4">{games.length === 0 && <NoData>No games to show yet.</NoData>}{games.map((game) => <div key={game.id} className="flex flex-col gap-2 border-b pb-4 last:border-0 last:pb-0">
     <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{game.home_name} <span className="tabular-nums">{game.home_score !== null && game.away_score !== null ? `${game.home_score} – ${game.away_score}` : 'vs'}</span> {game.away_name}</p><Badge variant="secondary" className="capitalize">{game.forfeited_by_season_team_id ? 'Forfeit' : game.status}</Badge></div>
-    <p className="text-sm text-muted-foreground">{dateTime(game.scheduled_at)}{game.venue_name ? ` · ${game.venue_name}` : ''}{gameStage(game) ? ` · ${gameStage(game)}` : ''}</p>
-    {game.status === 'scheduled' && season.status !== 'completed' && <details><summary className="cursor-pointer text-sm underline">Edit schedule</summary><div className="pt-3"><Editor title="Edit game" path={`games/${game.id}`} method="PATCH" fields={fields(game)} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} /></div></details>}
+    <p className="text-sm text-muted-foreground">{formatGameDateTime(game.scheduled_at, timeZone)}{game.venue_name ? ` · ${game.venue_name}` : ''}{gameStage(game) ? ` · ${gameStage(game)}` : ''}</p>
+    {game.status === 'scheduled' && season.status !== 'completed' && <details><summary className="cursor-pointer text-sm underline">Edit schedule</summary><div className="pt-3"><Editor title="Edit game" path={`games/${game.id}`} method="PATCH" fields={fields(game)} transform={(v) => ({ ...v, scheduledAt: zonedInstant(v.scheduledAt, timeZone), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} /></div></details>}
     {(season.status === 'active' || (season.status === 'completed' && game.status === 'completed')) && <details><summary className="cursor-pointer text-sm underline">{game.status === 'completed' ? 'Correct score' : 'Record final score'}</summary><div className="pt-3">{game.forfeited_by_season_team_id && <p className="mb-3 text-sm text-muted-foreground">Saving a score records a played result instead of a forfeit.</p>}<Editor title="Final score" path={`games/${game.id}/score`} fields={[{ name: 'homeScore', label: `${game.home_name} score`, type: 'number', required: true, value: game.home_score }, { name: 'awayScore', label: `${game.away_name} score`, type: 'number', required: true, value: game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} /></div></details>}
   </div>)}</div>
 }
@@ -350,8 +446,8 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
 
 type GameDialog = { kind: 'schedule' } | { kind: 'generator'; mode: 'preliminary' | 'playoffs' } | { kind: 'edit' | 'score' | 'remove' | 'forfeit' | 'history'; game: Game }
 
-function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, teams, teamsLoading, teamsError, onRetryTeams, venues, onClose, onSaved, onPendingChange }: {
-  seasonId: string; divisions: Division[]; divisionId: string; onDivisionChange: (id: string) => void; teams: SeasonTeam[]; teamsLoading: boolean; teamsError: string | null; onRetryTeams: () => void; venues: Item[]; onClose: () => void; onSaved: () => void; onPendingChange: (pending: boolean) => void
+function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, teams, teamsLoading, teamsError, onRetryTeams, venues, onClose, onSaved, onPendingChange, timeZone }: {
+  seasonId: string; divisions: Division[]; divisionId: string; onDivisionChange: (id: string) => void; teams: SeasonTeam[]; teamsLoading: boolean; teamsError: string | null; onRetryTeams: () => void; venues: Item[]; onClose: () => void; onSaved: () => void; onPendingChange: (pending: boolean) => void; timeZone?: string | null
 }) {
   const client = useQueryClient()
   const [homeTeam, setHomeTeam] = useState('')
@@ -376,11 +472,11 @@ function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, t
     const time = String(values.get('gameTime') ?? '')
     if (!date) { setMissingDate(true); document.getElementById('schedule-game-date')?.focus(); return }
     if (!time) { setMissingTime(true); document.getElementById('schedule-game-time-hour')?.focus(); return }
-    const scheduledAt = new Date(`${date}T${time}`)
-    if (!Number.isFinite(scheduledAt.getTime())) { setError('Choose a valid date and time.'); return }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) { setError('Choose a valid date and time.'); return }
+    const scheduledAt = zonedInstant(`${date}T${time}`, timeZone)
     try {
       onPendingChange(true)
-      await mutation.mutateAsync({ homeTeamId: homeTeam, awayTeamId: awayTeam, scheduledAt: scheduledAt.toISOString(), venueId: optional(venue) })
+      await mutation.mutateAsync({ homeTeamId: homeTeam, awayTeamId: awayTeam, scheduledAt, venueId: optional(venue) })
     } catch { onPendingChange(false) }
   }
 
@@ -422,23 +518,44 @@ function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, t
   </form>
 }
 
-function GamesManager({ season, divisions, venues }: { season: Season; divisions: Division[]; venues: Item[] }) {
+function GamesManager({ season, divisions, venues, timeZone }: { season: Season; divisions: Division[]; venues: Item[]; timeZone?: string | null }) {
   const [dialog, setDialog] = useState<GameDialog | null>(null)
   const [pending, setPending] = useState(false)
   const [divisionFilter, setDivisionFilter] = useState('')
   const [scheduleDivision, setScheduleDivision] = useState('')
   const [status, setStatus] = useState('scheduled')
   const [dates, setDates] = useState<DateRange | undefined>()
-  const [page, setPage] = useState(1)
+  const [page, setQueryPage] = useState(1)
+  const [displayPage, setDisplayPage] = useState(1)
+  const [paging, setPaging] = useState(false)
+  const pageTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Filters and page-size changes apply at once; next/previous clicks update the page number immediately and fetch once clicking settles.
+  const setPage = (next: number) => { clearTimeout(pageTimer.current); setPaging(false); setDisplayPage(next); setQueryPage(next) }
+  const goToPage = (next: number) => {
+    clearTimeout(pageTimer.current)
+    setPaging(true)
+    setDisplayPage(next)
+    pageTimer.current = setTimeout(() => setQueryPage(next), 300)
+  }
+  useEffect(() => () => clearTimeout(pageTimer.current), [])
   const [pageSize, setPageSize] = useState(10)
   const client = useQueryClient()
-  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize), sort: status === 'completed' ? 'desc' : 'asc', status })
-  if (divisionFilter) params.set('divisionId', divisionFilter)
-  else params.set('scope', 'season')
-  if (dates?.from) params.set('from', startOfDay(dates.from).toISOString())
-  if (dates?.to) params.set('to', startOfDay(addDays(dates.to, 1)).toISOString())
-  const path = `seasons/${season.id}/games?${params}`
-  const games = useQuery({ queryKey: ['league', path], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(path, client)), retry: false })
+  const gamesPath = (tab: string, tabPage: number, tabPageSize: number) => {
+    const params = new URLSearchParams({ page: String(tabPage), pageSize: String(tabPageSize), sort: tab === 'completed' ? 'desc' : 'asc', status: tab })
+    if (divisionFilter) params.set('divisionId', divisionFilter)
+    else params.set('scope', 'season')
+    // Date filters cover whole days in the league's time zone.
+    if (dates?.from) params.set('from', zonedDayStart(format(dates.from, 'yyyy-MM-dd'), timeZone))
+    if (dates?.to) params.set('to', zonedDayStart(format(addDays(dates.to, 1), 'yyyy-MM-dd'), timeZone))
+    return `seasons/${season.id}/games?${params}`
+  }
+  const gamesQuery = (gamePath: string) => ({ queryKey: ['league', gamePath], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(gamePath, client)), retry: false })
+  const path = gamesPath(status, page, pageSize)
+  // While a filter or page change loads, keep showing this tab's current list instead of a loading state.
+  const games = useQuery({ ...gamesQuery(path), placeholderData: (previous: PaginatedResult<Game> | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && new URLSearchParams(String(previousQuery.queryKey[1]).split('?')[1]).get('status') === status ? previous : undefined })
+  // Load the other tab's first page in the background so switching tabs shows games right away.
+  const otherTabPath = gamesPath(status === 'completed' ? 'scheduled' : 'completed', 1, 10)
+  useEffect(() => { void client.prefetchQuery({ ...gamesQuery(otherTabPath), staleTime: 30_000 }) }, [otherTabPath]) // eslint-disable-line react-hooks/exhaustive-deps
   const scheduleStatus = useLeagueQuery<{ divisions: ScheduleStatus[] }>(`seasons/${season.id}/schedule/status`)
   const scheduleDivisions = scheduleStatus.data?.divisions ?? []
   const teamDivision = dialog?.kind === 'edit' ? dialog.game.division_id : dialog?.kind === 'schedule' ? scheduleDivision : ''
@@ -449,28 +566,61 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
     mutationFn: (id: string) => leagueRequest(`games/${id}`, client, 'DELETE'),
     onSuccess: () => { setDialog(null); setPage(1); toast.success('Game removed.') },
   })
+  const [confirmStart, setConfirmStart] = useState(false)
+  const startSeason = useMutation({
+    mutationFn: () => leagueRequest(`seasons/${season.id}/status`, client, 'POST', { status: 'active' }),
+    onSuccess: () => { setConfirmStart(false); toast.success('Season started.') },
+    onError: (error) => toast.error(error.message),
+  })
+  const seasonHint = season.status === 'draft' ? 'Scores can be recorded after the season starts.' : season.status === 'completed' ? 'Scheduling is closed. Final scores can still be corrected.' : ''
+  // A page already in the cache shows right away; only pages not fetched yet show the skeleton.
+  const cachedTarget = displayPage !== page ? client.getQueryData<PaginatedResult<Game>>(['league', gamesPath(status, displayPage, pageSize)]) : undefined
+  const listData = cachedTarget ?? games.data
+  const showSkeleton = !cachedTarget && (games.isLoading || games.isPlaceholderData || displayPage !== page)
+  const pageMeta = listData ? { ...listData, page: displayPage } : undefined
   const resetPage = () => { setPage(1); setPageSize(10) }
   const clearDates = () => { setDates(undefined); resetPage() }
+  const [datesOpen, setDatesOpen] = useState(false)
+  const [dateStart, setDateStart] = useState<Date | undefined>()
+  // Each pick starts a fresh range: the first click sets the start, the second sets the end and applies the filter.
+  const pickDate = (day: Date) => {
+    if (!dateStart) { setDateStart(day); return }
+    const [from, to] = day < dateStart ? [day, dateStart] : [dateStart, day]
+    setDateStart(undefined)
+    setDates({ from, to })
+    resetPage()
+    setDatesOpen(false)
+  }
+  const toggleDates = (open: boolean) => {
+    // Closing after a single click filters to that one day.
+    if (!open && dateStart) { setDates({ from: dateStart, to: dateStart }); resetPage() }
+    setDateStart(undefined)
+    setDatesOpen(open)
+  }
+  const seasonStart = season.start_date ? parseISO(season.start_date) : undefined
+  const dateLabel = !dates?.from ? 'All dates'
+    : !dates.to || dates.from.getTime() === dates.to.getTime() ? format(dates.from, 'MMM d, yyyy')
+      : format(dates.from, dates.from.getFullYear() === dates.to.getFullYear() ? 'MMM d' : 'MMM d, yyyy') + ' – ' + format(dates.to, 'MMM d, yyyy')
   const editable = season.status !== 'completed'
   const game = dialog && 'game' in dialog ? dialog.game : undefined
   const gameFields: InputField[] = [
     { name: 'homeTeamId', label: 'Home team', required: true, value: game?.home_season_team_id, options: names(teams) },
     { name: 'awayTeamId', label: 'Away team', required: true, value: game?.away_season_team_id, options: names(teams) },
-    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: localInput(game?.scheduled_at ?? null) },
+    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: zonedInput(game?.scheduled_at, timeZone) },
     { name: 'venueId', label: 'Venue', value: game?.venue_id, options: names(venues) },
     ...(dialog?.kind === 'edit' ? [{ name: 'durationMinutes', label: 'Game duration (minutes)', type: 'number', required: true, min: 1, max: 1440, value: game?.duration_minutes ?? 60, description: game?.duration_minutes == null ? 'No duration was recorded for this game. Check the duration to detect schedule conflicts.' : 'Used to check for team and venue conflicts.' }] : []),
   ]
   const closeDialog = () => { setDialog(null); setPending(false); removeGame.reset() }
   const saved = (message: string) => { closeDialog(); toast.success(message) }
   const groups = new Map<string, { day: Date | null; rows: Game[] }>()
-  for (const row of games.data?.items ?? []) {
-    const day = row.scheduled_at ? new Date(row.scheduled_at) : null
-    const key = day ? format(day, 'yyyy-MM-dd') : 'unscheduled'
+  for (const row of listData?.items ?? []) {
+    const key = row.scheduled_at ? zonedDate(row.scheduled_at, timeZone) : 'unscheduled'
+    const day = row.scheduled_at ? parseISO(key) : null
     if (!groups.has(key)) groups.set(key, { day, rows: [] })
     groups.get(key)!.rows.push(row)
   }
-  const gameAgenda = games.data?.items.length ? <div className="flex flex-col gap-8">{Array.from(groups.entries()).map(([key, group]) => <section key={key} className="flex flex-col gap-4" aria-label={group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'}>
-    <div className="flex flex-wrap items-baseline gap-3"><h3 className="text-xl font-semibold tracking-tight">{group.day ? format(group.day, 'EEEE, MMM d') : 'Date not scheduled'}</h3><span className="text-sm text-muted-foreground">{group.rows.length} {group.rows.length === 1 ? 'game' : 'games'}{games.data && games.data.total > games.data.pageSize ? ' shown' : ''}</span></div>
+  const gameAgenda = listData?.items.length ? <div className="flex flex-col gap-8">{Array.from(groups.entries()).map(([key, group]) => <section key={key} className="flex flex-col gap-4" aria-label={group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'}>
+    <div className="flex flex-wrap items-baseline gap-3"><h3 className="text-xl font-semibold tracking-tight">{group.day ? format(group.day, 'EEEE, MMM d') : 'Date not scheduled'}</h3><span className="text-sm text-muted-foreground">{group.rows.length} {group.rows.length === 1 ? 'game' : 'games'}{listData && listData.total > listData.pageSize ? ' shown' : ''}</span></div>
     <div className="flex items-start gap-4 sm:gap-6">
       {group.day && <div aria-hidden="true" className="hidden w-20 shrink-0 flex-col items-center rounded-lg border bg-card px-2 py-3 text-center sm:flex"><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'MMM')}</span><span className="text-2xl font-semibold tabular-nums">{format(group.day, 'd')}</span><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'EEE')}</span></div>}
       <Table className="table-fixed border-y"><caption className="sr-only">{group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'} games</caption>
@@ -481,13 +631,14 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
           const canScore = (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
           const canForfeit = (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
           return <TableRow key={row.id}>
-            <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? new Date(row.scheduled_at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '—'}</TableCell>
+            <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? formatGameTime(row.scheduled_at, timeZone) : '—'}</TableCell>
             <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium">{row.home_name} <span className="font-normal text-muted-foreground">vs</span> {row.away_name}</span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 lg:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground md:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
             <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground md:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
-            <TableCell className="hidden w-32 lg:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'seasonDraft'}>{row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
+            <TableCell className="hidden w-32 lg:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
             <TableCell className="pr-3 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.home_name} vs ${row.away_name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
               {canEdit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'edit', game: row })}><PencilIcon />Edit schedule</DropdownMenuItem>}
               {canScore && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'score', game: row })}><CircleCheckIcon />{row.status === 'completed' ? 'Correct score' : 'Record final score'}</DropdownMenuItem>}
+              {editable && season.status === 'draft' && row.status === 'scheduled' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Start the season first</span></span></DropdownMenuItem>}
               {canForfeit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'forfeit', game: row })}><FlagIcon />{row.forfeited_by_season_team_id ? 'Correct forfeit' : 'Mark as forfeit'}</DropdownMenuItem>}
               <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'history', game: row })}><HistoryIcon />Schedule history</DropdownMenuItem>
             </DropdownMenuGroup>{canEdit && <><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="whitespace-nowrap py-2" onClick={() => { removeGame.reset(); setDialog({ kind: 'remove', game: row }) }}><Trash2Icon />Remove game</DropdownMenuItem></DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu></TableCell>
@@ -495,41 +646,99 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
         })}</TableBody>
       </Table>
     </div>
-  </section>)}<DataPagination meta={games.data} onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /></div> : <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{dates?.from ? 'No games in this date range' : status === 'completed' ? 'No final results yet' : 'No scheduled games'}</h3></EmptyTitle><EmptyDescription>{dates?.from ? 'Choose different dates to see more games.' : status === 'completed' ? 'Final scores will appear here once recorded.' : editable ? 'Schedule a matchup for this season.' : 'No scheduled games are available for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{dates?.from && <Button variant="outline" onClick={clearDates}>Clear dates</Button>}{status === 'scheduled' && editable && divisions.length > 0 && <Button onClick={openSchedule}><PlusIcon data-icon="inline-start" />Schedule game</Button>}</div></EmptyContent></Empty></CardContent></Card>
+  </section>)}<DataPagination meta={pageMeta!} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /></div> : <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{dates?.from ? 'No games in this date range' : status === 'completed' ? 'No final results yet' : 'No scheduled games'}</h3></EmptyTitle><EmptyDescription>{dates?.from ? 'Choose different dates to see more games.' : status === 'completed' ? 'Final scores will appear here once recorded.' : editable ? 'Schedule a matchup for this season.' : 'No scheduled games are available for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{dates?.from && <Button variant="outline" onClick={clearDates}>Clear dates</Button>}{status === 'scheduled' && editable && divisions.length > 0 && <Button onClick={openSchedule}><PlusIcon data-icon="inline-start" />Schedule game</Button>}</div></EmptyContent></Empty></CardContent></Card>
   return <div className="flex flex-col gap-8">
     {editable && scheduleStatus.isError && <Alert variant="destructive"><AlertTitle>Couldn’t load schedule status</AlertTitle><AlertDescription><p>{scheduleStatus.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void scheduleStatus.refetch()}>Try again</Button></AlertDescription></Alert>}
     {editable && scheduleStatus.isSuccess && !scheduleDivisions.some((item) => item.teamCount >= 2) && <Alert><AlertTitle>Register teams to schedule games</AlertTitle><AlertDescription><p>Add at least two teams to a division before scheduling a matchup.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/teams" />}>Manage teams</Button></AlertDescription></Alert>}
-    {season.status === 'draft' && <Alert><AlertTitle>Season is in draft</AlertTitle><AlertDescription>You can schedule games now. Start the season before recording final scores.</AlertDescription></Alert>}
-    {season.status === 'completed' && <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>Scheduling is closed. Final scores can still be corrected.</AlertDescription></Alert>}
     <Tabs value={status} onValueChange={(value) => { if (typeof value === 'string') { setStatus(value); resetPage() } }}>
       <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-4">
-        <TabsList><TabsTrigger value="scheduled">Scheduled</TabsTrigger><TabsTrigger value="completed">Final results</TabsTrigger></TabsList>
+        <div className="flex flex-wrap items-center gap-3">
+          <TabsList className="relative"><TabsIndicator /><TabsTrigger value="scheduled" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Scheduled</TabsTrigger><TabsTrigger value="completed" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Final results</TabsTrigger></TabsList>
+          {seasonHint ? <Tooltip>
+            <TooltipTrigger render={<span tabIndex={0} aria-label={`${season.status === 'draft' ? 'Draft' : 'Completed'} season. ${seasonHint}`} className="inline-flex rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}><SeasonStatusBadge status={season.status} includeSeason /></TooltipTrigger>
+            <TooltipContent side="bottom" align="start">{seasonHint}</TooltipContent>
+          </Tooltip> : <SeasonStatusBadge status={season.status} includeSeason />}
+          {timeZone && timeZone !== browserTimeZone() && <span className="text-xs text-muted-foreground">Times in {timeZone.replaceAll('_', ' ')}</span>}
+          {editable && season.status === 'draft' && <Button type="button" variant="ghost" size="sm" disabled={startSeason.isPending} onClick={() => { startSeason.reset(); setConfirmStart(true) }}><PlayIcon data-icon="inline-start" />Start season</Button>}
+        </div>
         <div className="flex flex-wrap items-end gap-2">
           <Choice label="Division" value={divisionFilter} options={divisions} emptyLabel="All divisions" onChange={(value) => { setDivisionFilter(value); setPage(1) }} />
-          <Popover><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dates?.from ? dates.to ? `${format(dates.from, 'MMM d')} – ${format(dates.to, 'MMM d, yyyy')}` : `From ${format(dates.from, 'MMM d, yyyy')}` : 'All dates'}</PopoverTrigger><PopoverContent align="end" className="w-auto p-0"><Calendar mode="range" selected={dates} onSelect={(value) => { setDates(value); resetPage() }} autoFocus />{dates?.from && <Button type="button" variant="ghost" className="mx-3 mb-3" onClick={clearDates}>Clear dates</Button>}</PopoverContent></Popover>
+          <Popover open={datesOpen} onOpenChange={toggleDates}><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dateLabel}</PopoverTrigger><PopoverContent align="end" className="w-auto gap-0 p-0"><Calendar mode="range" selected={dateStart ? { from: dateStart, to: undefined } : dates} onSelect={(_value, day) => pickDate(day)} defaultMonth={dateStart ?? dates?.from ?? (seasonStart && isValid(seasonStart) ? seasonStart : undefined)} autoFocus /><div className="flex min-h-11 items-center justify-between gap-3 border-t px-3 py-1.5"><p className="text-xs text-muted-foreground">{dateStart ? 'Select an end date' : 'Select a start date'}</p>{(dates?.from || dateStart) && <Button type="button" variant="ghost" size="sm" onClick={() => { setDateStart(undefined); clearDates(); setDatesOpen(false) }}>Clear dates</Button>}</div></PopoverContent></Popover>
           <Button type="button" variant="outline" disabled={!dates?.from} onClick={clearDates}>Reset</Button>
           {editable && <>
-            <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.canGeneratePreliminary)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
+            {(() => {
+              const generate = <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.canGeneratePreliminary)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
+              // A disabled control receives no hover events, so a focusable wrapper explains why generation is unavailable.
+              if (!scheduleStatus.isSuccess || !scheduleDivisions.length || scheduleDivisions.some((item) => item.canGeneratePreliminary)) return generate
+              return <Tooltip>
+                <TooltipTrigger render={<span tabIndex={0} aria-label="Generate schedule is unavailable" className="inline-flex cursor-not-allowed rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}>{generate}</TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="block max-w-sm px-3 py-2.5 text-left leading-relaxed">{generationBlockers(scheduleDivisions.map((item) => ({ name: item.name, reason: item.preliminaryReason || 'Not eligible for schedule generation.' })))}</TooltipContent>
+              </Tooltip>
+            })()}
             {scheduleDivisions.some((item) => item.playoffs) && <Button variant="outline" onClick={() => setDialog({ kind: 'generator', mode: 'playoffs' })} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
             <Button onClick={openSchedule} disabled={!divisions.length}><PlusIcon data-icon="inline-start" />Schedule game</Button>
           </>}
         </div>
       </div>
-      {editable && scheduleStatus.isSuccess && scheduleDivisions.length > 0 && !scheduleDivisions.some((item) => item.canGeneratePreliminary) && <div className="pt-3 text-sm text-muted-foreground"><p>Schedule generation is unavailable:</p><ul className="list-disc pl-5">{scheduleDivisions.map((item) => <li key={item.id}>{item.name}: {item.preliminaryReason || 'Not eligible for schedule generation.'}</li>)}</ul></div>}
-      {editable && scheduleStatus.isSuccess && scheduleDivisions.some((item) => item.playoffs) && !scheduleDivisions.some((item) => item.playoffStage) && <div className="pt-3 text-sm text-muted-foreground"><p>Playoffs are not ready:</p><ul className="list-disc pl-5">{scheduleDivisions.filter((item) => item.playoffs).map((item) => <li key={item.id}>{item.name}: {item.playoffReason || 'The next round is not ready.'}</li>)}</ul></div>}
-      <TabsContent value={status} className="pt-5">{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</TabsContent>
+      <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none">{games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : showSkeleton ? <div className="flex flex-col gap-8"><GamesSkeleton />{paging && pageMeta ? <DataPagination meta={pageMeta} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /> : <PaginationSkeleton />}</div> : gameAgenda}</div></TabsContent>
     </Tabs>
-    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : dialog?.kind === 'score' ? `${game?.home_name} vs ${game?.away_name} · ${season.name}${game?.forfeited_by_season_team_id ? '. Saving a score records a played result instead of a forfeit.' : ''}` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
-      {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} mode={dialog.mode} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
+    <Dialog open={confirmStart} onOpenChange={(open) => { if (!startSeason.isPending) setConfirmStart(open) }}>
+      <DialogContent showCloseButton={!startSeason.isPending} className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Start {season.name}?</DialogTitle><DialogDescription>Final scores can be recorded once the season starts. Team registrations can no longer be corrected or removed.</DialogDescription></DialogHeader>
+        <DialogFooter><Button type="button" variant="outline" disabled={startSeason.isPending} onClick={() => setConfirmStart(false)}>Cancel</Button><Button type="button" disabled={startSeason.isPending} onClick={() => startSeason.mutate()}>{startSeason.isPending ? 'Starting…' : 'Start season'}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && dialog?.kind !== 'score' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
+      {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} mode={dialog.mode} timeZone={timeZone} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
       {dialog?.kind === 'forfeit' && <GameForfeitDialog game={dialog.game} onClose={closeDialog} onSaved={() => saved('Forfeit recorded.')} onPendingChange={setPending} />}
-      {dialog?.kind === 'history' && <GameScheduleHistory gameId={dialog.game.id} />}
+      {dialog?.kind === 'history' && <GameScheduleHistory gameId={dialog.game.id} timeZone={timeZone} />}
       {dialog?.kind === 'remove' && <><p className="text-sm text-muted-foreground">This removes the game from the schedule. Games with dependent playoff games or records may be blocked.</p>{removeGame.isError && <p role="alert" className="text-sm text-destructive">{removeGame.error.message}</p>}<DialogFooter><Button type="button" variant="outline" disabled={removeGame.isPending} onClick={closeDialog}>Cancel</Button><Button type="button" variant="destructive" disabled={removeGame.isPending} onClick={() => removeGame.mutate(dialog.game.id)}>{removeGame.isPending ? 'Removing…' : 'Remove game'}</Button></DialogFooter></>}
-      {dialog?.kind === 'schedule' && <ScheduleGameForm seasonId={season.id} divisions={divisions} divisionId={scheduleDivision} onDivisionChange={setScheduleDivision} teams={teams} teamsLoading={!!scheduleDivision && registrations.isFetching} teamsError={registrations.isError ? registrations.error.message : null} onRetryTeams={() => void registrations.refetch()} venues={venues} onClose={closeDialog} onSaved={() => saved('Game scheduled.')} onPendingChange={setPending} />}
-      {dialog?.kind === 'edit' && teamDivision && (registrations.isLoading ? <p>Loading teams…</p> : registrations.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load teams</AlertTitle><AlertDescription><p>{registrations.error.message}</p><Button variant="outline" size="sm" onClick={() => void registrations.refetch()}>Try again</Button></AlertDescription></Alert> : teams.length < 2 ? <p className="text-sm text-muted-foreground">Register at least two teams in this division to schedule a game.</p> : <Editor key={`${dialog.kind}-${teamDivision}-${game?.id ?? ''}`} title="Game details" path={`games/${dialog.game.id}`} method="PATCH" fields={gameFields} transform={(v) => ({ ...v, scheduledAt: new Date(v.scheduledAt).toISOString(), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} submitLabel="Save changes" alignActions="end" onSaved={() => saved('Schedule updated.')} onCancel={closeDialog} onPendingChange={setPending} />)}
-      {dialog?.kind === 'score' && <Editor key={dialog.game.id} title="Final score" path={`games/${dialog.game.id}/score`} fields={[{ name: 'homeScore', label: `${dialog.game.home_name} score`, type: 'number', required: true, value: dialog.game.home_score }, { name: 'awayScore', label: `${dialog.game.away_name} score`, type: 'number', required: true, value: dialog.game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} submitLabel="Save score" alignActions="end" onSaved={() => saved('Final score saved.')} onCancel={closeDialog} onPendingChange={setPending} />}
+      {dialog?.kind === 'schedule' && <ScheduleGameForm seasonId={season.id} divisions={divisions} divisionId={scheduleDivision} onDivisionChange={setScheduleDivision} teams={teams} teamsLoading={!!scheduleDivision && registrations.isFetching} teamsError={registrations.isError ? registrations.error.message : null} onRetryTeams={() => void registrations.refetch()} venues={venues} onClose={closeDialog} onSaved={() => saved('Game scheduled.')} onPendingChange={setPending} timeZone={timeZone} />}
+      {dialog?.kind === 'edit' && teamDivision && (registrations.isLoading ? <p>Loading teams…</p> : registrations.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load teams</AlertTitle><AlertDescription><p>{registrations.error.message}</p><Button variant="outline" size="sm" onClick={() => void registrations.refetch()}>Try again</Button></AlertDescription></Alert> : teams.length < 2 ? <p className="text-sm text-muted-foreground">Register at least two teams in this division to schedule a game.</p> : <Editor key={`${dialog.kind}-${teamDivision}-${game?.id ?? ''}`} title="Game details" path={`games/${dialog.game.id}`} method="PATCH" fields={gameFields} transform={(v) => ({ ...v, scheduledAt: zonedInstant(v.scheduledAt, timeZone), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} submitLabel="Save changes" alignActions="end" onSaved={() => saved('Schedule updated.')} onCancel={closeDialog} onPendingChange={setPending} />)}
+      {dialog?.kind === 'score' && <GameScoreDialog key={dialog.game.id} game={dialog.game} stage={gameStage(dialog.game)} timeZone={timeZone} onClose={closeDialog} onSaved={() => saved('Final score saved.')} onPendingChange={setPending} />}
     </DialogContent></Dialog>
   </div>
 }
+
+type LeagueRow = Item & { location: string | null; time_zone?: string | null }
+// Active leagues come from the workspace; archived ones load only when the archive is shown.
+function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId: string; leagues: LeagueRow[]; onDelete: (target: DeleteTarget) => void }) {
+  const [view, setView] = useState('')
+  const [editing, setEditing] = useState('')
+  const archiveAction = useArchiveAction()
+  const showingArchived = view === 'archived'
+  const archived = useLeagueQuery<LeagueRow[]>(`organizations/${organizationId}/leagues?archived=true`, !!organizationId && showingArchived)
+  const rows = showingArchived ? archived.data ?? [] : leagues
+  const deleteLeague = (item: LeagueRow) => onDelete(showingArchived
+    ? { path: `leagues/${item.id}`, title: 'Delete league permanently?', description: `This removes ${item.name} with all of its seasons, teams, games and results. This can’t be undone.`, confirmName: item.name, submitLabel: 'Delete permanently', success: 'League deleted.' }
+    : { path: `leagues/${item.id}`, title: 'Delete league?', description: `This removes ${item.name} with its seasons, teams and venues. Leagues with recorded results need to be archived instead.`, confirmName: item.name, submitLabel: 'Delete league', success: 'League deleted.' })
+  const toolbar = <div className="flex flex-wrap items-end justify-between gap-3"><Choice label="Show" value={view} options={[{ id: 'archived', name: 'Archived' }]} emptyLabel="Active" onChange={(value) => { setView(value); setEditing('') }} />{!showingArchived && <CreateLeagueDialog organizationId={organizationId} />}</div>
+  if (!showingArchived && !leagues.length) return <Card className="mx-auto w-full max-w-3xl"><CardContent>
+    <Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No leagues yet</h3></EmptyTitle><EmptyDescription>Create your first league to start organizing seasons, teams, and games.</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2"><CreateLeagueDialog organizationId={organizationId} first /><Button variant="ghost" onClick={() => setView('archived')}><ArchiveIcon data-icon="inline-start" />View archived</Button></div></EmptyContent></Empty>
+  </CardContent></Card>
+  return <section aria-label="Leagues" className="flex flex-col gap-4">
+    {toolbar}
+    {showingArchived && archived.isLoading ? <LoadingContent /> : showingArchived && archived.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load archived leagues</AlertTitle><AlertDescription><p>{archived.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void archived.refetch()}>Try again</Button></AlertDescription></Alert> : !rows.length ? <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><ArchiveIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No archived leagues</h3></EmptyTitle><EmptyDescription>Archived leagues appear here and can be restored.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
+    : <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">{showingArchived ? 'Archived leagues' : 'Leagues in this organization'}</caption>
+      <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Time zone</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+      <TableBody>{rows.map((item) => <Fragment key={item.id}>
+        <TableRow>
+          <TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><p className="mt-1 break-words text-xs text-muted-foreground sm:hidden">{item.location || 'No location added'}</p></TableCell>
+          <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
+          <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground md:table-cell"><span className="break-words">{item.time_zone ? item.time_zone.replaceAll('_', ' ') : 'Not set'}</span></TableCell>
+          <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+            {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
+              <DropdownMenuItem className="py-2" onClick={() => setEditing(editing === item.id ? '' : item.id)}><PencilIcon />{editing === item.id ? 'Close editor' : 'Edit league'}</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/archive`, message: 'League archived.', undoPath: `leagues/${item.id}/restore` })}><ArchiveIcon />Archive league</DropdownMenuItem>
+            </>}
+          </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
+        </TableRow>
+        {!showingArchived && editing === item.id && <TableRow><TableCell colSpan={4} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[{ name: 'name', label: 'Name', required: true, value: item.name }, { name: 'location', label: 'Location', value: item.location }, { name: 'timeZone', label: 'Time zone', type: 'timezone', value: item.time_zone ?? browserTimeZone(), description: 'Game times show in this zone.' }]} transform={(v) => ({ name: v.name, location: optional(v.location), timeZone: v.timeZone || null })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
+      </Fragment>)}</TableBody>
+    </Table></CardContent></Card>}
+  </section>
+}
+
 
 export function LeagueWorkspace({ section, initialTeamFilters }: { section: Section; initialTeamFilters?: TeamFilters }) {
   const { organizations, organization, leagues, league: selectedLeague, seasons, season, divisions, division, changeDivision, changeWorkspace } = useWorkspace()
@@ -568,14 +777,21 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const searchPending = section === 'seasons' && seasonSearch.trim() !== debouncedSearch
   const seasonFilters = new URLSearchParams()
   if (section === 'seasons' && debouncedSearch) seasonFilters.set('search', debouncedSearch)
-  if (section === 'seasons' && seasonStatus) seasonFilters.set('status', seasonStatus)
+  if (section === 'seasons' && seasonStatus) seasonFilters.set(seasonStatus === 'archived' ? 'archived' : 'status', seasonStatus === 'archived' ? 'true' : seasonStatus)
   if (section === 'seasons' && selectedSeasonLeague) seasonFilters.set('leagueId', selectedSeasonLeague)
   if (section === 'seasons') { seasonFilters.set('page', String(seasonPageNumber)); seasonFilters.set('pageSize', String(seasonPageSize)) }
   const seasonQuery = seasonFilters.toString()
   const filtersActive = !!(seasonSearch.trim() || seasonStatus || selectedSeasonLeague)
   const queryClient = useQueryClient()
+  const seasonPathFor = (pageNumber: number) => { const params = new URLSearchParams(seasonFilters); params.set('page', String(pageNumber)); return `organizations/${org}/seasons?${params}` }
   const seasonPagePath = `organizations/${org}/seasons?${seasonQuery}`
-  const seasonPage = useQuery({ queryKey: ['league', seasonPagePath], queryFn: async () => requirePaginatedResult<SeasonListItem>(await leagueRequest<unknown>(seasonPagePath, queryClient)), enabled: !!org && section === 'seasons' && !searchPending, retry: false })
+  const seasonPage = useQuery({ queryKey: ['league', seasonPagePath], queryFn: async () => requirePaginatedResult<SeasonListItem>(await leagueRequest<unknown>(seasonPagePath, queryClient)), enabled: !!org && section === 'seasons' && !searchPending, retry: false, placeholderData: keepPagedList<PaginatedResult<SeasonListItem>>(seasonPagePath) })
+  const seasonPaging = useDebouncedPage(seasonPageNumber, withoutPage(seasonPagePath), setSeasonPageNumber)
+  const seasonPagePending = seasonPaging.displayPage !== seasonPageNumber
+  const cachedSeasonPage = seasonPagePending ? queryClient.getQueryData<PaginatedResult<SeasonListItem>>(['league', seasonPathFor(seasonPaging.displayPage)]) : undefined
+  const seasonList = cachedSeasonPage ?? seasonPage.data
+  const seasonsLoading = !cachedSeasonPage && (searchPending || seasonPage.isLoading || seasonPage.isPlaceholderData || seasonPagePending)
+  const seasonMeta = seasonList && (seasonPage.isPlaceholderData || seasonPagePending ? { ...seasonList, page: seasonPaging.displayPage } : seasonList)
   const teamFilters = new URLSearchParams()
   if (teamLeagueFilter) teamFilters.set('leagueId', teamLeagueFilter)
   if (teamSeasonFilter) teamFilters.set('seasonId', teamSeasonFilter)
@@ -584,8 +800,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   teamFilters.set('page', String(teamPage))
   teamFilters.set('pageSize', String(teamPagination.pageSize))
   const teamSearchPending = section === 'teams' && teamSearch.trim() !== debouncedTeamSearch
+  const teamPathFor = (pageNumber: number) => { const params = new URLSearchParams(teamFilters); params.set('page', String(pageNumber)); return `organizations/${org}/teams?${params}` }
   const teamPagePath = `organizations/${org}/teams?${teamFilters}`
-  const organizationTeams = useQuery({ queryKey: ['league', teamPagePath], queryFn: async () => requirePaginatedResult<OrganizationTeamRow>(await leagueRequest<unknown>(teamPagePath, queryClient)), enabled: !!org && section === 'teams' && !teamSearchPending && !!league && !!season && divisions.isSuccess, retry: false })
+  const organizationTeams = useQuery({ queryKey: ['league', teamPagePath], queryFn: async () => requirePaginatedResult<OrganizationTeamRow>(await leagueRequest<unknown>(teamPagePath, queryClient)), enabled: !!org && section === 'teams' && !teamSearchPending && !!league && !!season && divisions.isSuccess, retry: false, placeholderData: keepPagedList<PaginatedResult<OrganizationTeamRow>>(teamPagePath) })
   // Sync the requested page with workspace changes and server-side clamping after data changes.
   useEffect(() => {
     if (teamPagination.scope !== teamPageScope) {
@@ -597,7 +814,13 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
       setTeamPagination((current) => current.scope === teamPageScope && current.page === teamPage ? { ...current, page: organizationTeams.data!.page } : current)
     }
   }, [teamPageScope, teamPagination.scope, teamPage, teamSearchPending, organizationTeams.data, organizationTeams.isFetching])
-  const teamRows = organizationTeams.data?.items ?? []
+  const teamPaging = useDebouncedPage(teamPage, withoutPage(teamPagePath), setTeamPage)
+  const teamPagePending = teamPaging.displayPage !== teamPage
+  const cachedTeamPage = teamPagePending ? queryClient.getQueryData<PaginatedResult<OrganizationTeamRow>>(['league', teamPathFor(teamPaging.displayPage)]) : undefined
+  const teamList = cachedTeamPage ?? organizationTeams.data
+  const teamsLoading = !cachedTeamPage && (teamSearchPending || organizationTeams.isLoading || organizationTeams.isPlaceholderData || teamPagePending)
+  const teamMeta = teamList && (organizationTeams.isPlaceholderData || teamPagePending ? { ...teamList, page: teamPaging.displayPage } : teamList)
+  const teamRows = teamList?.items ?? []
   const teamFiltersActive = !!teamSearch.trim() || !!selectedTeamDivision
   const teamReturnQuery = teamListHref({ search: teamSearch, leagueId: '', seasonId: '', divisionId: selectedTeamDivision }).slice('/manage/teams'.length)
   const rosterAction = (team: OrganizationTeamRow) => {
@@ -609,7 +832,6 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const venues = useLeagueQuery<Item[]>(`leagues/${league}/venues`, !!league && ['dashboard', 'games'].includes(section))
   const dashboard = useLeagueQuery<Dashboard>(`seasons/${season?.id}/dashboard?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'dashboard')
   const standings = useLeagueQuery<Standing[]>(`seasons/${season?.id}/standings?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'standings')
-  const [editing, setEditing] = useState('')
   const [seasonToEdit, setSeasonToEdit] = useState<Season | null>(null)
   const [createSeasonOpen, setCreateSeasonOpen] = useState(false)
   const [createTeamOpen, setCreateTeamOpen] = useState(false)
@@ -619,9 +841,16 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const [registerExistingOpen, setRegisterExistingOpen] = useState(false)
   const [teamToCorrect, setTeamToCorrect] = useState<OrganizationTeamRow | null>(null)
   const [teamToRemove, setTeamToRemove] = useState<OrganizationTeamRow | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const relevantQueries = [leagues, ...(section === 'seasons' ? [seasonPage] : ['dashboard', 'games', 'standings', 'teams', 'divisions'].includes(section) ? [seasons, divisions] : []), ...(section === 'teams' ? [organizationTeams] : []), ...(section === 'games' ? [venues] : []), ...(section === 'dashboard' ? [seasonTeams, venues, dashboard] : []), ...(section === 'standings' ? [standings] : [])]
   const failedQuery = searchPending || teamSearchPending ? undefined : relevantQueries.find((query) => query.isError)
-  const loading = searchPending || teamSearchPending || relevantQueries.some((query) => query.isLoading)
+  // Seasons and teams show their own list skeletons.
+  const loading = relevantQueries.some((query) => query !== seasonPage && query !== organizationTeams && query.isLoading)
+  const seasonsHeader = <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="w-24 text-muted-foreground sm:w-32">Status</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Start date</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">End date</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+  const teamsHeader = <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+  const createSeasonButton = <div className="flex justify-end"><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
+  const seasonPager = seasonMeta && <DataPagination meta={seasonMeta} onPageChange={seasonPaging.go} onPageSizeChange={(size) => { setSeasonPageNumber(1); setSeasonPageSize(size) }} />
+  const teamPager = teamMeta && <DataPagination meta={teamMeta} onPageChange={teamPaging.go} onPageSizeChange={(pageSize) => setTeamPagination({ scope: teamPageScope, page: 1, pageSize })} />
   const nameField = (value?: string): InputField[] => [{ name: 'name', label: 'Name', required: true, value }]
   const dateFields = (s?: Season): InputField[] => [...nameField(s?.name), { name: 'startDate', label: 'Start date', type: 'date', value: dateValue(s?.start_date ?? null) }, { name: 'endDate', label: 'End date', type: 'date', value: dateValue(s?.end_date ?? null) }]
   const seasonData = (v: Record<string, string>) => ({ name: v.name, startDate: optional(v.startDate), endDate: optional(v.endDate) })
@@ -642,7 +871,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
         <Field className="w-full sm:w-64"><FieldLabel htmlFor="season-search">Search seasons</FieldLabel><Input id="season-search" type="search" placeholder="Search by name" maxLength={120} value={seasonSearch} onChange={(event) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonSearch(event.target.value) }} /></Field>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
         <Choice label="League" value={selectedSeasonLeague} options={leagues.data ?? []} emptyLabel="All Leagues" onChange={(v) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonLeagueFilter(v) }} />
-        <Field className="w-full sm:w-52"><FieldLabel htmlFor="season-status">Status</FieldLabel><Select value={seasonStatus || null} onValueChange={(value) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonStatus(value ?? '') }} items={[{ value: null, label: 'All statuses' }, { value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }]}><SelectTrigger id="season-status" className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>All statuses</SelectItem><SelectItem value="draft">Draft</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="completed">Completed</SelectItem></SelectGroup></SelectContent></Select></Field>
+        <Field className="w-full sm:w-52"><FieldLabel htmlFor="season-status">Status</FieldLabel><Select value={seasonStatus || null} onValueChange={(value) => { setSeasonPageNumber(1); setSeasonPageSize(10); setSeasonStatus(value ?? '') }} items={[{ value: null, label: 'All statuses' }, { value: 'draft', label: 'Draft' }, { value: 'active', label: 'Active' }, { value: 'completed', label: 'Completed' }, { value: 'archived', label: 'Archived' }]}><SelectTrigger id="season-status" className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>All statuses</SelectItem><SelectItem value="draft">Draft</SelectItem><SelectItem value="active">Active</SelectItem><SelectItem value="completed">Completed</SelectItem><SelectItem value="archived">Archived</SelectItem></SelectGroup></SelectContent></Select></Field>
         </div>
       </div> : section === 'teams' ? <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end"><Field className="w-full sm:w-64"><FieldLabel htmlFor="team-search">Search teams</FieldLabel><Input id="team-search" type="search" placeholder="Search by team name" maxLength={120} value={teamSearch} onChange={(event) => { setTeamPage(1); setTeamSearch(event.target.value) }} /></Field><Choice label="Division" value={selectedTeamDivision} options={divisions.data ?? []} emptyLabel="All divisions" onChange={(value) => { setTeamPage(1); setTeamDivisionSelection({ id: value, seasonId: teamSeasonFilter }) }} /></div>
@@ -656,41 +885,29 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
       {['dashboard', 'standings'].includes(section) && season && <div className="flex flex-wrap items-end justify-between gap-4"><Field className="w-full sm:w-56"><FieldLabel htmlFor="page-division">Division</FieldLabel><Select value={division?.id ?? null} onValueChange={(value) => { if (value) changeDivision(value) }} items={(divisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={!divisions.data?.length}><SelectTrigger id="page-division" className="w-full"><SelectValue placeholder={divisions.isLoading ? 'Loading divisions…' : divisions.isError ? 'Divisions unavailable' : divisions.data?.length ? 'Choose division' : 'No divisions'} /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{divisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{section === 'standings' && <Button nativeButton={false} variant="outline" render={<Link href="/manage/games" />}><CalendarDaysIcon data-icon="inline-start" />View games</Button>}</div>}
     </div>
     {failedQuery ? <Alert variant="destructive"><AlertTitle>Couldn’t load this page</AlertTitle><AlertDescription><p>{failedQuery.error?.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void failedQuery.refetch()}>Try again</Button></AlertDescription></Alert> : loading ? <LoadingContent /> : <>
+    <DeleteRecordDialog target={deleteTarget} onClose={() => setDeleteTarget(null)} />
+    {['dashboard', 'games'].includes(section) && selectedLeague && !selectedLeague.time_zone && <Alert><Clock3Icon /><AlertTitle>Set {selectedLeague.name}’s time zone</AlertTitle><AlertDescription><p>Until it’s set, game times follow each viewer’s device.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/leagues" />}>Set time zone</Button></AlertDescription></Alert>}
     {section === 'dashboard' && <>
       {!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : !division ? <NoData>Choose a division to view the dashboard.</NoData> : <>
         <Panel title={season.name} description={`${division?.name ?? 'Division'} · Season ${season.status} · ${dashboard.data?.teamCount ?? 0} registered teams`}><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/teams" />}>Manage teams</Button></Panel>
-        <div className="grid gap-4 lg:grid-cols-2"><Panel title="Upcoming games"><GamesList games={dashboard.data?.upcoming ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/games" />}>Manage games</Button></Panel><Panel title="Recent results"><GamesList games={dashboard.data?.recent ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /></Panel></div>
+        <div className="grid gap-4 lg:grid-cols-2"><Panel title="Upcoming games"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.upcoming ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/games" />}>Manage games</Button></Panel><Panel title="Recent results"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.recent ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /></Panel></div>
         <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><TableHead>Team</TableHead><TableHead>Wins</TableHead><TableHead>Losses</TableHead><TableHead>Point difference</TableHead></TableRow></TableHeader><TableBody>{dashboard.data.standings.map((row) => <TableRow key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</TableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
       </>}
     </>}
-    {section === 'leagues' && (leagues.data?.length ? <section aria-label="Leagues" className="flex flex-col gap-4">
-      <div className="flex justify-end"><CreateLeagueDialog organizationId={org} /></div>
-      <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Leagues in this organization</caption>
-        <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-        <TableBody>{leagues.data.map((item) => <Fragment key={item.id}>
-          <TableRow>
-            <TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><p className="mt-1 break-words text-xs text-muted-foreground sm:hidden">{item.location || 'No location added'}</p></TableCell>
-            <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
-            <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuGroup>
-              <DropdownMenuItem onClick={() => setEditing(editing === item.id ? '' : item.id)}><PencilIcon />{editing === item.id ? 'Close editor' : 'Edit league'}</DropdownMenuItem>
-            </DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
-          </TableRow>
-          {editing === item.id && <TableRow><TableCell colSpan={3} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[...nameField(item.name), { name: 'location', label: 'Location', value: item.location }]} transform={(v) => ({ name: v.name, location: optional(v.location) })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
-        </Fragment>)}</TableBody>
-      </Table></CardContent></Card>
-    </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent>
-      <Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No leagues yet</h3></EmptyTitle><EmptyDescription>Create your first league to start organizing seasons, teams, and games.</EmptyDescription></EmptyHeader><EmptyContent><CreateLeagueDialog organizationId={org} first /></EmptyContent></Empty>
-    </CardContent></Card>)}
+    {section === 'leagues' && <LeaguesSection organizationId={org} leagues={leagues.data ?? []} onDelete={setDeleteTarget} />}
     {section === 'seasons' && (!leagues.data?.length ? <Panel title="A league is needed" description="Create a league before setting up a season."><Button className="self-start" nativeButton={false} render={<Link href="/manage/leagues" />}>Set up a league</Button></Panel> : <>
       <Dialog open={createSeasonOpen} onOpenChange={setCreateSeasonOpen}>
-        {seasonPage.data?.items.length ? <section aria-label="Seasons" className="flex flex-col gap-4">
-          <div className="flex justify-end"><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
+        {seasonsLoading ? <section aria-label="Seasons" aria-busy="true" className="flex flex-col gap-4">
+          {createSeasonButton}
+          <SeasonsSkeleton rows={skeletonRows(seasonMeta, seasonPaging.displayPage)} header={seasonsHeader} footer={seasonPager ?? <PaginationSkeleton />} />
+        </section> : seasonList?.items.length ? <section aria-label="Seasons" className="flex flex-col gap-4">
+          {createSeasonButton}
           <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Seasons in this organization</caption>
-            <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="w-24 text-muted-foreground sm:w-32">Status</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Start date</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">End date</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-            <TableBody>{seasonPage.data.items.map((item) => <Fragment key={item.id}>
-              <TableRow><TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><div className="mt-1 flex flex-col gap-1 break-words text-xs text-muted-foreground md:hidden"><span>{item.league_name}</span><span>Start: {readableDate(item.start_date)}</span><span>End: {readableDate(item.end_date)}</span></div></TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{item.league_name}</TableCell><TableCell><SeasonStatusBadge status={item.status} /></TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.start_date)}</TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.end_date)}</TableCell><TableCell className="pr-4 text-right"><SeasonActions season={item} onEdit={() => setSeasonToEdit(item)} /></TableCell></TableRow>
+            {seasonsHeader}
+            <TableBody>{seasonList.items.map((item) => <Fragment key={item.id}>
+              <TableRow><TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><div className="mt-1 flex flex-col gap-1 break-words text-xs text-muted-foreground md:hidden"><span>{item.league_name}</span><span>Start: {readableDate(item.start_date)}</span><span>End: {readableDate(item.end_date)}</span></div></TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{item.league_name}</TableCell><TableCell><SeasonStatusBadge status={item.status} /></TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.start_date)}</TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.end_date)}</TableCell><TableCell className="pr-4 text-right"><SeasonActions season={item} archived={seasonStatus === 'archived'} onEdit={() => setSeasonToEdit(item)} onDelete={() => setDeleteTarget(seasonStatus === 'archived' ? { path: `seasons/${item.id}`, title: 'Delete season permanently?', description: `This removes ${item.name} with all of its games, results and registrations. This can’t be undone.`, confirmName: item.name, submitLabel: 'Delete permanently', success: 'Season deleted.' } : { path: `seasons/${item.id}`, title: 'Delete season?', description: `This removes ${item.name} with its divisions, registrations and unplayed games. Seasons with recorded results need to be archived instead.`, confirmName: item.name, submitLabel: 'Delete season', success: 'Season deleted.' })} /></TableCell></TableRow>
             </Fragment>)}</TableBody>
-          </Table><DataPagination meta={seasonPage.data} onPageChange={setSeasonPageNumber} onPageSizeChange={(size) => { setSeasonPageNumber(1); setSeasonPageSize(size) }} /></CardContent></Card>
+          </Table>{seasonPager}</CardContent></Card>
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{filtersActive ? 'No matching seasons' : 'No seasons yet'}</h3></EmptyTitle><EmptyDescription>{filtersActive ? 'Try different filters or create a season.' : 'Create your first season to start organizing teams and games.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{filtersActive && <Button variant="outline" onClick={() => { setSeasonSearch(''); setSeasonStatus(''); setSeasonLeagueFilter(''); setSeasonPageNumber(1); setSeasonPageSize(10) }}>Clear filters</Button>}<DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />{filtersActive ? 'Create season' : 'Create your first season'}</DialogTrigger></div></EmptyContent></Empty></CardContent></Card>}
         <DialogContent><DialogHeader><DialogTitle>Create a season</DialogTitle><DialogDescription>{selectedLeague ? `Add a name and optional dates for ${selectedLeague.name}.` : 'Close this dialog and select a league in the header before creating a season.'}</DialogDescription></DialogHeader>{selectedLeague && <Editor key={selectedLeague.id} title="Season details" path={`leagues/${selectedLeague.id}/seasons`} fields={dateFields()} transform={seasonData} submitLabel="Create season" alignActions="end" onSaved={() => setCreateSeasonOpen(false)} />}</DialogContent>
       </Dialog>
@@ -698,8 +915,11 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>)}
     {section === 'teams' && (!leagues.data?.length || !league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <>
       <Dialog open={createTeamOpen} onOpenChange={(open) => { if (!createTeamPending) setCreateTeamOpen(open) }}>
-        {teamRows.length ? <section aria-label="Teams" className="flex flex-col gap-4">
-          {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption><TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+        {teamsLoading ? <section aria-label="Teams" aria-busy="true" className="flex flex-col gap-4">
+          <TeamsSkeleton rows={skeletonRows(teamMeta, teamPaging.displayPage)} view={teamView} header={teamsHeader} />
+          {teamPager ?? <PaginationSkeleton />}
+        </section> : teamRows.length ? <section aria-label="Teams" className="flex flex-col gap-4">
+          {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption>{teamsHeader}
             <TableBody>{teamRows.map((team) => {
               const canRegister = season.status !== 'completed' && team.season_id === season.id
               return <TableRow key={team.season_team_id ?? team.id}>
@@ -716,7 +936,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.league_name}</TableCell>
                 <TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.season_name ?? '—'}</TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{team.division_name ?? '—'}</TableCell>
                 <TableCell className="hidden md:table-cell"><Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge></TableCell>
-                <TableCell className="pr-3 text-right"><TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} /></TableCell>
+                <TableCell className="pr-3 text-right"><TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} onDelete={() => setDeleteTarget({ path: `teams/${team.id}`, title: 'Delete team?', description: `This removes ${team.name} and its registrations. Teams with games can’t be deleted.`, submitLabel: 'Delete team', success: 'Team deleted.' })} /></TableCell>
               </TableRow>
             })}</TableBody>
           </Table></CardContent></Card> : <ul aria-label="Teams and their season registrations" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -727,7 +947,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <div className="flex items-start gap-3">
                   <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-[#E67145]/10 text-sm font-semibold text-[#A64320] dark:text-[#FFAE88]">{initials}</span>
                   <div className="min-w-0 flex-1"><h4 className="break-words font-semibold leading-snug">{team.name}</h4><p className="mt-1 break-words text-sm text-muted-foreground">{team.league_name}</p></div>
-                  <TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} />
+                  <TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} onDelete={() => setDeleteTarget({ path: `teams/${team.id}`, title: 'Delete team?', description: `This removes ${team.name} and its registrations. Teams with games can’t be deleted.`, submitLabel: 'Delete team', success: 'Team deleted.' })} />
                 </div>
                 <div className="mt-5 flex flex-1 flex-col items-start gap-2 text-sm">
                   <Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge>
@@ -736,7 +956,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
               </li>
             })}
           </ul>}
-          {organizationTeams.data && <DataPagination meta={organizationTeams.data} onPageChange={setTeamPage} onPageSizeChange={(pageSize) => setTeamPagination({ scope: teamPageScope, page: 1, pageSize })} />}
+          {teamPager}
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{teamFiltersActive ? 'No matching teams' : 'No teams in this season'}</h3></EmptyTitle><EmptyDescription>{teamFiltersActive ? 'Try a different search or division.' : 'Register an existing team or create a team to start building rosters for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{teamFiltersActive && <Button variant="outline" onClick={() => { setTeamPage(1); setTeamSearch(''); setDebouncedTeamSearch(''); setTeamDivisionSelection({ id: '', seasonId: teamSeasonFilter }) }}>Clear filters</Button>}</div></EmptyContent></Empty></CardContent></Card>}
         <DialogContent showCloseButton={!createTeamPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"><DialogHeader className="pr-8"><DialogTitle>Create a team</DialogTitle><DialogDescription>Enter team details and choose divisions in the current season.</DialogDescription></DialogHeader><CreateTeamForm key={`${league}-${season.id}`} leagueId={league} season={season} initialDivisionId={season.status !== 'completed' ? selectedTeamDivision || (divisions.data?.length === 1 ? divisions.data[0].id : '') : ''} onClose={() => setCreateTeamOpen(false)} onCreated={(nextLeague, nextSeason, nextDivisions) => { changeWorkspace(nextLeague, nextSeason, nextDivisions[0]); if (selectedTeamDivision && (nextSeason !== teamSeasonFilter || nextDivisions.length > 1 || nextDivisions[0] !== selectedTeamDivision)) setTeamDivisionSelection({ id: '', seasonId: nextSeason }); setTeamPage(1); setTeamSearch(''); setDebouncedTeamSearch(''); setCreateTeamOpen(false) }} onPendingChange={setCreateTeamPending} /></DialogContent>
       </Dialog>
@@ -749,7 +969,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     {section === 'divisions' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <DivisionsWorkspace key={season.id} season={season} divisions={divisions.data ?? []} />)}
     {section === 'venues' && <VenuesWorkspace key={org} organizationId={org} leagues={leagues.data ?? []} selectedLeagueId={league} />}
     {section === 'standings' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : !division ? <NoData>Choose a division to view standings.</NoData> : standings.data?.length ? <StandingsView season={season} division={division} rows={standings.data} /> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No teams in this division</h3></EmptyTitle><EmptyDescription>Register teams to see their standings here.</EmptyDescription></EmptyHeader><EmptyContent><Button nativeButton={false} render={<Link href="/manage/teams" />}>Manage teams</Button></EmptyContent></Empty></CardContent></Card>)}
-    {section === 'games' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <GamesManager key={season.id} season={season} divisions={divisions.data ?? []} venues={venues.data ?? []} />)}
+    {section === 'games' && (!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <GamesManager key={season.id} timeZone={selectedLeague?.time_zone} season={season} divisions={divisions.data ?? []} venues={venues.data ?? []} />)}
     </>}
   </main>
 }

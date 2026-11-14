@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect } from "react"
 import { usePathname } from "next/navigation"
-import { ArrowLeftRightIcon, Building2Icon, CalendarDaysIcon, LayoutDashboardIcon, ListOrderedIcon, LayersIcon, LogOutIcon, MapPinIcon, MoreVerticalIcon, TrophyIcon, UsersIcon, CalendarRangeIcon } from "lucide-react"
+import { ArrowLeftRightIcon, Building2Icon, CalendarDaysIcon, LayoutDashboardIcon, ListOrderedIcon, LayersIcon, LogOutIcon, MapPinIcon, UserCogIcon, MoreVerticalIcon, TrophyIcon, UsersIcon, CalendarRangeIcon } from "lucide-react"
 import { useSignOut } from "@/components/session-actions"
 import { ShotclockLogo } from "@/components/shotclock-logo"
 import { useWorkspace } from "@/components/workspace-context"
@@ -83,6 +83,7 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
                     <span className="grid min-w-0 flex-1 gap-0.5 text-left"><span className="truncate text-sm font-medium text-foreground">{name || 'Account'}</span><span className="truncate font-normal" title={user.email}>{user.email}</span></span>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem render={<Link href="/account" />}><UserCogIcon />Account settings</DropdownMenuItem>
                   <DropdownMenuItem disabled={pending} onClick={() => void signOut()}><LogOutIcon />Sign out</DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>

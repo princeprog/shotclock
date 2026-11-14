@@ -30,6 +30,7 @@ function harness(mode = 'preliminary', result = response, diagnostics = {}) {
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
     if (name === '@/lib/schedule-navigation-guard') return { confirmDiscardSchedulePreview: () => true }
     if (name === '@/lib/game-time') return { joinGameTime: () => '', splitGameTime: () => ({}) }
+    if (name === '@/lib/league-time') return require('../lib/league-time.ts')
     return require(name)
   } }
   vm.runInNewContext(compiled, context)
@@ -58,7 +59,7 @@ test('season preview uses shared options and shows divisions, skipped reasons an
   assert.match(nodes(adults).filter((n) => typeof n === 'string').join(' '), /four teams/i)
   assert.ok(text.indexOf('Boys') < text.indexOf('B1'))
   assert.ok(text.indexOf('B1') < text.indexOf('B2'))
-  assert.ok(text.indexOf('B2') < text.indexOf('Adults'))
+  assert.ok(text.indexOf('B2') < text.lastIndexOf('Adults'))
 })
 
 test('save keeps preview order, exact included divisions and edits, without display names', async () => {

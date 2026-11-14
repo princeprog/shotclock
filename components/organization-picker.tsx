@@ -3,13 +3,15 @@
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRightIcon, Building2Icon, PlusIcon } from 'lucide-react'
+import { ArchiveIcon, ArchiveRestoreIcon, ArrowRightIcon, Building2Icon, ChevronDownIcon, MoreVerticalIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/components/record-actions'
 import { leagueRequest } from '@/lib/league-client'
 import { organizationReturnPath } from '@/lib/organization-navigation'
 import { saveOrganizationSelection } from '@/lib/organization-selection'
@@ -28,9 +30,18 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
   const [editing, setEditing] = useState<Organization | null>(null)
   const [editName, setEditName] = useState('')
   const [editError, setEditError] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
+  const archiveAction = useArchiveAction()
   const organizations = useQuery({
     queryKey: ['league', 'organizations'],
     queryFn: () => leagueRequest<Organization[]>('organizations', client),
+    retry: false,
+  })
+  const archived = useQuery({
+    queryKey: ['league', 'organizations?archived=true'],
+    queryFn: () => leagueRequest<Organization[]>('organizations?archived=true', client),
+    enabled: showArchived,
     retry: false,
   })
 
@@ -93,7 +104,10 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
               <span className="flex min-w-0 flex-1 flex-col gap-1"><span className="truncate font-medium">{organization.name}</span><span className="text-xs font-normal text-muted-foreground">Owner</span></span>
               <ArrowRightIcon data-icon="inline-end" aria-hidden="true" />
             </Button>
-            <Button variant="ghost" size="sm" disabled={renameOrganization.isPending} aria-label={`Rename ${organization.name}`} aria-expanded={editing?.id === organization.id} onClick={() => { if (editing?.id === organization.id) { setEditing(null); renameOrganization.reset(); return }; setEditing(organization); setEditName(organization.name); setEditError(''); renameOrganization.reset(); setCreating(false) }}>Rename</Button>
+            <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${organization.name}`} disabled={renameOrganization.isPending || archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52"><DropdownMenuGroup>
+              <DropdownMenuItem className="py-2" onClick={() => { if (editing?.id === organization.id) { setEditing(null); renameOrganization.reset(); return }; setEditing(organization); setEditName(organization.name); setEditError(''); renameOrganization.reset(); setCreating(false) }}><PencilIcon />Rename</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `organizations/${organization.id}/archive`, message: 'Organization archived.', undoPath: `organizations/${organization.id}/restore` })}><ArchiveIcon />Archive</DropdownMenuItem>
+            </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => setDeleteTarget({ path: `organizations/${organization.id}`, title: 'Delete organization?', description: `This removes ${organization.name} with its leagues, seasons, teams and players. Organizations with recorded results need to be archived instead.`, confirmName: organization.name, submitLabel: 'Delete organization', success: 'Organization deleted.' })}><Trash2Icon />Delete</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
           </div>
           {editing?.id === organization.id && <form onSubmit={submitRename} className="flex flex-col gap-4 px-5 pb-5">
             <Field data-invalid={!!editError || renameOrganization.isError}><FieldLabel htmlFor={`rename-${organization.id}`} required>Organization name</FieldLabel><Input id={`rename-${organization.id}`} value={editName} onChange={(event) => { setEditName(event.target.value); setEditError('') }} maxLength={120} required aria-invalid={!!editError || renameOrganization.isError} />{editError && <FieldError>{editError}</FieldError>}</Field>
@@ -110,6 +124,17 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
           </form>
         </CardContent></Card>}
       </section>
+
+      <section aria-label="Archived organizations" className="mt-10 flex flex-col gap-3">
+        <Button variant="ghost" size="sm" className="-ml-2 w-fit text-muted-foreground" aria-expanded={showArchived} onClick={() => setShowArchived((value) => !value)}><ChevronDownIcon data-icon="inline-start" className={showArchived ? 'transition-transform duration-200' : '-rotate-90 transition-transform duration-200'} />Archived organizations</Button>
+        {showArchived && (archived.isPending ? <Skeleton className="h-14 w-full" /> : archived.isError ? <p role="alert" className="text-sm text-destructive">{archived.error.message}</p> : !archived.data.length ? <p className="text-sm text-muted-foreground">No archived organizations.</p> : <Card className="gap-0 py-0"><CardContent className="gap-0 px-0"><ul className="divide-y">{archived.data.map((organization) => <li key={organization.id} className="flex items-center gap-4 px-5 py-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><ArchiveIcon aria-hidden="true" className="size-4" /></span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{organization.name}</span>
+          <Button variant="outline" size="sm" disabled={archiveAction.isPending} onClick={() => archiveAction.mutate({ path: `organizations/${organization.id}/restore`, message: 'Organization restored.' })}><ArchiveRestoreIcon data-icon="inline-start" />Restore</Button>
+          <Button variant="ghost" size="icon-sm" aria-label={`Delete ${organization.name} permanently`} onClick={() => setDeleteTarget({ path: `organizations/${organization.id}`, title: 'Delete organization permanently?', description: `This removes ${organization.name} with all of its leagues, seasons, games and results. This can’t be undone.`, confirmName: organization.name, submitLabel: 'Delete permanently', success: 'Organization deleted.' })}><Trash2Icon /></Button>
+        </li>)}</ul></CardContent></Card>)}
+      </section>
+      <DeleteRecordDialog target={deleteTarget} onClose={() => setDeleteTarget(null)} />
     </main>
   )
 }

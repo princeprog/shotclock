@@ -126,4 +126,8 @@
 body {
   @apply bg-background text-foreground;
 }
+/* Keep the scrollbar's space reserved so short and long pages don't shift sideways. */
+html {
+  scrollbar-gutter: stable;
+}
 }
