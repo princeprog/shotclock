@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { CalendarDaysIcon, CalendarSearchIcon, CircleAlertIcon, CircleCheckIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarSearchIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -605,7 +605,12 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
             <Field><FieldLabel htmlFor="schedule-duration" required>Game duration (minutes)</FieldLabel><Input id="schedule-duration" type="number" min="1" step="1" required disabled={pending} value={duration} onChange={(e) => { setDuration(e.target.value); changed() }} /></Field>
             <Field><FieldLabel htmlFor="schedule-rest" required>Minimum rest (minutes)</FieldLabel><Input id="schedule-rest" type="number" min="0" step="1" required disabled={pending} value={rest} onChange={(e) => { setRest(e.target.value); changed() }} /></Field>
           </div>
-          <Field><FieldLabel htmlFor="schedule-pace" required>Pacing</FieldLabel>
+          <Field><div className="flex items-center gap-1.5"><FieldLabel htmlFor="schedule-pace" required>Pacing</FieldLabel>
+            <Popover><PopoverTrigger openOnHover delay={200} closeDelay={150} render={<Button type="button" variant="ghost" size="icon-xs" aria-label="Explain pacing options" />}><CircleHelpIcon aria-hidden="true" /></PopoverTrigger>
+              <PopoverContent align="start" side="top" aria-label="Pacing options" className="w-72 gap-2 text-xs">
+                {paces.map((item) => <p key={item.value}><span className="font-medium">{item.label}:</span> {item.description}</p>)}
+              </PopoverContent>
+            </Popover></div>
             <Select value={pace} disabled={pending} items={paces.map(({ value, label }) => ({ value, label }))} onValueChange={(value) => { const next = paces.find((item) => item.value === value); if (next) { setPace(next.value); changed() } }}>
               <SelectTrigger id="schedule-pace" aria-required="true" className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent alignItemWithTrigger={false}><SelectGroup>{paces.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectGroup></SelectContent>
