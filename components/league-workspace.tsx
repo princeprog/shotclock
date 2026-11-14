@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { addDays, format, parseISO, startOfDay } from 'date-fns'
+import { addDays, format, isValid, parseISO, startOfDay } from 'date-fns'
 import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
@@ -484,6 +484,27 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   const seasonHint = season.status === 'draft' ? 'Scores can be recorded after the season starts.' : season.status === 'completed' ? 'Scheduling is closed. Final scores can still be corrected.' : ''
   const resetPage = () => { setPage(1); setPageSize(10) }
   const clearDates = () => { setDates(undefined); resetPage() }
+  const [datesOpen, setDatesOpen] = useState(false)
+  const [dateStart, setDateStart] = useState<Date | undefined>()
+  // Each pick starts a fresh range: the first click sets the start, the second sets the end and applies the filter.
+  const pickDate = (day: Date) => {
+    if (!dateStart) { setDateStart(day); return }
+    const [from, to] = day < dateStart ? [day, dateStart] : [dateStart, day]
+    setDateStart(undefined)
+    setDates({ from, to })
+    resetPage()
+    setDatesOpen(false)
+  }
+  const toggleDates = (open: boolean) => {
+    // Closing after a single click filters to that one day.
+    if (!open && dateStart) { setDates({ from: dateStart, to: dateStart }); resetPage() }
+    setDateStart(undefined)
+    setDatesOpen(open)
+  }
+  const seasonStart = season.start_date ? parseISO(season.start_date) : undefined
+  const dateLabel = !dates?.from ? 'All dates'
+    : !dates.to || dates.from.getTime() === dates.to.getTime() ? format(dates.from, 'MMM d, yyyy')
+      : format(dates.from, dates.from.getFullYear() === dates.to.getFullYear() ? 'MMM d' : 'MMM d, yyyy') + ' – ' + format(dates.to, 'MMM d, yyyy')
   const editable = season.status !== 'completed'
   const game = dialog && 'game' in dialog ? dialog.game : undefined
   const gameFields: InputField[] = [
@@ -545,7 +566,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <Choice label="Division" value={divisionFilter} options={divisions} emptyLabel="All divisions" onChange={(value) => { setDivisionFilter(value); setPage(1) }} />
-          <Popover><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dates?.from ? dates.to ? `${format(dates.from, 'MMM d')} – ${format(dates.to, 'MMM d, yyyy')}` : `From ${format(dates.from, 'MMM d, yyyy')}` : 'All dates'}</PopoverTrigger><PopoverContent align="end" className="w-auto p-0"><Calendar mode="range" selected={dates} onSelect={(value) => { setDates(value); resetPage() }} autoFocus />{dates?.from && <Button type="button" variant="ghost" className="mx-3 mb-3" onClick={clearDates}>Clear dates</Button>}</PopoverContent></Popover>
+          <Popover open={datesOpen} onOpenChange={toggleDates}><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dateLabel}</PopoverTrigger><PopoverContent align="end" className="w-auto gap-0 p-0"><Calendar mode="range" selected={dateStart ? { from: dateStart, to: undefined } : dates} onSelect={(_value, day) => pickDate(day)} defaultMonth={dateStart ?? dates?.from ?? (seasonStart && isValid(seasonStart) ? seasonStart : undefined)} autoFocus /><div className="flex min-h-11 items-center justify-between gap-3 border-t px-3 py-1.5"><p className="text-xs text-muted-foreground">{dateStart ? 'Select an end date' : 'Select a start date'}</p>{(dates?.from || dateStart) && <Button type="button" variant="ghost" size="sm" onClick={() => { setDateStart(undefined); clearDates(); setDatesOpen(false) }}>Clear dates</Button>}</div></PopoverContent></Popover>
           <Button type="button" variant="outline" disabled={!dates?.from} onClick={clearDates}>Reset</Button>
           {editable && <>
             {(() => {
