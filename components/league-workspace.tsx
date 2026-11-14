@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO, startOfDay } from 'date-fns'
@@ -298,6 +298,31 @@ function WorkspacePrompt({ leagueCount, leagueSelected, seasonCount }: { leagueC
   return <Panel title="Choose a season" description="Select a season in the workspace control at the top of the page." />
 }
 function NoData({ children }: { children: React.ReactNode }) { return <p className="text-sm text-muted-foreground">{children}</p> }
+// Mirrors the games agenda (date heading, date tile and table columns) so loading doesn't shift the layout.
+function GamesSkeleton() {
+  return <div role="status" aria-label="Loading games" className="flex flex-col gap-8">
+    {[2, 3].map((rows, group) => <div key={group} className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-baseline gap-3"><Skeleton className="h-7 w-44" /><Skeleton className="h-4 w-14" /></div>
+      <div className="flex items-start gap-4 sm:gap-6">
+        <div aria-hidden="true" className="hidden w-20 shrink-0 flex-col items-center gap-1.5 rounded-lg border bg-card px-2 py-3 sm:flex"><Skeleton className="h-3 w-7" /><Skeleton className="h-7 w-8" /><Skeleton className="h-3 w-7" /></div>
+        <Table className="table-fixed border-y">
+          <colgroup><col className="w-24 sm:w-28" /><col /><col className="hidden w-48 md:table-column" /><col className="hidden w-32 lg:table-column" /><col className="w-12" /></colgroup>
+          <TableBody>{Array.from({ length: rows }, (_, row) => <TableRow key={row} className="hover:bg-transparent">
+            <TableCell className="py-4"><Skeleton className="h-4 w-16" /></TableCell>
+            <TableCell><div className="flex flex-col gap-2"><Skeleton className="h-4 w-44 max-w-full" /><Skeleton className="h-3 w-56 max-w-full" /></div></TableCell>
+            <TableCell className="hidden md:table-cell"><Skeleton className="h-4 w-24" /></TableCell>
+            <TableCell className="hidden lg:table-cell"><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+            <TableCell className="pr-3"><Skeleton className="ml-auto size-7 rounded-md" /></TableCell>
+          </TableRow>)}</TableBody>
+        </Table>
+      </div>
+    </div>)}
+  </div>
+}
+
+function PaginationSkeleton() {
+  return <div aria-hidden="true" className="flex flex-wrap items-center justify-between gap-4 border-t px-5 py-3"><Skeleton className="h-4 w-24" /><div className="flex items-center gap-3"><Skeleton className="h-4 w-20" /><Skeleton className="h-4 w-20" /><Skeleton className="size-8 rounded-md" /><Skeleton className="size-8 rounded-md" /></div></div>
+}
 function LoadingContent() { return <div role="status" aria-label="Loading page content" className="flex flex-col gap-3"><Skeleton className="h-10 w-48" /><Skeleton className="h-32 w-full" /></div> }
 function Choice({ label, value, options, onChange, emptyLabel }: { label: string; value: string; options: Item[]; onChange: (value: string) => void; emptyLabel?: string }) {
   const empty = emptyLabel ?? `No ${label.toLowerCase()} selected`
@@ -447,7 +472,19 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   const [scheduleDivision, setScheduleDivision] = useState('')
   const [status, setStatus] = useState('scheduled')
   const [dates, setDates] = useState<DateRange | undefined>()
-  const [page, setPage] = useState(1)
+  const [page, setQueryPage] = useState(1)
+  const [displayPage, setDisplayPage] = useState(1)
+  const [paging, setPaging] = useState(false)
+  const pageTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Filters and page-size changes apply at once; next/previous clicks update the page number immediately and fetch once clicking settles.
+  const setPage = (next: number) => { clearTimeout(pageTimer.current); setPaging(false); setDisplayPage(next); setQueryPage(next) }
+  const goToPage = (next: number) => {
+    clearTimeout(pageTimer.current)
+    setPaging(true)
+    setDisplayPage(next)
+    pageTimer.current = setTimeout(() => setQueryPage(next), 300)
+  }
+  useEffect(() => () => clearTimeout(pageTimer.current), [])
   const [pageSize, setPageSize] = useState(10)
   const client = useQueryClient()
   const gamesPath = (tab: string, tabPage: number, tabPageSize: number) => {
@@ -482,6 +519,11 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
     onError: (error) => toast.error(error.message),
   })
   const seasonHint = season.status === 'draft' ? 'Scores can be recorded after the season starts.' : season.status === 'completed' ? 'Scheduling is closed. Final scores can still be corrected.' : ''
+  // A page already in the cache shows right away; only pages not fetched yet show the skeleton.
+  const cachedTarget = displayPage !== page ? client.getQueryData<PaginatedResult<Game>>(['league', gamesPath(status, displayPage, pageSize)]) : undefined
+  const listData = cachedTarget ?? games.data
+  const showSkeleton = !cachedTarget && (games.isLoading || games.isPlaceholderData || displayPage !== page)
+  const pageMeta = listData ? { ...listData, page: displayPage } : undefined
   const resetPage = () => { setPage(1); setPageSize(10) }
   const clearDates = () => { setDates(undefined); resetPage() }
   const [datesOpen, setDatesOpen] = useState(false)
@@ -517,14 +559,14 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
   const closeDialog = () => { setDialog(null); setPending(false); removeGame.reset() }
   const saved = (message: string) => { closeDialog(); toast.success(message) }
   const groups = new Map<string, { day: Date | null; rows: Game[] }>()
-  for (const row of games.data?.items ?? []) {
+  for (const row of listData?.items ?? []) {
     const day = row.scheduled_at ? new Date(row.scheduled_at) : null
     const key = day ? format(day, 'yyyy-MM-dd') : 'unscheduled'
     if (!groups.has(key)) groups.set(key, { day, rows: [] })
     groups.get(key)!.rows.push(row)
   }
-  const gameAgenda = games.data?.items.length ? <div className="flex flex-col gap-8">{Array.from(groups.entries()).map(([key, group]) => <section key={key} className="flex flex-col gap-4" aria-label={group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'}>
-    <div className="flex flex-wrap items-baseline gap-3"><h3 className="text-xl font-semibold tracking-tight">{group.day ? format(group.day, 'EEEE, MMM d') : 'Date not scheduled'}</h3><span className="text-sm text-muted-foreground">{group.rows.length} {group.rows.length === 1 ? 'game' : 'games'}{games.data && games.data.total > games.data.pageSize ? ' shown' : ''}</span></div>
+  const gameAgenda = listData?.items.length ? <div className="flex flex-col gap-8">{Array.from(groups.entries()).map(([key, group]) => <section key={key} className="flex flex-col gap-4" aria-label={group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'}>
+    <div className="flex flex-wrap items-baseline gap-3"><h3 className="text-xl font-semibold tracking-tight">{group.day ? format(group.day, 'EEEE, MMM d') : 'Date not scheduled'}</h3><span className="text-sm text-muted-foreground">{group.rows.length} {group.rows.length === 1 ? 'game' : 'games'}{listData && listData.total > listData.pageSize ? ' shown' : ''}</span></div>
     <div className="flex items-start gap-4 sm:gap-6">
       {group.day && <div aria-hidden="true" className="hidden w-20 shrink-0 flex-col items-center rounded-lg border bg-card px-2 py-3 text-center sm:flex"><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'MMM')}</span><span className="text-2xl font-semibold tabular-nums">{format(group.day, 'd')}</span><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'EEE')}</span></div>}
       <Table className="table-fixed border-y"><caption className="sr-only">{group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'} games</caption>
@@ -550,7 +592,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
         })}</TableBody>
       </Table>
     </div>
-  </section>)}<DataPagination meta={games.data} onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /></div> : <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{dates?.from ? 'No games in this date range' : status === 'completed' ? 'No final results yet' : 'No scheduled games'}</h3></EmptyTitle><EmptyDescription>{dates?.from ? 'Choose different dates to see more games.' : status === 'completed' ? 'Final scores will appear here once recorded.' : editable ? 'Schedule a matchup for this season.' : 'No scheduled games are available for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{dates?.from && <Button variant="outline" onClick={clearDates}>Clear dates</Button>}{status === 'scheduled' && editable && divisions.length > 0 && <Button onClick={openSchedule}><PlusIcon data-icon="inline-start" />Schedule game</Button>}</div></EmptyContent></Empty></CardContent></Card>
+  </section>)}<DataPagination meta={pageMeta!} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /></div> : <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{dates?.from ? 'No games in this date range' : status === 'completed' ? 'No final results yet' : 'No scheduled games'}</h3></EmptyTitle><EmptyDescription>{dates?.from ? 'Choose different dates to see more games.' : status === 'completed' ? 'Final scores will appear here once recorded.' : editable ? 'Schedule a matchup for this season.' : 'No scheduled games are available for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{dates?.from && <Button variant="outline" onClick={clearDates}>Clear dates</Button>}{status === 'scheduled' && editable && divisions.length > 0 && <Button onClick={openSchedule}><PlusIcon data-icon="inline-start" />Schedule game</Button>}</div></EmptyContent></Empty></CardContent></Card>
   return <div className="flex flex-col gap-8">
     {editable && scheduleStatus.isError && <Alert variant="destructive"><AlertTitle>Couldn’t load schedule status</AlertTitle><AlertDescription><p>{scheduleStatus.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void scheduleStatus.refetch()}>Try again</Button></AlertDescription></Alert>}
     {editable && scheduleStatus.isSuccess && !scheduleDivisions.some((item) => item.teamCount >= 2) && <Alert><AlertTitle>Register teams to schedule games</AlertTitle><AlertDescription><p>Add at least two teams to a division before scheduling a matchup.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/teams" />}>Manage teams</Button></AlertDescription></Alert>}
@@ -583,7 +625,7 @@ function GamesManager({ season, divisions, venues }: { season: Season; divisions
           </>}
         </div>
       </div>
-      <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none"><div aria-busy={games.isPlaceholderData || undefined} className={games.isPlaceholderData ? "pointer-events-none opacity-60 transition-opacity duration-200 motion-reduce:transition-none" : "transition-opacity duration-200 motion-reduce:transition-none"}>{games.isLoading ? <LoadingContent /> : games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : gameAgenda}</div></div></TabsContent>
+      <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none">{games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : showSkeleton ? <div className="flex flex-col gap-8"><GamesSkeleton />{paging && pageMeta ? <DataPagination meta={pageMeta} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /> : <PaginationSkeleton />}</div> : gameAgenda}</div></TabsContent>
     </Tabs>
     <Dialog open={confirmStart} onOpenChange={(open) => { if (!startSeason.isPending) setConfirmStart(open) }}>
       <DialogContent showCloseButton={!startSeason.isPending} className="sm:max-w-md">
