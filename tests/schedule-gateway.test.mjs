@@ -69,24 +69,25 @@ test('season scheduling routes are allowlisted and reject unsupported paths', as
   assert.equal((await request('POST', `seasons/${id}/playoffs`, '{}', { origin: 'https://evil.test' })).status, 403)
 })
 
-test('season saves accept at most 2 MiB while previews keep the 8192-byte limit', async () => {
+test('season saves and previews accept at most 2 MiB', async () => {
   const sizedBody = (size) => `{"value":"${'x'.repeat(size - 12)}"}`
   for (const kind of ['schedule', 'playoffs']) {
     assert.equal((await request('POST', `seasons/${id}/${kind}`, sizedBody(2 * 1024 * 1024))).status, 200)
     assert.equal((await request('POST', `seasons/${id}/${kind}`, sizedBody(2 * 1024 * 1024 + 1))).status, 413)
-    assert.equal((await request('POST', `seasons/${id}/${kind}/preview`, sizedBody(8192))).status, 200)
-    assert.equal((await request('POST', `seasons/${id}/${kind}/preview`, sizedBody(8193))).status, 413)
+    assert.equal((await request('POST', `seasons/${id}/${kind}/preview`, sizedBody(2 * 1024 * 1024))).status, 200)
+    assert.equal((await request('POST', `seasons/${id}/${kind}/preview`, sizedBody(2 * 1024 * 1024 + 1))).status, 413)
   }
+  assert.equal((await request('POST', `divisions/${id}/schedule/preview`, sizedBody(8193))).status, 413)
 })
 
 test('season preview diagnostics have bounded, owner-protected gateway routes', async () => {
   const sizedBody = (size) => `{"value":"${'x'.repeat(size - 12)}"}`
   for (const kind of ['schedule', 'playoffs']) {
-    for (const action of ['estimate', 'validate']) {
+    for (const action of ['estimate', 'validate', 'suggest']) {
       const path = `seasons/${id}/${kind}/${action}`
       assert.equal((await request('POST', path, '{}')).status, 200)
       assert.equal((await request('POST', path, '{}', { origin: 'https://evil.test' })).status, 403)
-      const limit = action === 'validate' ? 2 * 1024 * 1024 : 8192
+      const limit = 2 * 1024 * 1024
       assert.equal((await request('POST', path, sizedBody(limit))).status, 200)
       assert.equal((await request('POST', path, sizedBody(limit + 1))).status, 413)
     }
