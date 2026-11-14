@@ -132,17 +132,39 @@ test('rejects a preview that assigns a game to a skipped division', async () => 
   assert.equal(tree.some((n) => n.type === 'Button' && nodes(n).includes('Save schedule')), false)
 })
 
-test('capacity is shown only after requesting a preview and explains a shortfall', async () => {
+const capacityDialog = (tree) => tree.some((n) => n.type === 'Dialog')
+
+test('capacity opens in a dialog only after requesting a preview and explains a shortfall', async () => {
   const h = harness('preliminary', response, { capacity: 1 }); h.setup()
   let tree = h.render()
-  assert.equal(tree.some((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-capacity-heading'), false)
+  assert.equal(capacityDialog(tree), false)
   assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Preview schedule')).props.disabled, false)
   await h.preview()
   tree = h.render()
-  assert.match(tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' '), /2\s+more court slots/)
+  assert.equal(capacityDialog(tree), true)
+  const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
+  assert.match(text, /Schedule can’t be generated yet/)
+  assert.match(text, /Not enough court time/)
+  assert.match(text, /These settings have 1 open court slot for 3 games, so 2 games can’t be placed\./)
+  assert.match(text, /Select the other court and add playing time\./)
+  assert.match(text, /Extend the end date by about \d+ weeks\./)
   assert.equal(h.calls.length, 0)
   tree.find((n) => n.type === 'Input' && n.props.id === 'schedule-duration').props.onChange({ target: { value: '90' } })
-  assert.equal(h.render().some((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-capacity-heading'), false)
+  assert.equal(capacityDialog(h.render()), false)
+})
+
+test('a quick fix in the capacity dialog changes the setting and closes the dialog', async () => {
+  const h = harness('preliminary', response, { capacity: 1 }); h.setup(); await h.preview()
+  h.render().find((n) => n.type === 'Button' && nodes(n).includes('Select all courts')).props.onClick()
+  const tree = h.render()
+  assert.equal(capacityDialog(tree), false)
+  assert.match(tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' '), /2\s+of\s+2/)
+})
+
+test('the preview starts without a dialog when capacity is sufficient', async () => {
+  const h = harness(); h.setup(); await h.preview()
+  assert.equal(capacityDialog(h.render()), false)
+  assert.equal(h.calls[0][0], 'seasons/s1/schedule/preview')
 })
 
 test('explains when no division can be scheduled', async () => {
@@ -156,7 +178,8 @@ test('explains when no division can be scheduled', async () => {
 test('reports a failed capacity check and lets the organizer retry', async () => {
   const h = harness('preliminary', response, { error: 'Service unavailable' }); h.setup(); await h.preview()
   const tree = h.render()
-  assert.match(tree.filter((n) => typeof n === 'string').join(' '), /Capacity check unavailable.*Service unavailable.*Try previewing again/)
+  assert.match(tree.filter((n) => typeof n === 'string').join(' '), /Capacity check unavailable.*Service unavailable/)
+  assert.ok(tree.some((n) => n.type === 'Button' && nodes(n).includes('Try again')))
   assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Preview schedule')).props.disabled, false)
   assert.equal(h.calls.length, 0)
 })
@@ -195,10 +218,10 @@ test('conflicts name the related game and team, and the summary jumps to the fir
 
 const label = (node) => nodes(node).filter((n) => typeof n === 'string' || typeof n === 'number').join('')
 
-test('review opens with a compact summary instead of the capacity panel', async () => {
+test('review opens with a compact summary and no capacity dialog', async () => {
   const h = harness(); h.setup(); await h.preview()
   const tree = h.render()
-  assert.equal(tree.some((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-capacity-heading'), false)
+  assert.equal(capacityDialog(tree), false)
   const heading = tree.find((n) => n.type === 'h3' && n.props.id === 'schedule-preview-heading')
   assert.equal(label(heading), '3 games')
   const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
@@ -211,8 +234,9 @@ test('capacity check blocks a preview when pacing leaves too few dates', async (
   const divisions = [{ id: 'b', name: '18 under', teamCount: 8, gameCount: 28, gamesPerTeam: 7 }]
   const h = harness('preliminary', response, { maxGamesPerTeam: 3, limitedBy: 'weekly', required: 28, divisions }); h.setup(); await h.preview()
   const text = h.render().filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
-  assert.match(text, /18 under: weekly pacing fits 3 of 7 games per team\. Extend the dates to at least 7 weeks or choose another pacing\./)
-  assert.match(text, /More dates needed/)
+  assert.match(text, /Weekly pacing needs more weeks/)
+  assert.match(text, /18 under: each team plays 7 games, one per week, but only 3 weeks fit between Jan 1 and Feb 1, 2026\./)
+  assert.match(text, /Extend the end date by 4 weeks\./)
   assert.equal(h.calls.length, 0)
 })
 

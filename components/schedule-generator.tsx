@@ -3,14 +3,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format as formatDate, isValid, parseISO } from 'date-fns'
-import { CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
+import { ArrowRightIcon, CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Checkbox } from '@/components/ui/checkbox'
-import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -147,13 +147,58 @@ function formatGameSlot(value: string): string {
   return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
 }
 
-// Divisions whose teams need more games than pacing or the daily limit allows in the date range.
-function pacingShortfalls(estimate: Estimate): string[] {
+// Each reason the capacity check blocks a preview, in plain terms, with the settings that would fix it.
+type CapacityBlocker = { title: string; detail: string; fixes: string[]; action?: { kind: 'spread' } | { kind: 'courts' } | { kind: 'daily'; value: number } }
+const plural = (count: number, word: string) => count.toLocaleString('en-US') + ' ' + word + (count === 1 ? '' : 's')
+function capacityBlockers(estimate: Estimate, context: { startDate: string; endDate: string; selectedCourts: number; totalCourts: number; maxPerDay: number }): CapacityBlocker[] {
+  const blockers: CapacityBlocker[] = []
+  const ready = estimate.divisions.filter((division) => division.reason === undefined)
+  if (estimate.required === 0) {
+    blockers.push({ title: 'No divisions are ready to schedule', detail: 'Each division needs at least two teams and no existing preliminary games.',
+      fixes: estimate.divisions.filter((division) => division.reason).map((division) => division.name + ': ' + division.reason) })
+    return blockers
+  }
+  const start = parseISO(context.startDate)
+  const end = parseISO(context.endDate)
+  const days = isValid(start) && isValid(end) ? Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1 : 0
+  const range = isValid(start) && isValid(end) ? formatDate(start, 'MMM d') + ' and ' + formatDate(end, 'MMM d, yyyy') : 'these dates'
+  if (estimate.capacity === 0) {
+    blockers.push({ title: 'No open court time', detail: 'The selected dates, playing windows and courts don’t leave room for a single game.',
+      fixes: ['Make each playing window longer than one game plus changeover.', 'Choose playing days that fall between the start and end dates.', 'Check for blackout dates or existing games filling the selected courts.'] })
+  } else if (estimate.capacity < estimate.required) {
+    const shortfall = estimate.required - estimate.capacity
+    const fixes: string[] = []
+    let action: CapacityBlocker['action']
+    const perCourt = estimate.capacity / Math.max(1, context.selectedCourts)
+    const extraCourts = Math.ceil(shortfall / perCourt)
+    const freeCourts = context.totalCourts - context.selectedCourts
+    if (freeCourts > 0) {
+      fixes.push(extraCourts <= freeCourts ? 'Select ' + plural(extraCourts, 'more court') + '.' : freeCourts === 1 ? 'Select the other court and add playing time.' : 'Select all ' + context.totalCourts + ' courts and add playing time.')
+      action = { kind: 'courts' }
+    }
+    if (days >= 7) fixes.push('Extend the end date by about ' + plural(Math.ceil(shortfall / (estimate.capacity / (days / 7))), 'week') + '.')
+    fixes.push('Add playing days, lengthen playing windows or shorten games.')
+    blockers.push({ title: 'Not enough court time', detail: 'These settings have ' + plural(estimate.capacity, 'open court slot') + ' for ' + plural(estimate.required, 'game') + ', so ' + plural(shortfall, 'game') + ' can’t be placed.', fixes, action })
+  }
   const limit = estimate.maxGamesPerTeam
-  if (limit === null || limit === undefined) return []
-  return estimate.divisions.filter((division) => division.reason === undefined && (division.gamesPerTeam ?? 0) > limit).map((division) => estimate.limitedBy === 'weekly'
-    ? `${division.name}: weekly pacing fits ${limit} of ${division.gamesPerTeam} games per team. Extend the dates to at least ${division.gamesPerTeam} weeks or choose another pacing.`
-    : `${division.name}: the daily limit fits ${limit} of ${division.gamesPerTeam} games per team. Add playing days or raise the daily limit.`)
+  if (limit !== null && limit !== undefined) {
+    const short = ready.filter((division) => (division.gamesPerTeam ?? 0) > limit)
+    if (short.length) {
+      const most = Math.max(...short.map((division) => division.gamesPerTeam ?? 0))
+      const names = short.map((division) => division.name).join(', ')
+      if (estimate.limitedBy === 'weekly') {
+        blockers.push({ title: 'Weekly pacing needs more weeks', detail: names + ': each team plays ' + plural(most, 'game') + ', one per week, but only ' + plural(limit, 'week') + ' fit between ' + range + '.',
+          fixes: ['Extend the end date by ' + plural(most - limit, 'week') + '.', 'Or switch pacing to Spread across dates or As early as possible.'], action: { kind: 'spread' } })
+      } else {
+        const playingDays = Math.floor(limit / Math.max(1, context.maxPerDay))
+        const perDay = playingDays > 0 ? Math.ceil(most / playingDays) : 0
+        blockers.push({ title: 'Not enough playing days', detail: names + ': each team plays ' + plural(most, 'game') + ', but there are only ' + plural(playingDays, 'playing day') + ' at ' + context.maxPerDay + ' per team per day.',
+          fixes: ['Add playing days or extend the dates to reach ' + plural(Math.ceil(most / Math.max(1, context.maxPerDay)), 'playing day') + '.', ...(perDay > context.maxPerDay && perDay <= 10 ? ['Or allow ' + perDay + ' games per team per day.'] : [])],
+          action: perDay > context.maxPerDay && perDay <= 10 ? { kind: 'daily', value: perDay } : undefined })
+      }
+    }
+  }
+  return blockers
 }
 
 function validateWindows(windows: PlayingWindow[]): string {
@@ -289,7 +334,6 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [expandedGame, setExpandedGame] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<Record<string, Suggestions>>({})
   const previewHeading = useRef<HTMLHeadingElement>(null)
-  const capacityHeading = useRef<HTMLHeadingElement>(null)
   const wasPreviewed = useRef(false)
   const path = `seasons/${seasonId}/${mode === 'preliminary' ? 'schedule' : 'playoffs'}`
 
@@ -332,6 +376,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const calendar = useQuery({ queryKey: ['schedule-calendar', seasonId, calendarKey], enabled: !!calendarKey, retry: false,
     queryFn: () => leagueRequest<{ games: CalendarBooking[] }>(`seasons/${seasonId}/schedule/calendar`, client, 'POST', JSON.parse(calendarKey)) })
   const estimateReady = !!settingsKey && !estimate.isFetching && !!estimate.data && !estimate.isError
+  const blockerContext = { startDate, endDate, selectedCourts: venueIds.length, totalCourts: venues.length, maxPerDay: Number(maxPerDay) }
+  const blockers = estimateReady && estimate.data ? capacityBlockers(estimate.data, blockerContext) : []
   const validationReady = !!validationKey && settledValidation === validationKey && !validation.isFetching && !!validation.data && !validation.isError
 
   const preview = useMutation({
@@ -397,12 +443,22 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     try { new Intl.DateTimeFormat('en', { timeZone }).format() } catch { setError('Enter a valid IANA time zone, such as Asia/Manila.'); return }
     if (!timeZone.trim()) { setError('Enter a valid IANA time zone.'); return }
     if (!settingsKey) { setError('Check the scheduling settings and try again.'); return }
+    await checkCapacity()
+  }
+
+  function applyFix(action: NonNullable<CapacityBlocker['action']>) {
+    if (action.kind === 'spread') setPace('spread')
+    else if (action.kind === 'courts') setVenueIds(venues.map((venue) => venue.id))
+    else setMaxPerDay(String(action.value))
+    changed()
+  }
+
+  // The capacity dialog stays open only when something blocks the preview; otherwise the preview starts right away.
+  async function checkCapacity() {
     setShowCapacity(true)
     const result = await estimate.refetch()
-    if (result.error || !result.data || !result.data.required || result.data.capacity < result.data.required || pacingShortfalls(result.data).length) {
-      capacityHeading.current?.scrollIntoView({ block: 'start' })
-      return
-    }
+    if (result.error || !result.data || capacityBlockers(result.data, blockerContext).length) return
+    setShowCapacity(false)
     preview.mutate(JSON.parse(settingsKey) as ScheduleInput | { availability: Availability })
   }
 
@@ -640,30 +696,6 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         </div>
         </div>
 
-        {showCapacity && !hasPreview && <section className="flex flex-col gap-3 border-t pt-6" aria-labelledby="schedule-capacity-heading">
-          <div><h3 ref={capacityHeading} id="schedule-capacity-heading" className="scroll-mt-2 font-medium">Schedule capacity</h3><p className="text-sm text-muted-foreground">Check the number of games and available court slots before generating.</p></div>
-          {estimate.isFetching && <p className="text-sm text-muted-foreground" role="status">Checking capacity…</p>}
-          {!estimate.isFetching && estimate.isError && <Alert variant="destructive"><AlertTitle>Capacity check unavailable</AlertTitle><AlertDescription>{estimate.error.message} Try previewing again.</AlertDescription></Alert>}
-          {estimateReady && estimate.data && <div className="overflow-hidden rounded-lg border text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
-              <p className="font-medium">Capacity overview</p>
-              {estimate.data.required === 0 ? <Badge variant="secondary">No eligible divisions</Badge> : estimate.data.capacity < estimate.data.required ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />More slots needed</Badge> : pacingShortfalls(estimate.data).length ? <Badge variant="destructive"><CircleAlertIcon data-icon="inline-start" />More dates needed</Badge> : <Badge variant="secondary"><CircleCheckIcon data-icon="inline-start" />Slots available</Badge>}
-            </div>
-            <dl className="grid grid-cols-2 gap-4 px-4 py-4">
-              <div><dt className="text-muted-foreground">Games to schedule</dt><dd className="mt-1 text-xl font-semibold tabular-nums">{estimate.data.required.toLocaleString('en-US')}</dd></div>
-              <div><dt className="text-muted-foreground">Available court slots</dt><dd className="mt-1 text-xl font-semibold tabular-nums">Up to {estimate.data.capacity.toLocaleString('en-US')}</dd></div>
-            </dl>
-            {estimate.data.required === 0 && <p className="px-4 pb-4 text-muted-foreground">No divisions are ready to generate games with these settings.</p>}
-            {estimate.data.capacity < estimate.data.required && <p className="px-4 pb-4 text-destructive" role="alert">At least {estimate.data.required - estimate.data.capacity} more court slots are needed. Add venues or playing time.</p>}
-            {pacingShortfalls(estimate.data).length > 0 && <ul className="flex flex-col gap-1 px-4 pb-4 text-destructive" role="alert">{pacingShortfalls(estimate.data).map((message) => <li key={message}>{message}</li>)}</ul>}
-            <p className="px-4 pb-4 text-muted-foreground">Available slots are an estimate after existing bookings. Team rest and round order may reduce capacity.</p>
-            {estimate.data.divisions.length > 0 && <div className="border-t px-4 py-3">
-              <p className="mb-2 font-medium">Divisions</p>
-              <ul className="flex flex-col gap-2">{estimate.data.divisions.map((division) => <li key={division.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5"><span className="min-w-0 font-medium">{division.name}</span><span className="text-muted-foreground">{division.reason ? `Skipped — ${division.reason}` : `${division.gameCount} ${division.gameCount === 1 ? 'game' : 'games'}${mode === 'preliminary' && playoffs && division.teamCount < 4 ? ' · round robin only' : ''}`}</span></li>)}</ul>
-            </div>}
-          </div>}
-        </section>}
-
         {draft && draft.seasonId === seasonId && draft.mode === mode && <section aria-labelledby="schedule-preview-heading" className={reviewing ? 'flex flex-col gap-6' : 'flex flex-col gap-6 border-t pt-6'}>
           <div className="flex flex-col divide-y rounded-lg border">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
@@ -769,5 +801,38 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !!draft.unplaced.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
       </DialogFooter>
     </form>
+    {showCapacity && <Dialog open onOpenChange={(open) => { if (!open && !estimate.isFetching) setShowCapacity(false) }}>
+      <DialogContent showCloseButton={!estimate.isFetching} aria-labelledby="schedule-capacity-heading" className="max-h-[calc(100dvh-2rem)] gap-5 overflow-y-auto sm:max-w-lg">
+        <DialogHeader className="pr-8">
+          <DialogTitle id="schedule-capacity-heading">{estimate.isFetching ? 'Checking capacity' : estimate.isError ? 'Capacity check unavailable' : blockers.length ? 'Schedule can’t be generated yet' : 'Capacity looks good'}</DialogTitle>
+          <DialogDescription>{estimate.isFetching ? 'Comparing the games needed with open court time.' : estimate.isError ? estimate.error.message : blockers.length ? (blockers.length === 1 ? 'Fix this issue, then preview again.' : 'Fix these ' + blockers.length + ' issues, then preview again.') : 'Generating the preview.'}</DialogDescription>
+        </DialogHeader>
+        {estimate.isFetching && <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircleIcon aria-hidden="true" className="size-4 animate-spin" />Checking capacity…</p>}
+        {estimateReady && estimate.data && blockers.length > 0 && <>
+          {estimate.data.required > 0 && <dl className="grid grid-cols-2 divide-x rounded-lg border text-sm">
+            <div className="flex flex-col gap-1 p-3"><dt className="text-muted-foreground">Games needed</dt><dd className="text-xl font-semibold tabular-nums">{estimate.data.required.toLocaleString('en-US')}</dd></div>
+            <div className="flex flex-col gap-1 p-3"><dt className="text-muted-foreground">Open court slots</dt><dd className={estimate.data.capacity < estimate.data.required ? 'text-xl font-semibold tabular-nums text-destructive' : 'text-xl font-semibold tabular-nums'}>{estimate.data.capacity.toLocaleString('en-US')}</dd></div>
+          </dl>}
+          <ul aria-label="What’s blocking the schedule" className="flex flex-col divide-y">
+            {blockers.map((blocker) => <li key={blocker.title} className="flex gap-3 py-4 first:pt-0 last:pb-0">
+              <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-destructive" />
+              <div className="flex min-w-0 flex-col gap-2">
+                <p className="text-sm font-medium">{blocker.title}</p>
+                <p className="text-sm text-muted-foreground">{blocker.detail}</p>
+                {blocker.fixes.length > 0 && <ul className="flex flex-col gap-1 text-sm">{blocker.fixes.map((fix) => <li key={fix} className="flex gap-2"><ArrowRightIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />{fix}</li>)}</ul>}
+                {blocker.action && <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => applyFix(blocker.action!)}>{blocker.action.kind === 'spread' ? 'Use Spread across dates' : blocker.action.kind === 'courts' ? 'Select all courts' : 'Allow ' + blocker.action.value + ' games per day'}</Button>}
+              </div>
+            </li>)}
+          </ul>
+          {estimate.data.required > 0 && estimate.data.divisions.some((division) => division.reason) && <p className="text-xs text-muted-foreground">Not included: {estimate.data.divisions.filter((division) => division.reason).map((division) => division.name + ' (' + division.reason + ')').join(', ')}</p>}
+        </>}
+        <DialogFooter>
+          {estimate.isError ? <>
+            <Button type="button" variant="outline" onClick={() => setShowCapacity(false)}>Close</Button>
+            <Button type="button" onClick={() => void checkCapacity()}>Try again</Button>
+          </> : <Button type="button" disabled={estimate.isFetching} onClick={() => setShowCapacity(false)}>Edit settings</Button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>}
   </>
 }
