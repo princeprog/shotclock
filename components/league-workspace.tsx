@@ -4,10 +4,11 @@ import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormE
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO } from 'date-fns'
-import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
+import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
+import { LeagueWebsiteDialog } from '@/components/league-website-dialog'
 import { ScheduleGenerator } from '@/components/schedule-generator'
 import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
 import { GameScoreDialog } from '@/components/game-score-dialog'
@@ -700,11 +701,12 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   </div>
 }
 
-type LeagueRow = Item & { location: string | null; time_zone?: string | null }
+type LeagueRow = Item & { location: string | null; time_zone?: string | null; slug?: string | null; published_at?: string | null }
 // Active leagues come from the workspace; archived ones load only when the archive is shown.
 function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId: string; leagues: LeagueRow[]; onDelete: (target: DeleteTarget) => void }) {
   const [view, setView] = useState('')
   const [editing, setEditing] = useState('')
+  const [websiteLeague, setWebsiteLeague] = useState<LeagueRow | null>(null)
   const archiveAction = useArchiveAction()
   const showingArchived = view === 'archived'
   const archived = useLeagueQuery<LeagueRow[]>(`organizations/${organizationId}/leagues?archived=true`, !!organizationId && showingArchived)
@@ -720,22 +722,25 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
     {toolbar}
     {showingArchived && archived.isLoading ? <LoadingContent /> : showingArchived && archived.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load archived leagues</AlertTitle><AlertDescription><p>{archived.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void archived.refetch()}>Try again</Button></AlertDescription></Alert> : !rows.length ? <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><ArchiveIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No archived leagues</h3></EmptyTitle><EmptyDescription>Archived leagues appear here and can be restored.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
     : <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">{showingArchived ? 'Archived leagues' : 'Leagues in this organization'}</caption>
-      <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Time zone</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+      <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Time zone</TableHead><TableHead scope="col" className="hidden w-28 text-muted-foreground lg:table-cell">Website</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
       <TableBody>{rows.map((item) => <Fragment key={item.id}>
         <TableRow>
           <TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><p className="mt-1 break-words text-xs text-muted-foreground sm:hidden">{item.location || 'No location added'}</p></TableCell>
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground md:table-cell"><span className="break-words">{item.time_zone ? item.time_zone.replaceAll('_', ' ') : 'Not set'}</span></TableCell>
+          <TableCell className="hidden py-3 lg:table-cell">{item.published_at && !showingArchived ? <Badge variant="seasonActive">Published</Badge> : <span className="text-muted-foreground">Hidden</span>}</TableCell>
           <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
             {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
               <DropdownMenuItem className="py-2" onClick={() => setEditing(editing === item.id ? '' : item.id)}><PencilIcon />{editing === item.id ? 'Close editor' : 'Edit league'}</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => setWebsiteLeague(item)}><GlobeIcon />Website settings</DropdownMenuItem>
               <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/archive`, message: 'League archived.', undoPath: `leagues/${item.id}/restore` })}><ArchiveIcon />Archive league</DropdownMenuItem>
             </>}
           </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>
-        {!showingArchived && editing === item.id && <TableRow><TableCell colSpan={4} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[{ name: 'name', label: 'Name', required: true, value: item.name }, { name: 'location', label: 'Location', value: item.location }, { name: 'timeZone', label: 'Time zone', type: 'timezone', value: item.time_zone ?? browserTimeZone(), description: 'Game times show in this zone.' }]} transform={(v) => ({ name: v.name, location: optional(v.location), timeZone: v.timeZone || null })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
+        {!showingArchived && editing === item.id && <TableRow><TableCell colSpan={5} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[{ name: 'name', label: 'Name', required: true, value: item.name }, { name: 'location', label: 'Location', value: item.location }, { name: 'timeZone', label: 'Time zone', type: 'timezone', value: item.time_zone ?? browserTimeZone(), description: 'Game times show in this zone.' }]} transform={(v) => ({ name: v.name, location: optional(v.location), timeZone: v.timeZone || null })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
       </Fragment>)}</TableBody>
     </Table></CardContent></Card>}
+    <LeagueWebsiteDialog league={websiteLeague} onClose={() => setWebsiteLeague(null)} />
   </section>
 }
 

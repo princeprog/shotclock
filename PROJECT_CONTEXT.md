@@ -12,12 +12,13 @@ An organization currently has one owner user reference and can have multiple lea
 
 ## Workspace and repositories
 
-The workspace contains two **independent Git repositories** and their uncommitted changes must be handled separately:
+The workspace contains three **independent Git repositories** and their uncommitted changes must be handled separately:
 
 | Directory | Responsibility |
 | --- | --- |
 | `shotclock/` | Next.js web application, frontend authentication gateway, UI, assets, and frontend tests. This document lives here. |
 | `shotclock-api/` | NestJS HTTP API, authentication, PostgreSQL/Kysely database setup, migrations, generated database types, and API tests. |
+| `shotclock-website/` | Public Next.js website that shows published leagues' schedules, results, standings and team stats. |
 
 When working from this repository, the API is normally at `../shotclock-api/`. When working from the API repository, the web app and this document are normally at `../shotclock/`. Confirm the paths exist; each repository can also be opened independently. Both use pnpm and have separate `package.json` and `pnpm-lock.yaml` files.
 
@@ -56,6 +57,8 @@ When working from this repository, the API is normally at `../shotclock-api/`. W
 - Authentication rate limits are database-backed. Per-client IP attestation is optional and only safe when a trusted ingress strips and overwrites the configured header; see the API README before changing this behavior. Email is sent asynchronously over SMTP, without a durable delivery queue. Verification and reset links carry tokens in URL fragments.
 
 ### Browser/API boundary
+
+Owners publish a league from Leagues → Website settings (`components/league-website-dialog.tsx`, `PATCH /league/leagues/:id/publication`). The public website at `../shotclock-website/` reads the unauthenticated, read-only `/public` API and is refreshed by the API after league changes; it never shows player names or personal data. `NEXT_PUBLIC_WEBSITE_URL` sets the website address shown in the dialog. See `../docs/features/public-website.md`.
 
 The browser calls Next.js route handlers under `/api/auth/[action]` and `/api/league/[...path]`; the Next.js server calls the NestJS API. The gateway keeps tokens in host-only HTTP-only cookies, with `SameSite=Lax` and `Secure` in production, and checks the configured origin plus a custom request header for state-changing requests. Do not expose access or refresh tokens to browser storage, logs, URLs, or client-side JavaScript. Verification and reset action tokens are intentionally carried in URL fragments and submitted by the client.
 
@@ -100,7 +103,7 @@ Seasons transition draft → active → completed, and an active season without 
 ## Local development and migrations
 
 - Review each repository's `README.md`, `.env.example`, and package scripts. Actual `.env` and `.env.local` files contain local configuration and may contain secrets; never print their values or copy them into documentation.
-- The last configured local setup used the web app on `http://localhost:3100`, API on `http://localhost:3101`, and a local MailDev inbox on `http://localhost:1080` with SMTP on `127.0.0.1:1026`. Ports and running processes may change; inspect them before starting or stopping anything. MailDev captures messages locally; it is not production email delivery.
+- The last configured local setup used the web app on `http://localhost:3100`, API on `http://localhost:3101`, the public website on `http://localhost:3102`, and a local MailDev inbox on `http://localhost:1080` with SMTP on `127.0.0.1:1026`. Ports and running processes may change; inspect them before starting or stopping anything. MailDev captures messages locally; it is not production email delivery.
 - Example commands from their respective repositories: `pnpm exec next dev -p 3100` for the web app and `pnpm start:dev` for the API. Use the actual local configuration rather than assuming example defaults.
 - API CLI scripts load settings in this order: process environment, `.env.local`, then `.env`. `scripts/load-db-env.cjs` derives the codegen connection URL from `DB_*`, so migration and generated types use the same target. Verify the exact target before executing database operations.
 - Create migrations with `pnpm migrate:create <name>`, apply with `pnpm migrate:latest`, and regenerate with `pnpm generate:schema`. Do not edit applied migrations or hand-edit `src/database/db.d.ts`. Use schema-qualified Kysely/SQL names and check both schemas are present in generated types.
