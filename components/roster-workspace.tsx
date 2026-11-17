@@ -26,8 +26,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/in
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { SortableHead, useTableSort } from '@/components/sortable-head'
+import { Table, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { AnimatedTableBody, SortableHead, useTableSort } from '@/components/sortable-head'
 
 type Organization = { id: string; name: string }
 type RosterContext = { id: string; team_name: string; abbreviation: string | null; league_name: string; season_id: string; season_name: string; season_status: 'draft' | 'active' | 'completed'; organization_id: string; division_id: string; division_name: string }
@@ -246,18 +246,18 @@ export function RosterWorkspace({ seasonTeamId, backHref }: { seasonTeamId: stri
         {searchPending || roster.isLoading ? <div role="status" aria-label="Loading players"><Skeleton className="h-32 w-full" /></div>
           : roster.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load players</AlertTitle><AlertDescription><p>{roster.error.message}</p><Button size="sm" variant="outline" className="mt-3" onClick={() => void roster.refetch()}>Try again</Button></AlertDescription></Alert>
           : roster.data?.length ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Players in {context.data.team_name} for {context.data.season_name}</caption><TableHeader className="bg-muted/30"><TableRow><SortableHead column="player" sort={sort} onSort={onSort} className="pl-5 text-muted-foreground">Player</SortableHead><SortableHead column="position" sort={sort} onSort={onSort} className="hidden w-40 text-muted-foreground md:table-cell">Position</SortableHead><SortableHead column="age" sort={sort} onSort={onSort} className="hidden w-36 whitespace-normal text-muted-foreground md:table-cell">Age</SortableHead><SortableHead column="jersey" sort={sort} onSort={onSort} className="w-28 text-muted-foreground sm:w-36">Jersey number</SortableHead>{editable && <TableHead scope="col" className="w-14 pr-4 text-right"><span className="sr-only">Actions</span></TableHead>}</TableRow></TableHeader>
-            <TableBody>{sortedRoster.map((player) => {
+            <AnimatedTableBody>{sortedRoster.map((player) => {
               const position = positions.find(([value]) => value === player.position)?.[1] ?? player.position ?? 'Not set'
               const age = ageAtSeasonStart(player.date_of_birth, rosterSeason.data?.start_date)
               const ageLabel = rosterSeason.isLoading ? 'Loading…' : age === null ? '—' : String(age)
-              return <TableRow key={player.id}>
+              return <TableRow key={player.id} data-key={player.id}>
                 <TableCell className="py-4 pl-5 whitespace-normal"><span className="break-words font-medium">{player.first_name} {player.last_name}</span><span className="mt-1 block text-sm text-muted-foreground md:hidden">{position} · Age: {ageLabel}</span></TableCell>
                 <TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{position}</TableCell>
                 <TableCell className="hidden text-muted-foreground tabular-nums md:table-cell">{ageLabel}</TableCell>
                 <TableCell className="text-muted-foreground tabular-nums">{player.jersey_number === null ? 'Not set' : `#${player.jersey_number}`}</TableCell>
                 {editable && <TableCell className="pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${player.first_name} ${player.last_name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>{context.data.season_status === 'active' && <DropdownMenuItem className="py-2" onClick={() => setDialog({ kind: 'edit', player })}><PencilIcon />Edit jersey number</DropdownMenuItem>}<DropdownMenuItem className="py-2" onClick={() => setDialog({ kind: 'details', player })}><PencilIcon />Edit player details</DropdownMenuItem></DropdownMenuGroup>{context.data.season_status === 'draft' && <><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => { removal.reset(); setPlayerToRemove(player) }}><UserRoundMinusIcon />Remove from roster</DropdownMenuItem><DropdownMenuItem variant="destructive" className="py-2" onClick={() => setDeleteTarget({ path: `organizations/${context.data!.organization_id}/players/${player.player_id}`, title: 'Delete player?', description: `This removes ${playerName(player)} from your organization and its draft rosters. Players on a started season’s roster can’t be deleted.`, submitLabel: 'Delete player', success: 'Player deleted.' })}><Trash2Icon />Delete player</DropdownMenuItem></DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu></TableCell>}
               </TableRow>
-            })}</TableBody>
+            })}</AnimatedTableBody>
           </Table></CardContent></Card> : <Card><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><UsersIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{debouncedSearch ? 'No matching players' : 'No players yet'}</h3></EmptyTitle><EmptyDescription>{debouncedSearch ? 'Try a different player name.' : editable ? 'Add players to build this team’s roster for the season.' : 'No players were added to this roster.'}</EmptyDescription></EmptyHeader>{debouncedSearch ? <EmptyContent><Button variant="outline" onClick={() => { setSearch(''); setDebouncedSearch('') }}>Clear search</Button></EmptyContent> : editable && <EmptyContent><Button onClick={() => setDialog({ kind: 'add' })}><PlusIcon data-icon="inline-start" />Add your first player</Button></EmptyContent>}</Empty></CardContent></Card>}
         </section>
         <DeleteRecordDialog target={deleteTarget} onClose={() => setDeleteTarget(null)} />
@@ -266,4 +266,5 @@ export function RosterWorkspace({ seasonTeamId, backHref }: { seasonTeamId: stri
       </>}
   </main>
 }
+
 

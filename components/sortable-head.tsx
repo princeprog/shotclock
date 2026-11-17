@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState, type ComponentProps, type ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { ArrowDownIcon, ArrowUpIcon, ChevronsUpDownIcon } from 'lucide-react'
-import { TableHead } from '@/components/ui/table'
+import { TableBody, TableHead } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { nextSort, sortRows, type SortState, type SortValue } from '@/lib/table-sort'
 
@@ -27,3 +27,32 @@ export function useTableSort<T, K extends string>(rows: readonly T[], accessors:
   return { sorted, sort, onSort: (column: K) => setSort((current) => nextSort(current, column)) }
 }
 
+
+
+const reorderEase = 'cubic-bezier(0.16, 1, 0.3, 1)'
+
+// A table body that animates re-sorting: rows marked with data-key slide from their old position to the new one
+// (FLIP), and rows that were not there before fade in. Nothing animates on first render or with reduced motion.
+// While busy (a server sort is loading) the current rows stay visible and dimmed.
+export function AnimatedTableBody({ className, busy = false, ...props }: ComponentProps<typeof TableBody> & { busy?: boolean }) {
+  const body = useRef<HTMLTableSectionElement>(null)
+  const positions = useRef<Map<string, number> | null>(null)
+  useLayoutEffect(() => {
+    const element = body.current
+    if (!element) return
+    const previous = positions.current
+    const next = new Map<string, number>()
+    const animate = !!previous && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    for (const row of element.querySelectorAll<HTMLTableRowElement>(':scope > tr[data-key]')) {
+      const key = row.dataset.key!
+      const top = row.offsetTop
+      next.set(key, top)
+      if (!animate) continue
+      const before = previous.get(key)
+      if (before === undefined) row.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: reorderEase })
+      else if (Math.abs(before - top) > 1) row.animate([{ transform: `translateY(${before - top}px)` }, { transform: 'none' }], { duration: 420, easing: reorderEase })
+    }
+    positions.current = next
+  })
+  return <TableBody ref={body} aria-busy={busy || undefined} className={cn('transition-opacity duration-200', busy && 'opacity-60', className)} {...props} />
+}

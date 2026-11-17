@@ -19,7 +19,7 @@ import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/compo
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
 import { DataPagination } from '@/components/data-pagination'
-import { SortableHead, useTableSort } from '@/components/sortable-head'
+import { AnimatedTableBody, SortableHead, useTableSort } from '@/components/sortable-head'
 import { nextSort, sortParams, sortRows, type SortState } from '@/lib/table-sort'
 import { requirePaginatedResult, type PaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
@@ -324,7 +324,11 @@ function useDebouncedPage(page: number, scope: string, commit: (page: number) =>
 }
 function withoutPage(path: string) { const [base, query = ''] = path.split('?'); const params = new URLSearchParams(query); params.delete('page'); return `${base}?${params}` }
 // Reuses the previous page only while paging within the same filtered list.
-function keepPagedList<T>(path: string) { return (previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && withoutPage(String(previousQuery.queryKey[1])) === withoutPage(path) ? previous : undefined }
+// Keep showing the previous list while only the page or the sort changes.
+function withoutPageOrSort(path: string) { const [base, query = ''] = path.split('?'); const params = new URLSearchParams(query); for (const name of ['page', 'sortBy', 'sortDir']) params.delete(name); return `${base}?${params}` }
+function keepPagedList<T>(path: string) { return (previous: T | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && withoutPageOrSort(String(previousQuery.queryKey[1])) === withoutPageOrSort(path) ? previous : undefined }
+// The request a sort click will make: the current filters on page 1 with the new sort.
+function sortedRequest(filters: URLSearchParams, sort: SortState<string>) { const params = new URLSearchParams(filters); params.set('page', '1'); params.delete('sortBy'); params.delete('sortDir'); for (const [name, value] of Object.entries(sortParams(sort))) params.set(name, value); return params }
 function skeletonRows(meta: PaginatedResult<unknown> | undefined, page: number) { return meta ? Math.max(1, Math.min(meta.pageSize, meta.total - (page - 1) * meta.pageSize)) : 5 }
 function SeasonsSkeleton({ rows, header, footer }: { rows: number; header: ReactNode; footer: ReactNode }) {
   return <Card role="status" aria-label="Loading seasons" className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed">{header}
@@ -447,13 +451,13 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
           <SortableHead column="losses" sort={sort} onSort={onSort} end className="w-16 text-right sm:w-24"><span className="sm:hidden" aria-hidden="true">L</span><span className="sr-only sm:not-sr-only">Losses</span></SortableHead>
           <SortableHead column="difference" sort={sort} onSort={onSort} end className="w-20 pr-4 text-right sm:w-44 sm:pr-5"><span className="sm:hidden" aria-hidden="true">Diff</span><span className="sr-only sm:not-sr-only">Point difference</span></SortableHead>
         </TableRow></TableHeader>
-        <TableBody>{sorted.map((row) => <TableRow key={row.id}>
+        <AnimatedTableBody>{sorted.map((row) => <TableRow key={row.id} data-key={row.id}>
           <TableCell className="py-4 pl-4 tabular-nums text-muted-foreground sm:pl-5">#{row.rank}</TableCell>
           <TableCell className="break-words whitespace-normal font-medium">{row.name}</TableCell>
           <TableCell className="text-right tabular-nums">{row.wins}</TableCell>
           <TableCell className="text-right tabular-nums">{row.losses}</TableCell>
           <TableCell className="pr-4 text-right tabular-nums sm:pr-5">{row.pointDifference > 0 ? `+${row.pointDifference}` : row.pointDifference}</TableCell>
-        </TableRow>)}</TableBody>
+        </TableRow>)}</AnimatedTableBody>
       </Table>
     </CardContent></Card>
     <p className="flex items-start gap-2 text-sm text-muted-foreground"><InfoIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" /><span>Ranked by wins, point difference, then team name.</span></p>
@@ -645,11 +649,11 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
       <Table className="table-fixed border-y"><caption className="sr-only">{group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'} games</caption>
         <colgroup><col className="w-24 sm:w-28" /><col /><col className="hidden w-48 md:table-column" /><col className="hidden w-32 lg:table-column" /><col className="w-12" /></colgroup>
         <TableHeader className={groupIndex === 0 ? 'bg-muted/30' : 'sr-only'}><TableRow className="hover:bg-transparent"><SortableHead column="time" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Time</SortableHead><SortableHead column="matchup" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Matchup and score</SortableHead><SortableHead column="venue" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground md:table-cell">Venue</SortableHead><SortableHead column="status" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground lg:table-cell">Status</SortableHead><TableHead scope="col"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-        <TableBody>{sortRows(group.rows, gameSortState, gameSort).map((row) => {
+        <AnimatedTableBody>{sortRows(group.rows, gameSortState, gameSort).map((row) => {
           const canEdit = row.status === 'scheduled' && editable
           const canScore = (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
           const canForfeit = (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
-          return <TableRow key={row.id}>
+          return <TableRow key={row.id} data-key={row.id}>
             <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? formatGameTime(row.scheduled_at, timeZone) : '—'}</TableCell>
             <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium">{row.home_name} <span className="font-normal text-muted-foreground">vs</span> {row.away_name}</span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 lg:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground md:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
             <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground md:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
@@ -662,7 +666,7 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
               <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'history', game: row })}><HistoryIcon />Schedule history</DropdownMenuItem>
             </DropdownMenuGroup>{canEdit && <><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="whitespace-nowrap py-2" onClick={() => { removeGame.reset(); setDialog({ kind: 'remove', game: row }) }}><Trash2Icon />Remove game</DropdownMenuItem></DropdownMenuGroup></>}</DropdownMenuContent></DropdownMenu></TableCell>
           </TableRow>
-        })}</TableBody>
+        })}</AnimatedTableBody>
       </Table>
     </div>
   </section>)}<DataPagination meta={pageMeta!} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /></div> : <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{dates?.from ? 'No games in this date range' : status === 'completed' ? 'No final results yet' : 'No scheduled games'}</h3></EmptyTitle><EmptyDescription>{dates?.from ? 'Choose different dates to see more games.' : status === 'completed' ? 'Final scores will appear here once recorded.' : editable ? 'Schedule a matchup for this season.' : 'No scheduled games are available for this season.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{dates?.from && <Button variant="outline" onClick={clearDates}>Clear dates</Button>}{status === 'scheduled' && editable && divisions.length > 0 && <Button onClick={openSchedule}><PlusIcon data-icon="inline-start" />Schedule game</Button>}</div></EmptyContent></Empty></CardContent></Card>
@@ -742,8 +746,8 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
     {showingArchived && archived.isLoading ? <LoadingContent /> : showingArchived && archived.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load archived leagues</AlertTitle><AlertDescription><p>{archived.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void archived.refetch()}>Try again</Button></AlertDescription></Alert> : !rows.length ? <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><ArchiveIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No archived leagues</h3></EmptyTitle><EmptyDescription>Archived leagues appear here and can be restored.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
     : <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">{showingArchived ? 'Archived leagues' : 'Leagues in this organization'}</caption>
       <TableHeader className="bg-muted/30"><TableRow><SortableHead column="name" sort={leagueSortState} onSort={onLeagueSort} className="pl-5 text-muted-foreground">League</SortableHead><SortableHead column="location" sort={leagueSortState} onSort={onLeagueSort} className="hidden text-muted-foreground sm:table-cell">Location</SortableHead><SortableHead column="timeZone" sort={leagueSortState} onSort={onLeagueSort} className="hidden text-muted-foreground md:table-cell">Time zone</SortableHead><SortableHead column="website" sort={leagueSortState} onSort={onLeagueSort} className="hidden w-32 text-muted-foreground lg:table-cell">Website</SortableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-      <TableBody>{sortedLeagues.map((item) => <Fragment key={item.id}>
-        <TableRow>
+      <AnimatedTableBody>{sortedLeagues.map((item) => <Fragment key={item.id}>
+        <TableRow data-key={item.id}>
           <TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><p className="mt-1 break-words text-xs text-muted-foreground sm:hidden">{item.location || 'No location added'}</p></TableCell>
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground md:table-cell"><span className="break-words">{item.time_zone ? item.time_zone.replaceAll('_', ' ') : 'Not set'}</span></TableCell>
@@ -757,7 +761,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
           </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>
         {!showingArchived && editing === item.id && <TableRow><TableCell colSpan={5} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[{ name: 'name', label: 'Name', required: true, value: item.name }, { name: 'location', label: 'Location', value: item.location }, { name: 'timeZone', label: 'Time zone', type: 'timezone', value: item.time_zone ?? browserTimeZone(), description: 'Game times show in this zone.' }]} transform={(v) => ({ name: v.name, location: optional(v.location), timeZone: v.timeZone || null })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
-      </Fragment>)}</TableBody>
+      </Fragment>)}</AnimatedTableBody>
     </Table></CardContent></Card>}
     <LeagueWebsiteDialog league={websiteLeague} onClose={() => setWebsiteLeague(null)} />
   </section>
@@ -797,6 +801,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   // Seasons and teams are paged by the API, so their column sorts are sent as query parameters.
   const [seasonSort, setSeasonSort] = useState<SortState<SeasonSortKey>>(null)
   const [teamSort, setTeamSort] = useState<SortState<TeamSortKey>>(null)
+  // The list request started by the latest sort click; while it loads, the current rows stay visible and reorder on arrival.
+  const [seasonSortRequest, setSeasonSortRequest] = useState('')
+  const [teamSortRequest, setTeamSortRequest] = useState('')
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(seasonSearch.trim()), 300)
     return () => window.clearTimeout(timer)
@@ -817,7 +824,8 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const seasonPagePending = seasonPaging.displayPage !== seasonPageNumber
   const cachedSeasonPage = seasonPagePending ? queryClient.getQueryData<PaginatedResult<SeasonListItem>>(['league', seasonPathFor(seasonPaging.displayPage)]) : undefined
   const seasonList = cachedSeasonPage ?? seasonPage.data
-  const seasonsLoading = !cachedSeasonPage && (searchPending || seasonPage.isLoading || seasonPage.isPlaceholderData || seasonPagePending)
+  const seasonSorting = seasonPage.isPlaceholderData && seasonSortRequest === seasonPagePath
+  const seasonsLoading = !cachedSeasonPage && (searchPending || seasonPage.isLoading || (seasonPage.isPlaceholderData && !seasonSorting) || seasonPagePending)
   const seasonMeta = seasonList && (seasonPage.isPlaceholderData || seasonPagePending ? { ...seasonList, page: seasonPaging.displayPage } : seasonList)
   const teamFilters = new URLSearchParams()
   if (teamLeagueFilter) teamFilters.set('leagueId', teamLeagueFilter)
@@ -846,7 +854,8 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const teamPagePending = teamPaging.displayPage !== teamPage
   const cachedTeamPage = teamPagePending ? queryClient.getQueryData<PaginatedResult<OrganizationTeamRow>>(['league', teamPathFor(teamPaging.displayPage)]) : undefined
   const teamList = cachedTeamPage ?? organizationTeams.data
-  const teamsLoading = !cachedTeamPage && (teamSearchPending || organizationTeams.isLoading || organizationTeams.isPlaceholderData || teamPagePending)
+  const teamSorting = organizationTeams.isPlaceholderData && teamSortRequest === teamPagePath
+  const teamsLoading = !cachedTeamPage && (teamSearchPending || organizationTeams.isLoading || (organizationTeams.isPlaceholderData && !teamSorting) || teamPagePending)
   const teamMeta = teamList && (organizationTeams.isPlaceholderData || teamPagePending ? { ...teamList, page: teamPaging.displayPage } : teamList)
   const teamRows = teamList?.items ?? []
   const teamFiltersActive = !!teamSearch.trim() || !!selectedTeamDivision
@@ -875,8 +884,8 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const failedQuery = searchPending || teamSearchPending ? undefined : relevantQueries.find((query) => query.isError)
   // Seasons and teams show their own list skeletons.
   const loading = relevantQueries.some((query) => query !== seasonPage && query !== organizationTeams && query.isLoading)
-  const onSeasonSort = (column: SeasonSortKey) => { setSeasonPageNumber(1); setSeasonSort((current) => nextSort(current, column)) }
-  const onTeamSort = (column: TeamSortKey) => { setTeamPage(1); setTeamSort((current) => nextSort(current, column)) }
+  const onSeasonSort = (column: SeasonSortKey) => { const next = nextSort(seasonSort, column); setSeasonSortRequest(`organizations/${org}/seasons?${sortedRequest(seasonFilters, next)}`); setSeasonPageNumber(1); setSeasonSort(next) }
+  const onTeamSort = (column: TeamSortKey) => { const next = nextSort(teamSort, column); setTeamSortRequest(`organizations/${org}/teams?${sortedRequest(teamFilters, next)}`); setTeamPage(1); setTeamSort(next) }
   const seasonsHeader = <TableHeader className="bg-muted/30"><TableRow><SortableHead column="name" sort={seasonSort} onSort={onSeasonSort} className="pl-5 text-muted-foreground">Season</SortableHead><SortableHead column="league" sort={seasonSort} onSort={onSeasonSort} className="hidden text-muted-foreground md:table-cell">League</SortableHead><SortableHead column="status" sort={seasonSort} onSort={onSeasonSort} className="w-28 text-muted-foreground sm:w-36">Status</SortableHead><SortableHead column="startDate" sort={seasonSort} onSort={onSeasonSort} className="hidden text-muted-foreground md:table-cell">Start date</SortableHead><SortableHead column="endDate" sort={seasonSort} onSort={onSeasonSort} className="hidden text-muted-foreground md:table-cell">End date</SortableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
   const teamsHeader = <TableHeader className="bg-muted/30"><TableRow><SortableHead column="name" sort={teamSort} onSort={onTeamSort} className="pl-5 text-muted-foreground">Team</SortableHead><SortableHead column="league" sort={teamSort} onSort={onTeamSort} className="hidden text-muted-foreground md:table-cell">League</SortableHead><SortableHead column="season" sort={teamSort} onSort={onTeamSort} className="hidden text-muted-foreground md:table-cell">Season</SortableHead><SortableHead column="division" sort={teamSort} onSort={onTeamSort} className="hidden text-muted-foreground md:table-cell">Division</SortableHead><SortableHead column="status" sort={teamSort} onSort={onTeamSort} className="hidden w-36 text-muted-foreground md:table-cell">Status</SortableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
   const createSeasonButton = <div className="flex justify-end"><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
@@ -922,7 +931,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
       {!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : !division ? <NoData>Choose a division to view the dashboard.</NoData> : <>
         <Panel title={season.name} description={`${division?.name ?? 'Division'} · Season ${season.status} · ${dashboard.data?.teamCount ?? 0} registered teams`}><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/teams" />}>Manage teams</Button></Panel>
         <div className="grid gap-4 lg:grid-cols-2"><Panel title="Upcoming games"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.upcoming ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/games" />}>Manage games</Button></Panel><Panel title="Recent results"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.recent ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /></Panel></div>
-        <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><SortableHead column="team" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Team</SortableHead><SortableHead column="wins" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Wins</SortableHead><SortableHead column="losses" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Losses</SortableHead><SortableHead column="difference" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Point difference</SortableHead></TableRow></TableHeader><TableBody>{dashboardStandings.sorted.map((row) => <TableRow key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</TableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
+        <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><SortableHead column="team" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Team</SortableHead><SortableHead column="wins" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Wins</SortableHead><SortableHead column="losses" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Losses</SortableHead><SortableHead column="difference" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Point difference</SortableHead></TableRow></TableHeader><AnimatedTableBody>{dashboardStandings.sorted.map((row) => <TableRow key={row.id} data-key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</AnimatedTableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
       </>}
     </>}
     {section === 'leagues' && <LeaguesSection organizationId={org} leagues={leagues.data ?? []} onDelete={setDeleteTarget} />}
@@ -935,9 +944,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
           {createSeasonButton}
           <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Seasons in this organization</caption>
             {seasonsHeader}
-            <TableBody>{seasonList.items.map((item) => <Fragment key={item.id}>
-              <TableRow><TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><div className="mt-1 flex flex-col gap-1 break-words text-xs text-muted-foreground md:hidden"><span>{item.league_name}</span><span>Start: {readableDate(item.start_date)}</span><span>End: {readableDate(item.end_date)}</span></div></TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{item.league_name}</TableCell><TableCell><SeasonStatusBadge status={item.status} /></TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.start_date)}</TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.end_date)}</TableCell><TableCell className="pr-4 text-right"><SeasonActions season={item} archived={seasonStatus === 'archived'} onEdit={() => setSeasonToEdit(item)} onDelete={() => setDeleteTarget(seasonStatus === 'archived' ? { path: `seasons/${item.id}`, title: 'Delete season permanently?', description: `This removes ${item.name} with all of its games, results and registrations. This can’t be undone.`, confirmName: item.name, submitLabel: 'Delete permanently', success: 'Season deleted.' } : { path: `seasons/${item.id}`, title: 'Delete season?', description: `This removes ${item.name} with its divisions, registrations and unplayed games. Seasons with recorded results need to be archived instead.`, confirmName: item.name, submitLabel: 'Delete season', success: 'Season deleted.' })} /></TableCell></TableRow>
-            </Fragment>)}</TableBody>
+            <AnimatedTableBody busy={seasonSorting}>{seasonList.items.map((item) => <Fragment key={item.id}>
+              <TableRow data-key={item.id}><TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><div className="mt-1 flex flex-col gap-1 break-words text-xs text-muted-foreground md:hidden"><span>{item.league_name}</span><span>Start: {readableDate(item.start_date)}</span><span>End: {readableDate(item.end_date)}</span></div></TableCell><TableCell className="hidden max-w-0 break-words whitespace-normal text-muted-foreground md:table-cell">{item.league_name}</TableCell><TableCell><SeasonStatusBadge status={item.status} /></TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.start_date)}</TableCell><TableCell className="hidden whitespace-normal text-muted-foreground md:table-cell">{readableDate(item.end_date)}</TableCell><TableCell className="pr-4 text-right"><SeasonActions season={item} archived={seasonStatus === 'archived'} onEdit={() => setSeasonToEdit(item)} onDelete={() => setDeleteTarget(seasonStatus === 'archived' ? { path: `seasons/${item.id}`, title: 'Delete season permanently?', description: `This removes ${item.name} with all of its games, results and registrations. This can’t be undone.`, confirmName: item.name, submitLabel: 'Delete permanently', success: 'Season deleted.' } : { path: `seasons/${item.id}`, title: 'Delete season?', description: `This removes ${item.name} with its divisions, registrations and unplayed games. Seasons with recorded results need to be archived instead.`, confirmName: item.name, submitLabel: 'Delete season', success: 'Season deleted.' })} /></TableCell></TableRow>
+            </Fragment>)}</AnimatedTableBody>
           </Table>{seasonPager}</CardContent></Card>
         </section> : <Card className="mx-auto w-full max-w-3xl"><CardContent><Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><CalendarDaysIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>{filtersActive ? 'No matching seasons' : 'No seasons yet'}</h3></EmptyTitle><EmptyDescription>{filtersActive ? 'Try different filters or create a season.' : 'Create your first season to start organizing teams and games.'}</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2">{filtersActive && <Button variant="outline" onClick={() => { setSeasonSearch(''); setSeasonStatus(''); setSeasonLeagueFilter(''); setSeasonPageNumber(1); setSeasonPageSize(10) }}>Clear filters</Button>}<DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />{filtersActive ? 'Create season' : 'Create your first season'}</DialogTrigger></div></EmptyContent></Empty></CardContent></Card>}
         <DialogContent><DialogHeader><DialogTitle>Create a season</DialogTitle><DialogDescription>{selectedLeague ? `Add a name and optional dates for ${selectedLeague.name}.` : 'Close this dialog and select a league in the header before creating a season.'}</DialogDescription></DialogHeader>{selectedLeague && <Editor key={selectedLeague.id} title="Season details" path={`leagues/${selectedLeague.id}/seasons`} fields={dateFields()} transform={seasonData} submitLabel="Create season" alignActions="end" onSaved={() => setCreateSeasonOpen(false)} />}</DialogContent>
@@ -951,9 +960,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
           {teamPager ?? <PaginationSkeleton />}
         </section> : teamRows.length ? <section aria-label="Teams" className="flex flex-col gap-4">
           {teamView === 'table' ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Teams and their season registrations in this organization</caption>{teamsHeader}
-            <TableBody>{teamRows.map((team) => {
+            <AnimatedTableBody busy={teamSorting}>{teamRows.map((team) => {
               const canRegister = season.status !== 'completed' && team.season_id === season.id
-              return <TableRow key={team.season_team_id ?? team.id}>
+              return <TableRow key={team.season_team_id ?? team.id} data-key={team.season_team_id ?? team.id}>
                 <TableCell className="max-w-0 py-3 pl-5 whitespace-normal">
                   <span className="break-words font-medium">{team.name}</span>
                   <div className="mt-1 flex flex-col items-start gap-1 md:hidden">
@@ -969,7 +978,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
                 <TableCell className="hidden md:table-cell"><Badge variant="secondary">{team.season_team_id ? 'Registered' : 'Not registered'}</Badge></TableCell>
                 <TableCell className="pr-3 text-right"><TeamActions team={team} roster={rosterAction(team)} canRegister={canRegister} onRegister={() => setTeamToRegister(team)} onEdit={() => setTeamToEdit(team)} onCorrect={season.status === 'draft' && team.season_team_id ? () => setTeamToCorrect(team) : undefined} onRemove={season.status === 'draft' && team.season_team_id ? () => setTeamToRemove(team) : undefined} onDelete={() => setDeleteTarget({ path: `teams/${team.id}`, title: 'Delete team?', description: `This removes ${team.name} and its registrations. Teams with games can’t be deleted.`, submitLabel: 'Delete team', success: 'Team deleted.' })} /></TableCell>
               </TableRow>
-            })}</TableBody>
+            })}</AnimatedTableBody>
           </Table></CardContent></Card> : <ul aria-label="Teams and their season registrations" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {teamRows.map((team) => {
               const canRegister = season.status !== 'completed' && team.season_id === season.id
@@ -1004,6 +1013,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>}
   </main>
 }
+
 
 
 
