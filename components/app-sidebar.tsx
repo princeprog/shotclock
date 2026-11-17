@@ -45,7 +45,7 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
           <SidebarGroupContent>
             <SidebarMenu>
               {items.map(({ href, label, icon: Icon }) => <SidebarMenuItem key={href}>
-                <SidebarMenuButton className="h-9 text-[15px] [&>svg]:size-[17px] group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-1.5!" tooltip={label} isActive={pathname === href || (href === '/manage/teams' && pathname.startsWith('/manage/rosters/'))} render={<Link href={href} aria-label={label} aria-current={pathname === href ? 'page' : undefined} />}>
+                <SidebarMenuButton className="h-9 text-[15px] [&>svg]:size-[17px] group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-1.5!" tooltip={label} isActive={pathname === href || (href === '/manage/teams' && pathname.startsWith('/manage/rosters/')) || (href === '/manage/games' && pathname.startsWith('/manage/games/'))} render={<Link href={href} aria-label={label} aria-current={pathname === href ? 'page' : undefined} />}>
                   <Icon /><span className="min-w-0 flex-1 whitespace-nowrap transition-opacity duration-150 motion-reduce:transition-none group-data-[collapsible=icon]:opacity-0">{label}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>)}
@@ -95,3 +95,4 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
     </Sidebar>
   )
 }
+

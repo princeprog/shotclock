@@ -9,7 +9,6 @@ import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
 import { LeagueWebsiteDialog } from '@/components/league-website-dialog'
-import { ScheduleGenerator } from '@/components/schedule-generator'
 import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
 import { GameScoreDialog } from '@/components/game-score-dialog'
 import { GameScheduleHistory } from '@/components/game-schedule-history'
@@ -467,7 +466,7 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
   </section>
 }
 
-type GameDialog = { kind: 'schedule' } | { kind: 'generator'; mode: 'preliminary' | 'playoffs' } | { kind: 'edit' | 'score' | 'remove' | 'forfeit' | 'history'; game: Game }
+type GameDialog = { kind: 'schedule' } | { kind: 'edit' | 'score' | 'remove' | 'forfeit' | 'history'; game: Game }
 
 function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, teams, teamsLoading, teamsError, onRetryTeams, venues, onClose, onSaved, onPendingChange, timeZone }: {
   seasonId: string; divisions: Division[]; divisionId: string; onDivisionChange: (id: string) => void; teams: SeasonTeam[]; teamsLoading: boolean; teamsError: string | null; onRetryTeams: () => void; venues: Item[]; onClose: () => void; onSaved: () => void; onPendingChange: (pending: boolean) => void; timeZone?: string | null
@@ -708,7 +707,7 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
                 <TooltipContent side="bottom" align="start" className="block max-w-sm px-3 py-2.5 text-left leading-relaxed">{generationBlockers(scheduleDivisions.map((item) => ({ name: item.name, reason: item.preliminaryReason || 'Not eligible for schedule generation.' })))}</TooltipContent>
               </Tooltip>
             })()}
-            {scheduleDivisions.some((item) => item.playoffs) && <Button variant="outline" onClick={() => setDialog({ kind: 'generator', mode: 'playoffs' })} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
+            {scheduleDivisions.some((item) => item.playoffs) && <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/playoffs" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
             <Button onClick={openSchedule} disabled={!divisions.length}><PlusIcon data-icon="inline-start" />Schedule game</Button>
           </div>}
         </div>
@@ -739,8 +738,7 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
         <DialogFooter><Button type="button" variant="outline" disabled={startSeason.isPending} onClick={() => setConfirmStart(false)}>Cancel</Button><Button type="button" disabled={startSeason.isPending} onClick={() => startSeason.mutate()}>{startSeason.isPending ? 'Starting…' : 'Start season'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && dialog?.kind !== 'score' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
-      {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} mode={dialog.mode} timeZone={timeZone} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
+    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">{dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && dialog?.kind !== 'score' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
       {dialog?.kind === 'forfeit' && <GameForfeitDialog game={dialog.game} onClose={closeDialog} onSaved={() => saved('Forfeit recorded.')} onPendingChange={setPending} />}
       {dialog?.kind === 'history' && <GameScheduleHistory gameId={dialog.game.id} timeZone={timeZone} />}
       {dialog?.kind === 'remove' && <><p className="text-sm text-muted-foreground">This removes the game from the schedule. Games with dependent playoff games or records may be blocked.</p>{removeGame.isError && <p role="alert" className="text-sm text-destructive">{removeGame.error.message}</p>}<DialogFooter><Button type="button" variant="outline" disabled={removeGame.isPending} onClick={closeDialog}>Cancel</Button><Button type="button" variant="destructive" disabled={removeGame.isPending} onClick={() => removeGame.mutate(dialog.game.id)}>{removeGame.isPending ? 'Removing…' : 'Remove game'}</Button></DialogFooter></>}
@@ -1041,6 +1039,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>}
   </main>
 }
+
 
 
 

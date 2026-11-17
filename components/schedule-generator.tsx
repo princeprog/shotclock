@@ -583,7 +583,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const unavailableTeams = teamRows.filter((row) => row.teamId && row.dates.length).length
   const optionsSummary = [timeZone, blackoutDates.length ? blackoutDates.length + ' blackout ' + (blackoutDates.length === 1 ? 'date' : 'dates') : '', unavailableTeams ? unavailableTeams + ' ' + (unavailableTeams === 1 ? 'team' : 'teams') + ' unavailable' : ''].filter(Boolean).join(' · ')
   const playingDays = weekdays.filter((_, index) => windows.some((window) => window.weekdays.includes(index)))
-  const summaryItems = [format === 'single' ? 'Single round robin' : 'Double round robin', summaryDates, playingDays.length ? playingDays.join(', ') : 'No playing days', venueIds.length + ' ' + (venueIds.length === 1 ? 'court' : 'courts'), paces.find((item) => item.value === pace)?.label ?? '']
+  const summaryItems = [mode === 'playoffs' ? 'Playoff round' : format === 'single' ? 'Single round robin' : 'Double round robin', summaryDates, playingDays.length ? playingDays.join(', ') : 'No playing days', venueIds.length + ' ' + (venueIds.length === 1 ? 'court' : 'courts'), paces.find((item) => item.value === pace)?.label ?? '']
 
   return <>
     {presentation === 'dialog' && <DialogHeader className="border-b px-6 py-5 pr-14">

@@ -166,7 +166,9 @@ test('unavailable schedule generation explains each division in a tooltip, witho
   assert.ok(find(tree, (node) => node.type === 'TooltipContent'))
   assert.doesNotMatch(text(tree), /Finish semifinals|Finish preliminary games|Playoffs not ready/)
   assert.equal(find(tree, (node) => node.props?.children?.includes?.('Generate schedule')).props.disabled, true)
-  assert.equal(find(tree, (node) => node.props?.children?.includes?.('Schedule playoffs')).props.disabled, true)
+  const playoffs = find(tree, (node) => node.props?.children?.includes?.('Schedule playoffs'))
+  assert.equal(playoffs.props.disabled, true)
+  assert.equal(playoffs.props.render.props.href, '/manage/games/playoffs')
 })
 
 test('rapid next-page clicks show the newest page at once and fetch it once clicking settles', async () => {
@@ -197,3 +199,4 @@ test('the division filter applies to final results and game actions remain avail
   assert.ok(find(tree, (node) => node.props?.children?.includes?.('Mark as forfeit')))
   assert.ok(find(tree, (node) => node.props?.children?.includes?.('Schedule history')))
 })
+
