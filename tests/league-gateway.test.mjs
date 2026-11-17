@@ -19,7 +19,7 @@ test('division and player routes are protected and accepted by the gateway', { s
   for (const path of [`seasons/${id}/divisions`, `organizations/${id}/players?search=alex`]) {
     assert.equal((await fetch(`${base}/api/league/${path}`)).status, 401)
   }
-  for (const [method, path] of [['POST', `seasons/${id}/divisions`], ['POST', `organizations/${id}/players`], ['POST', `organizations/${id}/players/${id}/fork`], ['PATCH', `players/${id}`], ['DELETE', `divisions/${id}`], ['PATCH', `season-teams/${id}`], ['DELETE', `season-teams/${id}`], ['DELETE', `rosters/${id}`]]) {
+  for (const [method, path] of [['POST', `seasons/${id}/divisions`], ['POST', `organizations/${id}/players`], ['POST', `organizations/${id}/players/${id}/fork`], ['PATCH', `players/${id}`], ['DELETE', `divisions/${id}`], ['PATCH', `season-teams/${id}`], ['DELETE', `season-teams/${id}`], ['DELETE', `rosters/${id}`], ['PATCH', `leagues/${id}/publication`]]) {
     assert.equal((await fetch(`${base}/api/league/${path}`, { method, headers, body: '{}' })).status, 401)
   }
 })

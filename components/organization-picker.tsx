@@ -15,6 +15,7 @@ import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/compo
 import { leagueRequest } from '@/lib/league-client'
 import { organizationReturnPath } from '@/lib/organization-navigation'
 import { saveOrganizationSelection } from '@/lib/organization-selection'
+import { markWorkspaceFresh } from '@/lib/session-freshness'
 import { useAppDispatch } from '@/lib/store-hooks'
 import { selectOrganization } from '@/lib/ui-slice'
 
@@ -47,6 +48,7 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
 
   function enterOrganization(organization: Organization) {
     saveOrganizationSelection(organization.id)
+    markWorkspaceFresh()
     dispatch(selectOrganization(organization.id))
     if (returnTo) router.replace(organizationReturnPath(returnTo))
     else router.push('/')

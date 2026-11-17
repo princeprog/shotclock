@@ -55,7 +55,7 @@ export function leagueChangeForMutation(client: QueryClient, path: string, metho
   if (removesRecord || child === 'archive' || child === 'restore' || (resource === 'organizations' && child === 'players' && method === 'DELETE')) change = { kind: 'unknown', action: 'edit' }
   else if (resource === 'organizations' && !child) change = { kind: 'organization', action: id ? 'edit' : 'create', organizationId: id ?? stringValue(value.id) }
   else if (resource === 'organizations' && child === 'leagues') change = { kind: 'league', action: 'create', organizationId: id, leagueId: stringValue(value.id) }
-  else if (resource === 'leagues' && !child) change = { kind: 'league', action: 'edit', leagueId: id, organizationId: stringValue(value.organization_id) }
+  else if (resource === 'leagues' && (!child || child === 'publication')) change = { kind: 'league', action: 'edit', leagueId: id, organizationId: stringValue(value.organization_id) }
   else if (resource === 'leagues' && child === 'seasons') change = { kind: 'season', action: 'create', leagueId: id, seasonId: stringValue(value.id) }
   else if (resource === 'seasons' && (!child || child === 'status')) change = { kind: 'season', action: 'edit', seasonId: id, leagueId: stringValue(value.league_id) }
   else if (resource === 'leagues' && child === 'teams') change = { kind: 'team', action: 'create', leagueId: id, seasonId: stringValue(input.seasonId), entityId: stringValue(value.id) }

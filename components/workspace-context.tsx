@@ -7,6 +7,7 @@ import { leagueRequest } from '@/lib/league-client'
 import { allowWorkspaceChange } from '@/lib/schedule-navigation-guard'
 import { organizationPickerUrl, shouldChooseOrganization } from '@/lib/organization-navigation'
 import { readOrganizationSelection, resolveSelectedOrganization, subscribeOrganizationSelection } from '@/lib/organization-selection'
+import { isLeavingWorkspace } from '@/lib/session-freshness'
 import { useAppDispatch, useAppSelector } from '@/lib/store-hooks'
 import { selectDivision, selectLeague, selectSeason } from '@/lib/ui-slice'
 import { parseWorkspaceSelection, readWorkspaceSelection, resolveWorkspaceDivision, resolveWorkspaceLeague, resolveWorkspaceSeason, saveWorkspaceSelection, subscribeWorkspaceSelection } from '@/lib/workspace-selection'
@@ -28,7 +29,7 @@ function useWorkspaceValue() {
   const organizationId = organization?.id ?? ''
   useEffect(() => {
     if (!shouldChooseOrganization(organizations.status, organizations.fetchStatus, !!organization)) return
-    if (!pathname.startsWith('/manage/')) return
+    if (!pathname.startsWith('/manage/') || isLeavingWorkspace()) return
     const { search, hash } = window.location
     router.replace(organizationPickerUrl(`${pathname}${search}${hash}`))
   }, [organization, organizations.fetchStatus, organizations.status, pathname, router])
