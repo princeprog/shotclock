@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useSyncExternalStore, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore, type FormEvent } from 'react'
 import Link from 'next/link'
 import { format, parseISO } from 'date-fns'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -27,6 +27,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { SortableHead, useTableSort } from '@/components/sortable-head'
 
 type Organization = { id: string; name: string }
 type RosterContext = { id: string; team_name: string; abbreviation: string | null; league_name: string; season_id: string; season_name: string; season_status: 'draft' | 'active' | 'completed'; organization_id: string; division_id: string; division_name: string }
@@ -180,6 +181,8 @@ function PlayerForm({ seasonTeamId, context, dialog, onDone, onCancel, onPending
   </form>
 }
 
+const noPlayers: Player[] = []
+
 export function RosterWorkspace({ seasonTeamId, backHref }: { seasonTeamId: string; backHref: string }) {
   const client = useQueryClient()
   const storedOrganization = useSyncExternalStore(subscribeOrganizationSelection, readOrganizationSelection, () => '')
@@ -205,6 +208,13 @@ export function RosterWorkspace({ seasonTeamId, backHref }: { seasonTeamId: stri
   const roster = useQuery({ queryKey: ['league', rosterPath], queryFn: () => leagueRequest<Player[]>(rosterPath, client), enabled: !!organization && context.data?.organization_id === organization.id && !searchPending, retry: false })
   const rosterSeasonId = context.data?.season_id ?? ''
   const rosterSeason = useQuery({ queryKey: ['league', `seasons/${rosterSeasonId}`], queryFn: () => leagueRequest<{ start_date: string | null }>(`seasons/${rosterSeasonId}`, client), enabled: !!organization && !!rosterSeasonId && context.data?.organization_id === organization.id, retry: false })
+  const rosterSort = useMemo(() => ({
+    player: (row: Player) => `${row.last_name} ${row.first_name}`,
+    position: (row: Player) => positions.find(([value]) => value === row.position)?.[1] ?? row.position,
+    age: (row: Player) => ageAtSeasonStart(row.date_of_birth, rosterSeason.data?.start_date),
+    jersey: (row: Player) => row.jersey_number,
+  }), [rosterSeason.data?.start_date])
+  const { sorted: sortedRoster, sort, onSort } = useTableSort(roster.data ?? noPlayers, rosterSort)
   const editable = context.data?.season_status !== 'completed'
 
   return <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 p-4 md:p-8">
@@ -235,8 +245,8 @@ export function RosterWorkspace({ seasonTeamId, backHref }: { seasonTeamId: stri
         {rosterSeason.isError && <Alert variant="destructive"><AlertTitle>Couldn’t load season details</AlertTitle><AlertDescription><p>Player ages are unavailable.</p><Button size="sm" variant="outline" className="mt-3" onClick={() => void rosterSeason.refetch()}>Try again</Button></AlertDescription></Alert>}
         {searchPending || roster.isLoading ? <div role="status" aria-label="Loading players"><Skeleton className="h-32 w-full" /></div>
           : roster.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load players</AlertTitle><AlertDescription><p>{roster.error.message}</p><Button size="sm" variant="outline" className="mt-3" onClick={() => void roster.refetch()}>Try again</Button></AlertDescription></Alert>
-          : roster.data?.length ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Players in {context.data.team_name} for {context.data.season_name}</caption><TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Player</TableHead><TableHead scope="col" className="hidden w-40 text-muted-foreground md:table-cell">Position</TableHead><TableHead scope="col" className="hidden w-36 whitespace-normal text-muted-foreground md:table-cell">Age</TableHead><TableHead scope="col" className="w-28 text-muted-foreground sm:w-36">Jersey number</TableHead>{editable && <TableHead scope="col" className="w-14 pr-4 text-right"><span className="sr-only">Actions</span></TableHead>}</TableRow></TableHeader>
-            <TableBody>{roster.data.map((player) => {
+          : roster.data?.length ? <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">Players in {context.data.team_name} for {context.data.season_name}</caption><TableHeader className="bg-muted/30"><TableRow><SortableHead column="player" sort={sort} onSort={onSort} className="pl-5 text-muted-foreground">Player</SortableHead><SortableHead column="position" sort={sort} onSort={onSort} className="hidden w-40 text-muted-foreground md:table-cell">Position</SortableHead><SortableHead column="age" sort={sort} onSort={onSort} className="hidden w-36 whitespace-normal text-muted-foreground md:table-cell">Age</SortableHead><SortableHead column="jersey" sort={sort} onSort={onSort} className="w-28 text-muted-foreground sm:w-36">Jersey number</SortableHead>{editable && <TableHead scope="col" className="w-14 pr-4 text-right"><span className="sr-only">Actions</span></TableHead>}</TableRow></TableHeader>
+            <TableBody>{sortedRoster.map((player) => {
               const position = positions.find(([value]) => value === player.position)?.[1] ?? player.position ?? 'Not set'
               const age = ageAtSeasonStart(player.date_of_birth, rosterSeason.data?.start_date)
               const ageLabel = rosterSeason.isLoading ? 'Loading…' : age === null ? '—' : String(age)
@@ -256,3 +266,4 @@ export function RosterWorkspace({ seasonTeamId, backHref }: { seasonTeamId: stri
       </>}
   </main>
 }
+

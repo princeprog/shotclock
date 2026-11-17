@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO } from 'date-fns'
@@ -19,6 +19,8 @@ import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/compo
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
 import { DataPagination } from '@/components/data-pagination'
+import { SortableHead, useTableSort } from '@/components/sortable-head'
+import { nextSort, sortParams, sortRows, type SortState } from '@/lib/table-sort'
 import { requirePaginatedResult, type PaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
@@ -411,8 +413,21 @@ function GamesList({ games, season, teams, venues, timeZone }: { games: Game[]; 
   </div>)}</div>
 }
 
+// Column accessors for tables sorted in the browser. Defined once so sorting is memoized per table.
+type RankedStanding = Standing & { rank: number }
+const standingSort = { rank: (row: RankedStanding) => row.rank, team: (row: RankedStanding) => row.name, wins: (row: RankedStanding) => row.wins, losses: (row: RankedStanding) => row.losses, difference: (row: RankedStanding) => row.pointDifference }
+const dashboardStandingSort = { team: (row: Standing) => row.name, wins: (row: Standing) => row.wins, losses: (row: Standing) => row.losses, difference: (row: Standing) => row.pointDifference }
+const noStandings: Standing[] = []
+const gameStatusLabel = (row: Game) => row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'
+const gameSort = { time: (row: Game) => row.scheduled_at ? Date.parse(row.scheduled_at) : null, matchup: (row: Game) => `${row.home_name} ${row.away_name}`, venue: (row: Game) => row.venue_name, status: (row: Game) => gameStatusLabel(row) }
+const leagueSort = { name: (row: LeagueRow) => row.name, location: (row: LeagueRow) => row.location, timeZone: (row: LeagueRow) => row.time_zone, website: (row: LeagueRow) => row.published_at ? 'Published' : 'Hidden' }
+type SeasonSortKey = 'name' | 'league' | 'status' | 'startDate' | 'endDate'
+type TeamSortKey = 'name' | 'league' | 'season' | 'division' | 'status'
+
 function StandingsView({ season, division, rows }: { season: Season; division: Division; rows: Standing[] }) {
   const hasResults = rows.some((row) => row.wins + row.losses > 0)
+  const ranked = useMemo(() => rows.map((row, index) => ({ ...row, rank: index + 1 })), [rows])
+  const { sorted, sort, onSort } = useTableSort(ranked, standingSort)
   return <section aria-label={`Standings for ${season.name}`} className="flex flex-col gap-8">
     <section aria-labelledby="standings-leaders-title" className="flex flex-col gap-4">
       <div className="flex flex-col gap-1"><h3 id="standings-leaders-title" className="text-lg font-semibold">Top three</h3><p className="text-sm text-muted-foreground">The leading teams in {season.name} · {division.name}.</p></div>
@@ -426,14 +441,14 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
     <Card className="gap-0 py-0"><CardHeader className="border-b px-4 py-4 sm:px-5"><CardTitle><h3 className="text-base font-semibold">Full standings</h3></CardTitle></CardHeader><CardContent className="px-0">
       <Table className="table-fixed"><caption className="sr-only">Standings for {season.name}, ordered by wins, point difference, team name and ID</caption>
         <TableHeader className="bg-muted/30"><TableRow>
-          <TableHead scope="col" className="w-12 pl-4 sm:w-16 sm:pl-5"><span className="sm:hidden" aria-hidden="true">#</span><span className="sr-only sm:not-sr-only">Rank</span></TableHead>
-          <TableHead scope="col">Team</TableHead>
-          <TableHead scope="col" aria-label="Wins" className="w-12 text-right sm:w-20"><span className="sm:hidden" aria-hidden="true">W</span><span className="hidden sm:inline">Wins</span></TableHead>
-          <TableHead scope="col" aria-label="Losses" className="w-12 text-right sm:w-20"><span className="sm:hidden" aria-hidden="true">L</span><span className="hidden sm:inline">Losses</span></TableHead>
-          <TableHead scope="col" aria-label="Point difference" className="w-16 pr-4 text-right sm:w-36 sm:pr-5"><span className="sm:hidden" aria-hidden="true">Diff</span><span className="hidden sm:inline">Point difference</span></TableHead>
+          <SortableHead column="rank" sort={sort} onSort={onSort} className="w-16 pl-4 sm:w-24 sm:pl-5"><span className="sm:hidden" aria-hidden="true">#</span><span className="sr-only sm:not-sr-only">Rank</span></SortableHead>
+          <SortableHead column="team" sort={sort} onSort={onSort}>Team</SortableHead>
+          <SortableHead column="wins" sort={sort} onSort={onSort} end className="w-16 text-right sm:w-24"><span className="sm:hidden" aria-hidden="true">W</span><span className="sr-only sm:not-sr-only">Wins</span></SortableHead>
+          <SortableHead column="losses" sort={sort} onSort={onSort} end className="w-16 text-right sm:w-24"><span className="sm:hidden" aria-hidden="true">L</span><span className="sr-only sm:not-sr-only">Losses</span></SortableHead>
+          <SortableHead column="difference" sort={sort} onSort={onSort} end className="w-20 pr-4 text-right sm:w-44 sm:pr-5"><span className="sm:hidden" aria-hidden="true">Diff</span><span className="sr-only sm:not-sr-only">Point difference</span></SortableHead>
         </TableRow></TableHeader>
-        <TableBody>{rows.map((row, index) => <TableRow key={row.id}>
-          <TableCell className="py-4 pl-4 tabular-nums text-muted-foreground sm:pl-5">#{index + 1}</TableCell>
+        <TableBody>{sorted.map((row) => <TableRow key={row.id}>
+          <TableCell className="py-4 pl-4 tabular-nums text-muted-foreground sm:pl-5">#{row.rank}</TableCell>
           <TableCell className="break-words whitespace-normal font-medium">{row.name}</TableCell>
           <TableCell className="text-right tabular-nums">{row.wins}</TableCell>
           <TableCell className="text-right tabular-nums">{row.losses}</TableCell>
@@ -523,6 +538,9 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const [dialog, setDialog] = useState<GameDialog | null>(null)
   const [pending, setPending] = useState(false)
   const [divisionFilter, setDivisionFilter] = useState('')
+  // Games stay grouped by day; a column sort orders the games within each day.
+  const [gameSortState, setGameSortState] = useState<SortState<keyof typeof gameSort>>(null)
+  const onGameSort = (column: keyof typeof gameSort) => setGameSortState((current) => nextSort(current, column))
   const [scheduleDivision, setScheduleDivision] = useState('')
   const [status, setStatus] = useState('scheduled')
   const [dates, setDates] = useState<DateRange | undefined>()
@@ -620,14 +638,14 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
     if (!groups.has(key)) groups.set(key, { day, rows: [] })
     groups.get(key)!.rows.push(row)
   }
-  const gameAgenda = listData?.items.length ? <div className="flex flex-col gap-8">{Array.from(groups.entries()).map(([key, group]) => <section key={key} className="flex flex-col gap-4" aria-label={group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'}>
+  const gameAgenda = listData?.items.length ? <div className="flex flex-col gap-8">{Array.from(groups.entries()).map(([key, group], groupIndex) => <section key={key} className="flex flex-col gap-4" aria-label={group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'}>
     <div className="flex flex-wrap items-baseline gap-3"><h3 className="text-xl font-semibold tracking-tight">{group.day ? format(group.day, 'EEEE, MMM d') : 'Date not scheduled'}</h3><span className="text-sm text-muted-foreground">{group.rows.length} {group.rows.length === 1 ? 'game' : 'games'}{listData && listData.total > listData.pageSize ? ' shown' : ''}</span></div>
     <div className="flex items-start gap-4 sm:gap-6">
       {group.day && <div aria-hidden="true" className="hidden w-20 shrink-0 flex-col items-center rounded-lg border bg-card px-2 py-3 text-center sm:flex"><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'MMM')}</span><span className="text-2xl font-semibold tabular-nums">{format(group.day, 'd')}</span><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'EEE')}</span></div>}
       <Table className="table-fixed border-y"><caption className="sr-only">{group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'} games</caption>
         <colgroup><col className="w-24 sm:w-28" /><col /><col className="hidden w-48 md:table-column" /><col className="hidden w-32 lg:table-column" /><col className="w-12" /></colgroup>
-        <TableHeader className="sr-only"><TableRow><TableHead scope="col">Time</TableHead><TableHead scope="col">Matchup and score</TableHead><TableHead scope="col">Venue</TableHead><TableHead scope="col">Status</TableHead><TableHead scope="col">Actions</TableHead></TableRow></TableHeader>
-        <TableBody>{group.rows.map((row) => {
+        <TableHeader className={groupIndex === 0 ? 'bg-muted/30' : 'sr-only'}><TableRow className="hover:bg-transparent"><SortableHead column="time" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Time</SortableHead><SortableHead column="matchup" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Matchup and score</SortableHead><SortableHead column="venue" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground md:table-cell">Venue</SortableHead><SortableHead column="status" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground lg:table-cell">Status</SortableHead><TableHead scope="col"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+        <TableBody>{sortRows(group.rows, gameSortState, gameSort).map((row) => {
           const canEdit = row.status === 'scheduled' && editable
           const canScore = (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
           const canForfeit = (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
@@ -711,6 +729,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
   const showingArchived = view === 'archived'
   const archived = useLeagueQuery<LeagueRow[]>(`organizations/${organizationId}/leagues?archived=true`, !!organizationId && showingArchived)
   const rows = showingArchived ? archived.data ?? [] : leagues
+  const { sorted: sortedLeagues, sort: leagueSortState, onSort: onLeagueSort } = useTableSort(rows, leagueSort)
   const deleteLeague = (item: LeagueRow) => onDelete(showingArchived
     ? { path: `leagues/${item.id}`, title: 'Delete league permanently?', description: `This removes ${item.name} with all of its seasons, teams, games and results. This can’t be undone.`, confirmName: item.name, submitLabel: 'Delete permanently', success: 'League deleted.' }
     : { path: `leagues/${item.id}`, title: 'Delete league?', description: `This removes ${item.name} with its seasons, teams and venues. Leagues with recorded results need to be archived instead.`, confirmName: item.name, submitLabel: 'Delete league', success: 'League deleted.' })
@@ -722,8 +741,8 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
     {toolbar}
     {showingArchived && archived.isLoading ? <LoadingContent /> : showingArchived && archived.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load archived leagues</AlertTitle><AlertDescription><p>{archived.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void archived.refetch()}>Try again</Button></AlertDescription></Alert> : !rows.length ? <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><ArchiveIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No archived leagues</h3></EmptyTitle><EmptyDescription>Archived leagues appear here and can be restored.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
     : <Card className="gap-0 py-0"><CardContent className="px-0"><Table className="table-fixed"><caption className="sr-only">{showingArchived ? 'Archived leagues' : 'Leagues in this organization'}</caption>
-      <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground sm:table-cell">Location</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Time zone</TableHead><TableHead scope="col" className="hidden w-28 text-muted-foreground lg:table-cell">Website</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-      <TableBody>{rows.map((item) => <Fragment key={item.id}>
+      <TableHeader className="bg-muted/30"><TableRow><SortableHead column="name" sort={leagueSortState} onSort={onLeagueSort} className="pl-5 text-muted-foreground">League</SortableHead><SortableHead column="location" sort={leagueSortState} onSort={onLeagueSort} className="hidden text-muted-foreground sm:table-cell">Location</SortableHead><SortableHead column="timeZone" sort={leagueSortState} onSort={onLeagueSort} className="hidden text-muted-foreground md:table-cell">Time zone</SortableHead><SortableHead column="website" sort={leagueSortState} onSort={onLeagueSort} className="hidden w-32 text-muted-foreground lg:table-cell">Website</SortableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+      <TableBody>{sortedLeagues.map((item) => <Fragment key={item.id}>
         <TableRow>
           <TableCell className="max-w-0 py-3 pl-5 whitespace-normal"><span className="break-words font-medium">{item.name}</span><p className="mt-1 break-words text-xs text-muted-foreground sm:hidden">{item.location || 'No location added'}</p></TableCell>
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
@@ -775,6 +794,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const selectedSeasonLeague = leagues.data?.some((item) => item.id === seasonLeagueFilter) ? seasonLeagueFilter : ''
   const [seasonPageNumber, setSeasonPageNumber] = useState(1)
   const [seasonPageSize, setSeasonPageSize] = useState(10)
+  // Seasons and teams are paged by the API, so their column sorts are sent as query parameters.
+  const [seasonSort, setSeasonSort] = useState<SortState<SeasonSortKey>>(null)
+  const [teamSort, setTeamSort] = useState<SortState<TeamSortKey>>(null)
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(seasonSearch.trim()), 300)
     return () => window.clearTimeout(timer)
@@ -784,7 +806,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   if (section === 'seasons' && debouncedSearch) seasonFilters.set('search', debouncedSearch)
   if (section === 'seasons' && seasonStatus) seasonFilters.set(seasonStatus === 'archived' ? 'archived' : 'status', seasonStatus === 'archived' ? 'true' : seasonStatus)
   if (section === 'seasons' && selectedSeasonLeague) seasonFilters.set('leagueId', selectedSeasonLeague)
-  if (section === 'seasons') { seasonFilters.set('page', String(seasonPageNumber)); seasonFilters.set('pageSize', String(seasonPageSize)) }
+  if (section === 'seasons') { seasonFilters.set('page', String(seasonPageNumber)); seasonFilters.set('pageSize', String(seasonPageSize)); for (const [name, value] of Object.entries(sortParams(seasonSort))) seasonFilters.set(name, value) }
   const seasonQuery = seasonFilters.toString()
   const filtersActive = !!(seasonSearch.trim() || seasonStatus || selectedSeasonLeague)
   const queryClient = useQueryClient()
@@ -804,6 +826,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   if (debouncedTeamSearch) teamFilters.set('search', debouncedTeamSearch)
   teamFilters.set('page', String(teamPage))
   teamFilters.set('pageSize', String(teamPagination.pageSize))
+  for (const [name, value] of Object.entries(sortParams(teamSort))) teamFilters.set(name, value)
   const teamSearchPending = section === 'teams' && teamSearch.trim() !== debouncedTeamSearch
   const teamPathFor = (pageNumber: number) => { const params = new URLSearchParams(teamFilters); params.set('page', String(pageNumber)); return `organizations/${org}/teams?${params}` }
   const teamPagePath = `organizations/${org}/teams?${teamFilters}`
@@ -836,6 +859,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const seasonTeams = useLeagueQuery<SeasonTeam[]>(`seasons/${season?.id}/teams?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'dashboard')
   const venues = useLeagueQuery<Item[]>(`leagues/${league}/venues`, !!league && ['dashboard', 'games'].includes(section))
   const dashboard = useLeagueQuery<Dashboard>(`seasons/${season?.id}/dashboard?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'dashboard')
+  const dashboardStandings = useTableSort(dashboard.data?.standings ?? noStandings, dashboardStandingSort)
   const standings = useLeagueQuery<Standing[]>(`seasons/${season?.id}/standings?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'standings')
   const [seasonToEdit, setSeasonToEdit] = useState<Season | null>(null)
   const [createSeasonOpen, setCreateSeasonOpen] = useState(false)
@@ -851,8 +875,10 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const failedQuery = searchPending || teamSearchPending ? undefined : relevantQueries.find((query) => query.isError)
   // Seasons and teams show their own list skeletons.
   const loading = relevantQueries.some((query) => query !== seasonPage && query !== organizationTeams && query.isLoading)
-  const seasonsHeader = <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="w-24 text-muted-foreground sm:w-32">Status</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Start date</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">End date</TableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
-  const teamsHeader = <TableHeader className="bg-muted/30"><TableRow><TableHead scope="col" className="pl-5 text-muted-foreground">Team</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">League</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Season</TableHead><TableHead scope="col" className="hidden text-muted-foreground md:table-cell">Division</TableHead><TableHead scope="col" className="hidden w-32 text-muted-foreground md:table-cell">Status</TableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+  const onSeasonSort = (column: SeasonSortKey) => { setSeasonPageNumber(1); setSeasonSort((current) => nextSort(current, column)) }
+  const onTeamSort = (column: TeamSortKey) => { setTeamPage(1); setTeamSort((current) => nextSort(current, column)) }
+  const seasonsHeader = <TableHeader className="bg-muted/30"><TableRow><SortableHead column="name" sort={seasonSort} onSort={onSeasonSort} className="pl-5 text-muted-foreground">Season</SortableHead><SortableHead column="league" sort={seasonSort} onSort={onSeasonSort} className="hidden text-muted-foreground md:table-cell">League</SortableHead><SortableHead column="status" sort={seasonSort} onSort={onSeasonSort} className="w-28 text-muted-foreground sm:w-36">Status</SortableHead><SortableHead column="startDate" sort={seasonSort} onSort={onSeasonSort} className="hidden text-muted-foreground md:table-cell">Start date</SortableHead><SortableHead column="endDate" sort={seasonSort} onSort={onSeasonSort} className="hidden text-muted-foreground md:table-cell">End date</SortableHead><TableHead scope="col" className="w-16 pr-4 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+  const teamsHeader = <TableHeader className="bg-muted/30"><TableRow><SortableHead column="name" sort={teamSort} onSort={onTeamSort} className="pl-5 text-muted-foreground">Team</SortableHead><SortableHead column="league" sort={teamSort} onSort={onTeamSort} className="hidden text-muted-foreground md:table-cell">League</SortableHead><SortableHead column="season" sort={teamSort} onSort={onTeamSort} className="hidden text-muted-foreground md:table-cell">Season</SortableHead><SortableHead column="division" sort={teamSort} onSort={onTeamSort} className="hidden text-muted-foreground md:table-cell">Division</SortableHead><SortableHead column="status" sort={teamSort} onSort={onTeamSort} className="hidden w-36 text-muted-foreground md:table-cell">Status</SortableHead><TableHead scope="col" className="w-14 pr-3 text-right"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
   const createSeasonButton = <div className="flex justify-end"><DialogTrigger render={<Button />}><PlusIcon data-icon="inline-start" />Create season</DialogTrigger></div>
   const seasonPager = seasonMeta && <DataPagination meta={seasonMeta} onPageChange={seasonPaging.go} onPageSizeChange={(size) => { setSeasonPageNumber(1); setSeasonPageSize(size) }} />
   const teamPager = teamMeta && <DataPagination meta={teamMeta} onPageChange={teamPaging.go} onPageSizeChange={(pageSize) => setTeamPagination({ scope: teamPageScope, page: 1, pageSize })} />
@@ -896,7 +922,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
       {!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : !division ? <NoData>Choose a division to view the dashboard.</NoData> : <>
         <Panel title={season.name} description={`${division?.name ?? 'Division'} · Season ${season.status} · ${dashboard.data?.teamCount ?? 0} registered teams`}><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/teams" />}>Manage teams</Button></Panel>
         <div className="grid gap-4 lg:grid-cols-2"><Panel title="Upcoming games"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.upcoming ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/games" />}>Manage games</Button></Panel><Panel title="Recent results"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.recent ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /></Panel></div>
-        <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><TableHead>Team</TableHead><TableHead>Wins</TableHead><TableHead>Losses</TableHead><TableHead>Point difference</TableHead></TableRow></TableHeader><TableBody>{dashboard.data.standings.map((row) => <TableRow key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</TableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
+        <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><SortableHead column="team" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Team</SortableHead><SortableHead column="wins" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Wins</SortableHead><SortableHead column="losses" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Losses</SortableHead><SortableHead column="difference" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Point difference</SortableHead></TableRow></TableHeader><TableBody>{dashboardStandings.sorted.map((row) => <TableRow key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</TableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
       </>}
     </>}
     {section === 'leagues' && <LeaguesSection organizationId={org} leagues={leagues.data ?? []} onDelete={setDeleteTarget} />}
@@ -978,3 +1004,6 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>}
   </main>
 }
+
+
+
