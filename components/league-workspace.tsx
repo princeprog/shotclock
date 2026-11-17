@@ -4,7 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, t
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO } from 'date-fns'
-import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon } from 'lucide-react'
+import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon, XIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
@@ -386,9 +386,9 @@ function PaginationSkeleton() {
   return <div aria-hidden="true" className="flex flex-wrap items-center justify-between gap-4 border-t px-5 py-3"><Skeleton className="h-4 w-24" /><div className="flex items-center gap-3"><Skeleton className="h-4 w-20" /><Skeleton className="h-4 w-20" /><Skeleton className="size-8 rounded-md" /><Skeleton className="size-8 rounded-md" /></div></div>
 }
 function LoadingContent() { return <div role="status" aria-label="Loading page content" className="flex flex-col gap-3"><Skeleton className="h-10 w-48" /><Skeleton className="h-32 w-full" /></div> }
-function Choice({ label, value, options, onChange, emptyLabel }: { label: string; value: string; options: Item[]; onChange: (value: string) => void; emptyLabel?: string }) {
+function Choice({ label, value, options, onChange, emptyLabel, hideLabel = false }: { label: string; value: string; options: Item[]; onChange: (value: string) => void; emptyLabel?: string; hideLabel?: boolean }) {
   const empty = emptyLabel ?? `No ${label.toLowerCase()} selected`
-  return <Field className="w-full sm:w-52"><FieldLabel htmlFor={`context-${label}`}>{label}</FieldLabel><Select value={value || null} onValueChange={(next) => onChange(next ?? '')} items={[{ value: null, label: empty }, ...options.map((option) => ({ value: option.id, label: option.name }))]}><SelectTrigger id={`context-${label}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>{empty}</SelectItem>{options.map((option) => <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
+  return <Field className={hideLabel ? 'min-w-0 flex-1 sm:w-48 sm:flex-none' : 'w-full sm:w-52'}><FieldLabel htmlFor={`context-${label}`} className={hideLabel ? 'sr-only' : undefined}>{label}</FieldLabel><Select value={value || null} onValueChange={(next) => onChange(next ?? '')} items={[{ value: null, label: empty }, ...options.map((option) => ({ value: option.id, label: option.name }))]}><SelectTrigger id={`context-${label}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup><SelectItem value={null}>{empty}</SelectItem>{options.map((option) => <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
 }
 function dateValue(value: string | null) { return value ? value.slice(0, 10) : '' }
 function readableDate(date: string | null) { return date ? format(parseISO(dateValue(date)), 'MMM d, yyyy') : 'Not set' }
@@ -674,21 +674,18 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
     {editable && scheduleStatus.isError && <Alert variant="destructive"><AlertTitle>Couldn’t load schedule status</AlertTitle><AlertDescription><p>{scheduleStatus.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void scheduleStatus.refetch()}>Try again</Button></AlertDescription></Alert>}
     {editable && scheduleStatus.isSuccess && !scheduleDivisions.some((item) => item.teamCount >= 2) && <Alert><AlertTitle>Register teams to schedule games</AlertTitle><AlertDescription><p>Add at least two teams to a division before scheduling a matchup.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/teams" />}>Manage teams</Button></AlertDescription></Alert>}
     <Tabs value={status} onValueChange={(value) => { if (typeof value === 'string') { setStatus(value); resetPage() } }}>
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <TabsList className="relative"><TabsIndicator /><TabsTrigger value="scheduled" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Scheduled</TabsTrigger><TabsTrigger value="completed" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Final results</TabsTrigger></TabsList>
-          {seasonHint ? <Tooltip>
+      {/* Season context and scheduling actions, then the view switch and filters. */}
+      <div className="flex flex-col gap-4 border-b pb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-2">
+            {seasonHint ? <Tooltip>
             <TooltipTrigger render={<span tabIndex={0} aria-label={`${season.status === 'draft' ? 'Draft' : 'Completed'} season. ${seasonHint}`} className="inline-flex rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}><SeasonStatusBadge status={season.status} includeSeason /></TooltipTrigger>
             <TooltipContent side="bottom" align="start">{seasonHint}</TooltipContent>
           </Tooltip> : <SeasonStatusBadge status={season.status} includeSeason />}
-          {timeZone && timeZone !== browserTimeZone() && <span className="text-xs text-muted-foreground">Times in {timeZone.replaceAll('_', ' ')}</span>}
-          {editable && season.status === 'draft' && <Button type="button" variant="ghost" size="sm" disabled={startSeason.isPending} onClick={() => { startSeason.reset(); setConfirmStart(true) }}><PlayIcon data-icon="inline-start" />Start season</Button>}
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <Choice label="Division" value={divisionFilter} options={divisions} emptyLabel="All divisions" onChange={(value) => { setDivisionFilter(value); setPage(1) }} />
-          <Popover open={datesOpen} onOpenChange={toggleDates}><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dateLabel}</PopoverTrigger><PopoverContent align="end" className="w-auto gap-0 p-0"><Calendar mode="range" selected={dateStart ? { from: dateStart, to: undefined } : dates} onSelect={(_value, day) => pickDate(day)} defaultMonth={dateStart ?? dates?.from ?? (seasonStart && isValid(seasonStart) ? seasonStart : undefined)} autoFocus /><div className="flex min-h-11 items-center justify-between gap-3 border-t px-3 py-1.5"><p className="text-xs text-muted-foreground">{dateStart ? 'Select an end date' : 'Select a start date'}</p>{(dates?.from || dateStart) && <Button type="button" variant="ghost" size="sm" onClick={() => { setDateStart(undefined); clearDates(); setDatesOpen(false) }}>Clear dates</Button>}</div></PopoverContent></Popover>
-          <Button type="button" variant="outline" disabled={!dates?.from} onClick={clearDates}>Reset</Button>
-          {editable && <>
+            {timeZone && timeZone !== browserTimeZone() && <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3Icon aria-hidden="true" className="size-3.5" />Times in {timeZone.replaceAll('_', ' ')}</span>}
+            {editable && season.status === 'draft' && <Button type="button" variant="ghost" size="sm" disabled={startSeason.isPending} onClick={() => { startSeason.reset(); setConfirmStart(true) }}><PlayIcon data-icon="inline-start" />Start season</Button>}
+          </div>
+          {editable && <div className="flex flex-wrap items-center gap-2">
             {(() => {
               const generate = <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.canGeneratePreliminary)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
               // A disabled control receives no hover events, so a focusable wrapper explains why generation is unavailable.
@@ -700,7 +697,15 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
             })()}
             {scheduleDivisions.some((item) => item.playoffs) && <Button variant="outline" onClick={() => setDialog({ kind: 'generator', mode: 'playoffs' })} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
             <Button onClick={openSchedule} disabled={!divisions.length}><PlusIcon data-icon="inline-start" />Schedule game</Button>
-          </>}
+          </div>}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList className="relative"><TabsIndicator /><TabsTrigger value="scheduled" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Scheduled</TabsTrigger><TabsTrigger value="completed" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Final results</TabsTrigger></TabsList>
+          <div role="group" aria-label="Filter games" className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Choice label="Division" hideLabel value={divisionFilter} options={divisions} emptyLabel="All divisions" onChange={(value) => { setDivisionFilter(value); setPage(1) }} />
+            <Popover open={datesOpen} onOpenChange={toggleDates}><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dateLabel}</PopoverTrigger><PopoverContent align="end" className="w-auto gap-0 p-0"><Calendar mode="range" selected={dateStart ? { from: dateStart, to: undefined } : dates} onSelect={(_value, day) => pickDate(day)} defaultMonth={dateStart ?? dates?.from ?? (seasonStart && isValid(seasonStart) ? seasonStart : undefined)} autoFocus /><div className="flex min-h-11 items-center justify-between gap-3 border-t px-3 py-1.5"><p className="text-xs text-muted-foreground">{dateStart ? 'Select an end date' : 'Select a start date'}</p>{(dates?.from || dateStart) && <Button type="button" variant="ghost" size="sm" onClick={() => { setDateStart(undefined); clearDates(); setDatesOpen(false) }}>Clear dates</Button>}</div></PopoverContent></Popover>
+            {(divisionFilter || dates?.from) && <Button type="button" variant="ghost" onClick={() => { setDivisionFilter(''); setPage(1); clearDates() }}><XIcon data-icon="inline-start" />Clear filters</Button>}
+          </div>
         </div>
       </div>
       <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none">{games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : showSkeleton ? <div className="flex flex-col gap-8"><GamesSkeleton />{paging && pageMeta ? <DataPagination meta={pageMeta} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /> : <PaginationSkeleton />}</div> : gameAgenda}</div></TabsContent>
@@ -1013,6 +1018,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>}
   </main>
 }
+
 
 
 
