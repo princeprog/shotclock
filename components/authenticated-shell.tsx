@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AppSidebarProvider } from "@/components/app-sidebar-provider"
 import { RestoreSession } from "@/components/session-actions"
+import { SessionFreshnessGuard } from "@/components/session-freshness-guard"
 import { SiteHeader } from "@/components/site-header"
 import { WorkspaceProvider } from "@/components/workspace-context"
 import { SidebarInset } from "@/components/ui/sidebar"
@@ -18,6 +19,7 @@ export async function AuthenticatedShell({ children, title = 'Dashboard' }: { ch
 
   return (
     <TooltipProvider>
+      <SessionFreshnessGuard />
       <AppSidebarProvider>
         <WorkspaceProvider>
           <AppSidebar user={session.user} variant="inset" />
