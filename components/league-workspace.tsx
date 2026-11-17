@@ -681,7 +681,7 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
             {seasonHint ? <Tooltip>
             <TooltipTrigger render={<span tabIndex={0} aria-label={`${season.status === 'draft' ? 'Draft' : 'Completed'} season. ${seasonHint}`} className="inline-flex rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}><SeasonStatusBadge status={season.status} includeSeason /></TooltipTrigger>
             <TooltipContent side="bottom" align="start">{seasonHint}</TooltipContent>
-          </Tooltip> : <SeasonStatusBadge status={season.status} includeSeason />}
+          </Tooltip> : season.status !== 'active' && <SeasonStatusBadge status={season.status} includeSeason />}
             {timeZone && timeZone !== browserTimeZone() && <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3Icon aria-hidden="true" className="size-3.5" />Times in {timeZone.replaceAll('_', ' ')}</span>}
             {editable && season.status === 'draft' && <Button type="button" variant="ghost" size="sm" disabled={startSeason.isPending} onClick={() => { startSeason.reset(); setConfirmStart(true) }}><PlayIcon data-icon="inline-start" />Start season</Button>}
           </div>
