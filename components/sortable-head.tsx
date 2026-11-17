@@ -29,10 +29,18 @@ export function useTableSort<T, K extends string>(rows: readonly T[], accessors:
 
 
 
-const reorderEase = 'cubic-bezier(0.16, 1, 0.3, 1)'
+// An even ease-in-out reads as one continuous glide; front-loaded curves make rows look like they jump.
+const reorderEase = 'cubic-bezier(0.4, 0, 0.2, 1)'
 
-// A table body that animates re-sorting: rows marked with data-key slide from their old position to the new one
-// (FLIP), and rows that were not there before fade in. Nothing animates on first render or with reduced motion.
+// Vertical offset a row is drawn at right now, including any reorder animation still running.
+function currentOffset(row: HTMLElement): number {
+  const transform = getComputedStyle(row).transform
+  return transform && transform !== 'none' ? new DOMMatrixReadOnly(transform).m42 : 0
+}
+
+// A table body that animates re-sorting: rows marked with data-key glide from where they are drawn to their new
+// position (FLIP), lightly staggered, and rows that were not there before fade in. A sort clicked mid-animation
+// continues from the rows' current positions. Nothing animates on first render or with reduced motion.
 // While busy (a server sort is loading) the current rows stay visible and dimmed.
 export function AnimatedTableBody({ className, busy = false, ...props }: ComponentProps<typeof TableBody> & { busy?: boolean }) {
   const body = useRef<HTMLTableSectionElement>(null)
@@ -43,16 +51,27 @@ export function AnimatedTableBody({ className, busy = false, ...props }: Compone
     const previous = positions.current
     const next = new Map<string, number>()
     const animate = !!previous && !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    let moving = 0
+    let entering = 0
     for (const row of element.querySelectorAll<HTMLTableRowElement>(':scope > tr[data-key]')) {
       const key = row.dataset.key!
       const top = row.offsetTop
       next.set(key, top)
       if (!animate) continue
       const before = previous.get(key)
-      if (before === undefined) row.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: reorderEase })
-      else if (Math.abs(before - top) > 1) row.animate([{ transform: `translateY(${before - top}px)` }, { transform: 'none' }], { duration: 420, easing: reorderEase })
+      const running = row.getAnimations()
+      const drift = running.length ? currentOffset(row) : 0
+      if (before === undefined) {
+        if (running.length) continue
+        row.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 360, easing: reorderEase, delay: Math.min(entering++ * 30, 180), fill: 'backwards' })
+        continue
+      }
+      const from = before + drift - top
+      if (Math.abs(from) < 0.5) continue
+      for (const animation of running) animation.cancel()
+      row.animate([{ transform: `translateY(${from}px)` }, { transform: 'translateY(0)' }], { duration: 480 + Math.min(Math.abs(from), 600) * 0.28, easing: reorderEase, delay: Math.min(moving++ * 14, 140), fill: 'backwards' })
     }
     positions.current = next
   })
-  return <TableBody ref={body} aria-busy={busy || undefined} className={cn('transition-opacity duration-200', busy && 'opacity-60', className)} {...props} />
+  return <TableBody ref={body} aria-busy={busy || undefined} className={cn('transition-opacity duration-300 ease-out', busy && 'opacity-60', className)} {...props} />
 }
