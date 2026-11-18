@@ -15,7 +15,7 @@ import { GameScoreDialog } from '@/components/game-score-dialog'
 import { GameScheduleHistory } from '@/components/game-schedule-history'
 import { VenuesWorkspace } from '@/components/venues-workspace'
 import { TimeZonePicker } from '@/components/time-zone-picker'
-import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/components/record-actions'
+import { DeleteRecordDialog, useArchiveAction, useGuardedArchive, type DeleteTarget } from '@/components/record-actions'
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
 import { DataPagination } from '@/components/data-pagination'
@@ -757,6 +757,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
   const [editing, setEditing] = useState('')
   const [websiteLeague, setWebsiteLeague] = useState<LeagueRow | null>(null)
   const archiveAction = useArchiveAction()
+  const guarded = useGuardedArchive()
   const showingArchived = view === 'archived'
   const archived = useLeagueQuery<LeagueRow[]>(`organizations/${organizationId}/leagues?archived=true`, !!organizationId && showingArchived)
   const rows = showingArchived ? archived.data ?? [] : leagues
@@ -780,11 +781,11 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground md:table-cell"><span className="break-words">{item.time_zone ? item.time_zone.replaceAll('_', ' ') : 'Not set'}</span></TableCell>
           <TableCell className="hidden py-3 lg:table-cell">{item.published_at && !showingArchived ? <Badge variant="seasonActive">Published</Badge> : <span className="text-muted-foreground">Hidden</span>}</TableCell>
-          <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+          <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending || guarded.pending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
             {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
               <DropdownMenuItem className="py-2" onClick={() => setEditing(item.id)}><PencilIcon />Edit league</DropdownMenuItem>
               <DropdownMenuItem className="py-2" onClick={() => setWebsiteLeague(item)}><GlobeIcon />Website settings</DropdownMenuItem>
-              <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/archive`, message: 'League archived.', undoPath: `leagues/${item.id}/restore` })}><ArchiveIcon />Archive league</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" disabled={guarded.pending} onClick={() => void guarded.archive({ kind: 'league', name: item.name, path: `leagues/${item.id}/archive`, undoPath: `leagues/${item.id}/restore`, message: 'League archived.', activeSeasonsPath: `leagues/${item.id}/seasons?status=active` })}><ArchiveIcon />Archive league</DropdownMenuItem>
             </>}
           </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>
@@ -792,6 +793,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
     </Table></CardContent></Card>}
     <LeagueWebsiteDialog league={websiteLeague} onClose={() => setWebsiteLeague(null)} />
     <EditLeagueDialog key={editingLeague?.id ?? 'none'} league={editingLeague} onClose={() => setEditing('')} />
+    {guarded.dialog}
   </section>
 }
 
@@ -1041,6 +1043,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>}
   </main>
 }
+
 
 
 

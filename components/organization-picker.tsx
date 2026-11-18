@@ -11,7 +11,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/c
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/components/record-actions'
+import { DeleteRecordDialog, useArchiveAction, useGuardedArchive, type DeleteTarget } from '@/components/record-actions'
 import { leagueRequest } from '@/lib/league-client'
 import { organizationReturnPath } from '@/lib/organization-navigation'
 import { saveOrganizationSelection } from '@/lib/organization-selection'
@@ -34,6 +34,7 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
   const [showArchived, setShowArchived] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
   const archiveAction = useArchiveAction()
+  const guarded = useGuardedArchive()
   const organizations = useQuery({
     queryKey: ['league', 'organizations'],
     queryFn: () => leagueRequest<Organization[]>('organizations', client),
@@ -106,9 +107,9 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
               <span className="flex min-w-0 flex-1 flex-col gap-1"><span className="truncate font-medium">{organization.name}</span><span className="text-xs font-normal text-muted-foreground">Owner</span></span>
               <ArrowRightIcon data-icon="inline-end" aria-hidden="true" />
             </Button>
-            <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${organization.name}`} disabled={renameOrganization.isPending || archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52"><DropdownMenuGroup>
+            <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${organization.name}`} disabled={renameOrganization.isPending || archiveAction.isPending || guarded.pending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52"><DropdownMenuGroup>
               <DropdownMenuItem className="py-2" onClick={() => { if (editing?.id === organization.id) { setEditing(null); renameOrganization.reset(); return }; setEditing(organization); setEditName(organization.name); setEditError(''); renameOrganization.reset(); setCreating(false) }}><PencilIcon />Rename</DropdownMenuItem>
-              <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `organizations/${organization.id}/archive`, message: 'Organization archived.', undoPath: `organizations/${organization.id}/restore` })}><ArchiveIcon />Archive</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" disabled={guarded.pending} onClick={() => void guarded.archive({ kind: 'organization', name: organization.name, path: `organizations/${organization.id}/archive`, undoPath: `organizations/${organization.id}/restore`, message: 'Organization archived.', activeSeasonsPath: `organizations/${organization.id}/seasons?status=active&pageSize=100` })}><ArchiveIcon />Archive</DropdownMenuItem>
             </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => setDeleteTarget({ path: `organizations/${organization.id}`, title: 'Delete organization?', description: `This removes ${organization.name} with its leagues, seasons, teams and players. Organizations with recorded results need to be archived instead.`, confirmName: organization.name, submitLabel: 'Delete organization', success: 'Organization deleted.' })}><Trash2Icon />Delete</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu>
           </div>
           {editing?.id === organization.id && <form onSubmit={submitRename} className="flex flex-col gap-4 px-5 pb-5">
@@ -137,6 +138,8 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
         </li>)}</ul></CardContent></Card>)}
       </section>
       <DeleteRecordDialog target={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      {guarded.dialog}
     </main>
   )
 }
+
