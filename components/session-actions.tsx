@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { RestoringSession } from '@/components/restoring-session'
 import { refreshSession } from '@/lib/client-session'
 import { publishSessionChange } from '@/lib/league-cache'
 import { useAppDispatch } from '@/lib/store-hooks'
@@ -26,7 +27,7 @@ export function RestoreSession() {
     }, () => { if (active) setError('The service is unavailable. Please try again.') })
     return () => { active = false }
   }, [queryClient, router])
-  return <main className="flex min-h-svh items-center justify-center p-6"><div role="status" className="flex flex-col items-center gap-4 text-center"><p>{error || 'Restoring your session…'}</p>{error && <Button onClick={() => window.location.reload()}>Try again</Button>}</div></main>
+  return <main className="flex min-h-svh items-center justify-center p-6">{error ? <div role="alert" className="flex flex-col items-center gap-4 text-center"><p>{error}</p><Button onClick={() => window.location.reload()}>Try again</Button></div> : <RestoringSession />}</main>
 }
 
 // On the login page: a session that can still be restored continues to organization selection; otherwise the form shows.
@@ -42,7 +43,7 @@ export function ResumeSession({ children }: { children: ReactNode }) {
     }, () => { if (active) setSignIn(true) })
     return () => { active = false }
   }, [queryClient, router])
-  return signIn ? children : <p role="status" className="py-12 text-center text-sm text-muted-foreground">Restoring your session…</p>
+  return signIn ? children : <RestoringSession size="inline" />
 }
 
 export function useSignOut() {
@@ -74,4 +75,5 @@ export function SignOut() {
   const { signOut, pending, error } = useSignOut()
   return <div className="flex items-center gap-3">{error && <span role="alert" className="text-sm text-destructive">{error}</span>}<Button variant="outline" onClick={signOut} disabled={pending}>{pending ? 'Signing out…' : 'Sign out'}</Button></div>
 }
+
 

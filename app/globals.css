@@ -131,3 +131,31 @@ html {
   scrollbar-gutter: stable;
 }
 }
+
+
+/* Restoring-session loader: the mark dribbles, its hand ticks round once per 2.4s, and the ring counts down in step.
+   It fades in after 200ms so instant restores never flash. Reduced motion keeps a still mark and a breathing ring. */
+@keyframes sc-appear { from { opacity: 0; transform: scale(0.96) } }
+@keyframes sc-dribble {
+  0%, 100% { transform: translateY(0) scale(1.05, 0.94); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1) }
+  14% { transform: translateY(-2%) scale(0.98, 1.03); animation-timing-function: cubic-bezier(0.2, 0.7, 0.4, 1) }
+  50% { transform: translateY(-16%) scale(1); animation-timing-function: cubic-bezier(0.6, 0, 0.8, 0.3) }
+  90% { transform: translateY(-1%) scale(0.99, 1.02) }
+}
+@keyframes sc-floor {
+  0%, 100% { transform: scaleX(1); opacity: 1 }
+  50% { transform: scaleX(0.6); opacity: 0.45 }
+}
+@keyframes sc-sweep { to { transform: rotate(360deg) } }
+@keyframes sc-countdown { from { stroke-dashoffset: 0 } to { stroke-dashoffset: 100 } }
+@keyframes sc-breathe { 50% { opacity: 0.35 } }
+.sc-appear { animation: sc-appear 360ms cubic-bezier(0.16, 1, 0.3, 1) 200ms both }
+.sc-dribble { transform-origin: 50% 100%; animation: sc-dribble 800ms infinite }
+.sc-floor { animation: sc-floor 800ms infinite cubic-bezier(0.45, 0, 0.55, 1) }
+.sc-sweep { transform-box: view-box; transform-origin: 32px 35px; animation: sc-sweep 2400ms steps(12) infinite }
+.sc-countdown { animation: sc-countdown 2400ms linear infinite }
+@media (prefers-reduced-motion: reduce) {
+  .sc-appear { animation-duration: 1ms }
+  .sc-dribble, .sc-floor, .sc-sweep { animation: none }
+  .sc-countdown { animation: sc-breathe 2400ms ease-in-out infinite }
+}
