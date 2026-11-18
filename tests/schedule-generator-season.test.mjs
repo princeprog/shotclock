@@ -49,14 +49,13 @@ function harness(mode = 'preliminary', result = response, diagnostics = {}) {
 test('season preview uses shared options and shows divisions, skipped reasons and grouped games', async () => {
   const h = harness(); h.setup()
   let tree = h.render()
-  tree.find((n) => n.type === 'label' && nodes(n).includes('Include playoffs')).props.children[0].props.onCheckedChange(true)
+  // The round robin no longer asks about playoffs; they are chosen on the playoff page.
+  assert.ok(!tree.some((n) => n.type === 'label' && nodes(n).includes('Include playoffs')))
   await h.preview(); tree = h.render()
   assert.equal(h.calls[0][0], 'seasons/s1/schedule/preview')
-  assert.equal(h.calls[0][3].playoffs, true)
+  assert.deepEqual(Object.keys(h.calls[0][3]).sort(), ['availability', 'format'])
   const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ').replace(/\s+/g, ' ')
   for (const value of ['Boys', 'Adults', 'Junior', 'Not enough teams', 'Check availability', '3', 'Round 1', 'Round 2']) assert.ok(text.includes(value), value)
-  const adults = tree.find((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-division-a')
-  assert.match(nodes(adults).filter((n) => typeof n === 'string').join(' '), /four teams/i)
   assert.ok(text.indexOf('Boys') < text.indexOf('B1'))
   assert.ok(text.indexOf('B1') < text.indexOf('B2'))
   assert.ok(text.indexOf('B2') < text.lastIndexOf('Adults'))
@@ -88,7 +87,8 @@ test('save keeps preview order, exact included divisions and edits, without disp
 test('playoffs uses season endpoint and input changes invalidate the preview', async () => {
   const h = harness('playoffs'); h.setup(); await h.preview()
   assert.equal(h.calls[0][0], 'seasons/s1/playoffs/preview')
-  assert.deepEqual(Object.keys(h.calls[0][3]), ['availability'])
+  assert.deepEqual(h.calls[0][3].thirdPlace, true)
+  assert.deepEqual(Object.keys(h.calls[0][3]), ['availability', 'thirdPlace'])
   let tree = h.render()
   tree.find((n) => n.type === 'Input' && n.props.id === 'schedule-duration').props.onChange({ target: { value: '90' } })
   tree = h.render()
@@ -101,7 +101,7 @@ test('playoff save uses the included divisions and the playoff season route', as
   h.render().find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
   await new Promise(setImmediate)
   assert.equal(h.calls[1][0], 'seasons/s1/playoffs')
-  assert.deepEqual(Object.keys(h.calls[1][3]).sort(), ['availability', 'divisionIds', 'games'])
+  assert.deepEqual(Object.keys(h.calls[1][3]).sort(), ['availability', 'divisionIds', 'games', 'thirdPlace'])
   assert.deepEqual(Array.from(h.calls[1][3].divisionIds), ['b', 'a'])
 })
 

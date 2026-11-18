@@ -59,7 +59,7 @@ type PlayingWindow = {
   endTime: string
 }
 type WindowDraft = PlayingWindow & { id: number }
-type ScheduleInput = { availability: Availability; format: 'single' | 'double'; playoffs: boolean; thirdPlace: boolean }
+type ScheduleInput = { availability: Availability; format: 'single' | 'double' }
 type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; playoffs?: boolean; playoffStage?: string | null; gameCount?: number; gamesPerTeam?: number }
 type Unplaced = Pick<ScheduleGame, 'divisionId' | 'divisionName' | 'homeTeamId' | 'awayTeamId' | 'homeName' | 'awayName' | 'round' | 'stage'> & { reason: string; reasonCode?: string }
 type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[]; unplaced?: Unplaced[] }
@@ -295,8 +295,8 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [duration, setDuration] = useState('60')
   const [rest, setRest] = useState('0')
   const [format, setFormat] = useState<'single' | 'double'>('single')
-  const [playoffs, setPlayoffs] = useState(false)
-  const [thirdPlace, setThirdPlace] = useState(false)
+  // Playoffs are decided when they are scheduled, so only the playoff page asks about a third-place game.
+  const [thirdPlace, setThirdPlace] = useState(true)
   const [pace, setPace] = useState<Pace>('weekly')
   const [maxPerDay, setMaxPerDay] = useState('1')
   const [changeover, setChangeover] = useState('0')
@@ -328,7 +328,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       const availability: Availability = { startDate, endDate, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest),
         pace, maxGamesPerTeamPerDay: Number(maxPerDay), changeoverMinutes: Number(changeover), blackoutDates: blackoutDates.filter((date) => date >= startDate && date <= endDate),
         teamUnavailability: [...unavailable].map(([teamId, dates]) => ({ teamId, dates: [...dates].sort() })) }
-      settingsKey = JSON.stringify(mode === 'preliminary' ? { availability, format, playoffs, thirdPlace: playoffs && thirdPlace } : { availability })
+      settingsKey = JSON.stringify(mode === 'preliminary' ? { availability, format } : { availability, thirdPlace })
     } catch { /* Wait until the time zone is valid. */ }
   }
   const estimate = useQuery({ queryKey: ['schedule-estimate', path, settingsKey], enabled: false, retry: false,
@@ -608,10 +608,12 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
             </Select>
             <FieldDescription>{format === 'single' ? 'Teams meet once.' : 'Teams meet twice, home and away.'}</FieldDescription>
           </Field>
-          <div className="flex flex-col gap-3 border-t pt-4">
-            <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-0.5" checked={playoffs} disabled={pending} onCheckedChange={(checked) => { setPlayoffs(checked); if (!checked) setThirdPlace(false); changed() }} /><span className="flex flex-col gap-0.5"><span className="font-medium">Include playoffs</span><span className="text-muted-foreground">Top four teams advance to semifinals.</span></span></label>
-            {playoffs && <label className="flex items-center gap-3 pl-7 text-sm"><Checkbox checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} />Include a third-place game</label>}
-          </div>
+          <p className="border-t pt-4 text-sm text-muted-foreground">Playoffs are scheduled separately once every round-robin game has a final score.</p>
+        </section>}
+        {mode === 'playoffs' && <section className={panel('flex flex-col gap-4')} aria-labelledby="schedule-bracket-heading">
+          {panelHeading('schedule-bracket-heading', 'Bracket')}
+          <p className="text-sm text-muted-foreground">The top four teams in each division play semifinals (1 vs 4, 2 vs 3). The winners meet in the championship.</p>
+          <label className="flex items-start gap-3 border-t pt-4 text-sm"><Checkbox className="mt-0.5" checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} /><span className="flex flex-col gap-0.5"><span className="font-medium">Include a third-place game</span><span className="text-muted-foreground">The semifinal losers play for third place.</span></span></label>
         </section>}
 
         <section className={panel('flex flex-col gap-4 border-t pt-6')} aria-labelledby="schedule-dates-heading">
@@ -745,9 +747,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               const divisionGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id)
               if (!divisionGames.length) return null
               const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
-              const note = mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount < 4 ? 'Round robin only (fewer than four teams)'
-                : mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.playoffs === false ? 'No playoffs'
-                  : mode === 'playoffs' ? (divisionGames.some(({ item }) => item.game.stage === 'semifinal') ? 'Semifinals through championship' : 'Championship round') : ''
+              const note = mode === 'playoffs' ? (divisionGames.some(({ item }) => item.game.stage === 'semifinal') ? 'Semifinals through championship' : 'Championship round') : ''
               return <section key={division.id} className="overflow-hidden rounded-xl border bg-card" aria-labelledby={'schedule-division-' + division.id}>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-5 py-3.5">
                   <h4 id={'schedule-division-' + division.id} className="font-semibold">{division.name}</h4>

@@ -158,7 +158,7 @@ test('opening manual scheduling defaults to the filter and a later filter change
 test('unavailable schedule generation explains each division in a tooltip, without a playoffs message', () => {
   const statuses = [
     { ...divisionStatuses[0], preliminaryReason: 'Needs another team', playoffs: true, playoffReason: 'Finish semifinals' },
-    { ...divisionStatuses[1], canGeneratePreliminary: false, preliminaryReason: 'Already scheduled', playoffStage: null, playoffReason: 'Finish preliminary games' },
+    { ...divisionStatuses[1], teamCount: 4, canGeneratePreliminary: false, preliminaryReason: 'Already scheduled', playoffStage: null, playoffReason: 'Finish preliminary games' },
   ]
   const tree = harness(statuses).render()
   assert.match(text(tree), /Needs another team/)
