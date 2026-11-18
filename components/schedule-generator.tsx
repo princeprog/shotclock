@@ -197,6 +197,8 @@ const unplacedReasons: Record<string, string> = {
   rest: 'Minimum rest leaves no open slot', limits: 'Pacing or team limits leave no open date', round_order: 'No open slot after the previous round',
   spread: 'Later dates are full', teams_busy: 'Teams are busy at every open slot', venues_busy: 'Courts are booked at every open slot', mixed: 'No slot fits every rule',
 }
+// Playoff sides that wait for a semifinal result have ids like "<semifinal>:winner".
+const waitingSide = (teamId: string) => teamId.includes(':') ? 'font-normal text-muted-foreground' : undefined
 const stageLabels: Record<ScheduleGame['stage'], string> = { preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }
 const paces: { value: Pace; label: string; description: string }[] = [
   { value: 'weekly', label: 'Weekly', description: 'Each team’s games are at least 7 days apart.' },
@@ -583,7 +585,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const unavailableTeams = teamRows.filter((row) => row.teamId && row.dates.length).length
   const optionsSummary = [timeZone, blackoutDates.length ? blackoutDates.length + ' blackout ' + (blackoutDates.length === 1 ? 'date' : 'dates') : '', unavailableTeams ? unavailableTeams + ' ' + (unavailableTeams === 1 ? 'team' : 'teams') + ' unavailable' : ''].filter(Boolean).join(' · ')
   const playingDays = weekdays.filter((_, index) => windows.some((window) => window.weekdays.includes(index)))
-  const summaryItems = [mode === 'playoffs' ? 'Playoff round' : format === 'single' ? 'Single round robin' : 'Double round robin', summaryDates, playingDays.length ? playingDays.join(', ') : 'No playing days', venueIds.length + ' ' + (venueIds.length === 1 ? 'court' : 'courts'), paces.find((item) => item.value === pace)?.label ?? '']
+  const summaryItems = [mode === 'playoffs' ? 'Playoff bracket' : format === 'single' ? 'Single round robin' : 'Double round robin', summaryDates, playingDays.length ? playingDays.join(', ') : 'No playing days', venueIds.length + ' ' + (venueIds.length === 1 ? 'court' : 'courts'), paces.find((item) => item.value === pace)?.label ?? '']
 
   return <>
     {presentation === 'dialog' && <DialogHeader className="border-b px-6 py-5 pr-14">
@@ -745,14 +747,14 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               const rounds = [...new Set(divisionGames.map(({ item }) => item.game.round))].sort((a, b) => a - b)
               const note = mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.teamCount < 4 ? 'Round robin only (fewer than four teams)'
                 : mode === 'preliminary' && 'playoffs' in draft.input && draft.input.playoffs && division.playoffs === false ? 'No playoffs'
-                  : mode === 'playoffs' && division.playoffStage ? stageLabels[division.playoffStage as ScheduleGame['stage']] ?? '' : ''
+                  : mode === 'playoffs' ? (divisionGames.some(({ item }) => item.game.stage === 'semifinal') ? 'Semifinals through championship' : 'Championship round') : ''
               return <section key={division.id} className="overflow-hidden rounded-xl border bg-card" aria-labelledby={'schedule-division-' + division.id}>
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b px-5 py-3.5">
                   <h4 id={'schedule-division-' + division.id} className="font-semibold">{division.name}</h4>
                   <p className="text-sm text-muted-foreground">{[note, plural(divisionGames.length, 'game')].filter(Boolean).join(' · ')}</p>
                 </div>
                 <div>{rounds.map((round) => <div key={round} className="border-t first:border-t-0">
-                  <h5 className="border-b bg-muted/40 px-5 py-1.5 text-xs font-medium text-muted-foreground">Round {round}</h5>
+                  <h5 className="border-b bg-muted/40 px-5 py-1.5 text-xs font-medium text-muted-foreground">{mode === 'playoffs' ? (divisionGames.some(({ item }) => item.game.round === round && item.game.stage === 'semifinal') ? 'Semifinals' : divisionGames.some(({ item }) => item.game.round === round && item.game.stage === 'third_place') ? 'Championship and third place' : 'Championship') : 'Round ' + round}</h5>
                   <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} >{divisionGames.filter(({ item }) => item.game.round === round).sort((a, b) => a.item.localTime.localeCompare(b.item.localTime)).map(({ item, index }) => {
                   const gameIssues = issues.filter((issue) => issue.index === index)
                   const invalid = invalidGameIndexes.includes(index)
@@ -760,7 +762,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
                     <AccordionTrigger id={`schedule-game-trigger-${index}`} className="items-center gap-3 px-5 py-3 hover:bg-muted/40 hover:no-underline">
                       <span className="grid min-w-0 flex-1 gap-x-4 gap-y-0.5 text-left sm:grid-cols-[10.5rem_minmax(0,1fr)_7rem] sm:items-center">
                         <span className="text-sm font-normal tabular-nums text-muted-foreground">{formatGameSlot(item.localTime)}</span>
-                        <span className="flex min-w-0 items-center gap-2 font-medium"><span className="truncate">{item.game.homeName} vs {item.game.awayName}</span>{item.game.stage !== 'preliminary' && <Badge variant="secondary">{stageLabels[item.game.stage]}</Badge>}{item.kept && <Badge variant="outline">Kept</Badge>}
+                        <span className="flex min-w-0 items-center gap-2 font-medium">{mode === 'playoffs' ? <span className="min-w-0 break-words"><span className={waitingSide(item.game.homeTeamId)}>{item.game.homeName}</span> <span className="font-normal text-muted-foreground">vs</span> <span className={waitingSide(item.game.awayTeamId)}>{item.game.awayName}</span></span> : <span className="truncate">{item.game.homeName} vs {item.game.awayName}</span>}{mode !== 'playoffs' && item.game.stage !== 'preliminary' && <Badge variant="secondary">{stageLabels[item.game.stage]}</Badge>}{item.kept && <Badge variant="outline">Kept</Badge>}
                           {(invalid || gameIssues.length > 0) && <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-destructive"><CircleAlertIcon className="size-3.5" />{invalid ? 'Check time' : issueLabels[gameIssues[0].type as IssueType] ?? 'Conflict'}{gameIssues.length > 1 && <span className="tabular-nums">+{gameIssues.length - 1}</span>}</span>}</span>
                         <span className="truncate text-sm font-normal text-muted-foreground">{venueName(item.venueId)}</span>
                       </span>
