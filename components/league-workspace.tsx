@@ -8,6 +8,7 @@ import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Cl
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
+import { EditLeagueDialog } from '@/components/edit-league-dialog'
 import { LeagueWebsiteDialog } from '@/components/league-website-dialog'
 import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
 import { GameScoreDialog } from '@/components/game-score-dialog'
@@ -767,6 +768,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
   if (!showingArchived && !leagues.length) return <Card className="mx-auto w-full max-w-3xl"><CardContent>
     <Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No leagues yet</h3></EmptyTitle><EmptyDescription>Create your first league to start organizing seasons, teams, and games.</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2"><CreateLeagueDialog organizationId={organizationId} first /><Button variant="ghost" onClick={() => setView('archived')}><ArchiveIcon data-icon="inline-start" />View archived</Button></div></EmptyContent></Empty>
   </CardContent></Card>
+  const editingLeague = showingArchived ? null : rows.find((item) => item.id === editing) ?? null
   return <section aria-label="Leagues" className="flex flex-col gap-4">
     {toolbar}
     {showingArchived && archived.isLoading ? <LoadingContent /> : showingArchived && archived.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load archived leagues</AlertTitle><AlertDescription><p>{archived.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void archived.refetch()}>Try again</Button></AlertDescription></Alert> : !rows.length ? <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><ArchiveIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No archived leagues</h3></EmptyTitle><EmptyDescription>Archived leagues appear here and can be restored.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
@@ -780,16 +782,16 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
           <TableCell className="hidden py-3 lg:table-cell">{item.published_at && !showingArchived ? <Badge variant="seasonActive">Published</Badge> : <span className="text-muted-foreground">Hidden</span>}</TableCell>
           <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
             {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
-              <DropdownMenuItem className="py-2" onClick={() => setEditing(editing === item.id ? '' : item.id)}><PencilIcon />{editing === item.id ? 'Close editor' : 'Edit league'}</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => setEditing(item.id)}><PencilIcon />Edit league</DropdownMenuItem>
               <DropdownMenuItem className="py-2" onClick={() => setWebsiteLeague(item)}><GlobeIcon />Website settings</DropdownMenuItem>
               <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/archive`, message: 'League archived.', undoPath: `leagues/${item.id}/restore` })}><ArchiveIcon />Archive league</DropdownMenuItem>
             </>}
           </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>
-        {!showingArchived && editing === item.id && <TableRow><TableCell colSpan={5} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[{ name: 'name', label: 'Name', required: true, value: item.name }, { name: 'location', label: 'Location', value: item.location }, { name: 'timeZone', label: 'Time zone', type: 'timezone', value: item.time_zone ?? browserTimeZone(), description: 'Game times show in this zone.' }]} transform={(v) => ({ name: v.name, location: optional(v.location), timeZone: v.timeZone || null })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
       </Fragment>)}</AnimatedTableBody>
     </Table></CardContent></Card>}
     <LeagueWebsiteDialog league={websiteLeague} onClose={() => setWebsiteLeague(null)} />
+    <EditLeagueDialog key={editingLeague?.id ?? 'none'} league={editingLeague} onClose={() => setEditing('')} />
   </section>
 }
 
@@ -1039,6 +1041,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>}
   </main>
 }
+
 
 
 
