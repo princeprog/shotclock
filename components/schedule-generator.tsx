@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { format as formatDate, isValid, parseISO } from 'date-fns'
+import { differenceInCalendarDays, format as formatDate, isValid, parseISO } from 'date-fns'
 import { CalendarDaysIcon, CalendarSearchIcon, ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, CircleHelpIcon, ListIcon, LoaderCircleIcon, PlusIcon, RefreshCwIcon, RotateCcwIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
+import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -52,7 +52,7 @@ type Availability = {
 }
 type Pace = 'weekly' | 'spread' | 'compact'
 type TeamUnavailabilityDraft = { id: number; teamId: string; dates: string[] }
-type StatusDivision = { id: string; name: string; teams?: { id: string; name: string }[] }
+type StatusDivision = { id: string; name: string; playoffStage: 'semifinal' | 'final' | null; playoffReason?: string | null; teams?: { id: string; name: string }[] }
 type PlayingWindow = {
   weekdays: number[]
   startTime: string
@@ -124,11 +124,11 @@ function formatGameSlot(value: string): string {
 type CapacityFix = { text: string; action?: { kind: 'spread'; label: string } | { kind: 'courts'; label: string } | { kind: 'daily'; value: number; label: string } }
 type CapacityBlocker = { title: string; detail: string; short?: string; divisions?: string[]; fixes: CapacityFix[] }
 const plural = (count: number, word: string) => count.toLocaleString('en-US') + ' ' + word + (count === 1 ? '' : 's')
-function capacityBlockers(estimate: Estimate, context: { startDate: string; endDate: string; selectedCourts: number; totalCourts: number; maxPerDay: number }): CapacityBlocker[] {
+function capacityBlockers(estimate: Estimate, context: { mode: Props['mode']; startDate: string; endDate: string; selectedCourts: number; totalCourts: number; maxPerDay: number }): CapacityBlocker[] {
   const blockers: CapacityBlocker[] = []
   const ready = estimate.divisions.filter((division) => division.reason === undefined)
   if (estimate.required === 0) {
-    blockers.push({ title: 'No divisions are ready to schedule', detail: 'Each division needs at least two teams and no existing preliminary games.',
+    blockers.push({ title: 'No divisions are ready to schedule', detail: context.mode === 'playoffs' ? 'Check the playoff status for each division below.' : 'Each division needs at least two teams and no existing preliminary games.',
       fixes: estimate.divisions.filter((division) => division.reason).map((division) => ({ text: division.name + ': ' + division.reason })) })
     return blockers
   }
@@ -214,6 +214,21 @@ const minutes = Array.from({ length: 60 }, (_, index) => String(index).padStart(
 const subscribe = () => () => {}
 const serverTimeZone = () => ''
 
+function dateRangeError(startDate: string, endDate: string): string | undefined {
+  const start = parseISO(startDate)
+  const end = parseISO(endDate)
+  if (!isValid(start) || !isValid(end)) return 'Choose a start date and an end date.'
+  if (end < start) return 'The end date must be on or after the start date.'
+  if (differenceInCalendarDays(end, start) >= 366) return 'Choose a date range of 366 days or fewer.'
+}
+
+function readPlayoffDates(key: string): string {
+  try {
+    const value = window.localStorage.getItem(key) ?? ''
+    return /^(?:\d{4}-\d{2}-\d{2})?\/(?:\d{4}-\d{2}-\d{2})?$/.test(value) ? value : ''
+  } catch { return '' }
+}
+
 function useDebouncedValue(value: string, delay = 500) {
   const [settled, setSettled] = useState('')
   useEffect(() => {
@@ -223,14 +238,14 @@ function useDebouncedValue(value: string, delay = 500) {
   return settled
 }
 
-function ScheduleDate({ id, label, value, disabled, onChange }: { id: string; label: string; value: string; disabled: boolean; onChange: (value: string) => void }) {
+function ScheduleDate({ id, label, value, disabled, errorId, onChange }: { id: string; label: string; value: string; disabled: boolean; errorId?: string; onChange: (value: string) => void }) {
   const [open, setOpen] = useState(false)
   const parsed = value ? parseISO(value) : undefined
   const selected = parsed && isValid(parsed) ? parsed : undefined
   return <Field>
     <FieldLabel htmlFor={id} required>{label}</FieldLabel>
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<Button id={id} type="button" variant="outline" disabled={disabled} aria-required="true" aria-label={`${label}: ${selected ? formatDate(selected, 'PPP') : 'Choose a date'}`} className="w-full justify-start font-normal" />}>
+      <PopoverTrigger render={<Button id={id} type="button" variant="outline" disabled={disabled} aria-required="true" aria-invalid={errorId ? true : undefined} aria-describedby={errorId} aria-label={`${label}: ${selected ? formatDate(selected, 'PPP') : 'Choose a date'}`} className="w-full justify-start font-normal" />}>
         <CalendarDaysIcon data-icon="inline-start" />{selected ? formatDate(selected, 'MMM d, yyyy') : 'Choose a date'}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto p-0">
@@ -287,8 +302,12 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const client = useQueryClient()
   const defaultZone = useSyncExternalStore(subscribe, browserTimeZone, serverTimeZone)
   const timeZone = leagueTimeZone || defaultZone
-  const [startDate, setStartDate] = useState(seasonStart?.slice(0, 10) ?? '')
-  const [endDate, setEndDate] = useState(seasonEnd?.slice(0, 10) ?? '')
+  const playoffDatesKey = `shotclock:playoff-dates:${seasonId}`
+  const savedPlayoffDates = useSyncExternalStore(subscribe, () => mode === 'playoffs' ? readPlayoffDates(playoffDatesKey) : '', () => '')
+  const [editedDates, setEditedDates] = useState<{ startDate: string; endDate: string } | null>(null)
+  const [savedStart, savedEnd] = savedPlayoffDates ? savedPlayoffDates.split('/') : []
+  const startDate = editedDates?.startDate ?? savedStart ?? seasonStart?.slice(0, 10) ?? ''
+  const endDate = editedDates?.endDate ?? savedEnd ?? seasonEnd?.slice(0, 10) ?? ''
   const nextWindowId = useRef(1)
   const [windows, setWindows] = useState<WindowDraft[]>([{ id: 0, weekdays: [], startTime: '09:00', endTime: '17:00' }])
   const [venueIds, setVenueIds] = useState<string[]>([])
@@ -316,10 +335,14 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
   const status = useQuery({ queryKey: ['league', `seasons/${seasonId}/schedule/status`], retry: false,
     queryFn: () => leagueRequest<{ divisions: StatusDivision[] }>(`seasons/${seasonId}/schedule/status`, client) })
-  const teamOptions = (status.data?.divisions ?? []).flatMap((division) => (division.teams ?? []).map((team) => ({ value: team.id, label: `${division.name} · ${team.name}` })))
+  const statusDivisions = status.data?.divisions ?? []
+  const playoffPreviewBlocked = mode === 'playoffs' && (status.isError || !statusDivisions.some((division) => division.playoffStage))
+  const teamOptions = statusDivisions.flatMap((division) => (division.teams ?? []).map((team) => ({ value: team.id, label: `${division.name} · ${team.name}` })))
+  const dateError = dateRangeError(startDate, endDate)
+  const showDateError = !!(startDate && endDate && dateError)
   const limitsValid = isWhole(maxPerDay, 1, 10) && isWhole(changeover, 0, 240)
   let settingsKey = ''
-  if (startDate && endDate && startDate <= endDate && !validateWindows(windows) && venueIds.length && duration && rest && Number.isInteger(Number(duration)) && Number(duration) > 0 && Number(duration) <= 1440 && Number.isInteger(Number(rest)) && Number(rest) >= 0 && Number(rest) <= 10080 && limitsValid && timeZone) {
+  if (!dateError && !validateWindows(windows) && venueIds.length && duration && rest && Number.isInteger(Number(duration)) && Number(duration) > 0 && Number(duration) <= 1440 && Number.isInteger(Number(rest)) && Number(rest) >= 0 && Number(rest) <= 10080 && limitsValid && timeZone) {
     try {
       new Intl.DateTimeFormat('en', { timeZone }).format()
       // Only dates inside the range matter; one entry per team, as the API expects.
@@ -353,7 +376,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const calendar = useQuery({ queryKey: ['schedule-calendar', seasonId, calendarKey], enabled: !!calendarKey, retry: false,
     queryFn: () => leagueRequest<{ games: CalendarBooking[] }>(`seasons/${seasonId}/schedule/calendar`, client, 'POST', JSON.parse(calendarKey)) })
   const estimateReady = !!settingsKey && !estimate.isFetching && !!estimate.data && !estimate.isError
-  const blockerContext = { startDate, endDate, selectedCourts: venueIds.length, totalCourts: venues.length, maxPerDay: Number(maxPerDay) }
+  const blockerContext = { mode, startDate, endDate, selectedCourts: venueIds.length, totalCourts: venues.length, maxPerDay: Number(maxPerDay) }
   const blockers = estimateReady && estimate.data ? capacityBlockers(estimate.data, blockerContext) : []
   const validationReady = !!validationKey && settledValidation === validationKey && !validation.isFetching && !!validation.data && !validation.isError
 
@@ -426,11 +449,20 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
     save.reset()
   }
 
+  function changeDates(startDate: string, endDate: string) {
+    setEditedDates({ startDate, endDate })
+    if (mode === 'playoffs') {
+      try { window.localStorage.setItem(playoffDatesKey, `${startDate}/${endDate}`) } catch { /* Keep the in-memory selection when storage is unavailable. */ }
+    }
+    changed()
+  }
+
   async function requestPreview(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (playoffPreviewBlocked) return
     setError('')
     setDraft(null)
-    if (!startDate || !endDate || startDate > endDate) { setError('Choose a valid date range.'); return }
+    if (dateError) { if (!showDateError) setError(dateError); return }
     const windowError = validateWindows(windows)
     if (windowError) { setError(windowError); return }
     if (!venueIds.length) { setError('Choose at least one venue.'); return }
@@ -444,6 +476,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
   // The capacity dialog stays open only when something blocks the preview; otherwise the preview starts right away.
   async function checkCapacity() {
+    if (playoffPreviewBlocked) return
     setShowCapacity(true)
     const result = await estimate.refetch()
     if (result.error || !result.data || capacityBlockers(result.data, blockerContext).length) return
@@ -576,8 +609,9 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const summaryDates = [startDate, endDate].every((date) => date && isValid(parseISO(date)))
     ? `${formatDate(parseISO(startDate), 'MMM d, yyyy')} – ${formatDate(parseISO(endDate), 'MMM d, yyyy')}` : 'Dates not set'
   const dateControls = <div className="grid gap-4 sm:grid-cols-2">
-    <ScheduleDate id="schedule-start-date" label="Start date" value={startDate} disabled={pending} onChange={(value) => { setStartDate(value); changed() }} />
-    <ScheduleDate id="schedule-end-date" label="End date" value={endDate} disabled={pending} onChange={(value) => { setEndDate(value); changed() }} />
+    <ScheduleDate id="schedule-start-date" label="Start date" value={startDate} disabled={pending} onChange={(value) => changeDates(value, endDate)} />
+    <ScheduleDate id="schedule-end-date" label="End date" value={endDate} disabled={pending} errorId={showDateError ? 'schedule-date-error' : undefined} onChange={(value) => changeDates(startDate, value)} />
+    {showDateError && <FieldError id="schedule-date-error" className="sm:col-span-2">{dateError}</FieldError>}
   </div>
   const panel = (fallback: string) => presentation === 'page' ? 'flex flex-col gap-5 rounded-xl border bg-card p-5' : fallback
   const panelHeading = (id: string, title: string, meta?: ReactNode) => <div className="flex min-h-7 items-center justify-between gap-3"><h3 id={id} className="text-base font-semibold">{title}</h3>{meta}</div>
@@ -613,12 +647,21 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         {mode === 'playoffs' && <section className={panel('flex flex-col gap-4')} aria-labelledby="schedule-bracket-heading">
           {panelHeading('schedule-bracket-heading', 'Bracket')}
           <p className="text-sm text-muted-foreground">The top four teams in each division play semifinals (1 vs 4, 2 vs 3). The winners meet in the championship.</p>
+          {status.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t check playoff readiness</AlertTitle><AlertDescription><Button type="button" variant="link" size="sm" className="px-0" onClick={() => void status.refetch()}>Try again</Button></AlertDescription></Alert>
+            : !status.data ? <p role="status" className="text-sm text-muted-foreground">Checking playoff readiness…</p>
+              : <div className="flex flex-col gap-2 border-t pt-4 text-sm">
+                <p className="font-medium">{playoffPreviewBlocked ? 'No divisions ready to preview' : 'Division readiness'}</p>
+                {statusDivisions.length ? <ul aria-label="Playoff readiness by division" className="space-y-1 text-muted-foreground">
+                  {statusDivisions.map((division) => <li key={division.id}><span className="font-medium text-foreground">{division.name}</span>{' · '}{division.playoffStage ? 'Ready to preview' : division.playoffReason ?? 'Unavailable'}</li>)}
+                </ul> : <p className="text-muted-foreground">Add a division and generate its round robin to get started.</p>}
+              </div>}
           <label className="flex items-start gap-3 border-t pt-4 text-sm"><Checkbox className="mt-0.5" checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} /><span className="flex flex-col gap-0.5"><span className="font-medium">Include a third-place game</span><span className="text-muted-foreground">The semifinal losers play for third place.</span></span></label>
         </section>}
 
         <section className={panel('flex flex-col gap-4 border-t pt-6')} aria-labelledby="schedule-dates-heading">
           {panelHeading('schedule-dates-heading', 'Availability')}
           {dateControls}
+          {mode === 'playoffs' && <p className="text-sm text-muted-foreground">Playoff dates are remembered for this season in this browser.</p>}
           {windows.map((window, position) => <div key={window.id} className="flex flex-col gap-3 border-t pt-4">
             <div className="flex min-h-7 items-center justify-between gap-3"><p className="text-sm font-medium">Playing window {position + 1} <span className="font-normal text-muted-foreground">· Weekly</span></p>{windows.length > 1 && <Button type="button" variant="ghost" size="icon-sm" disabled={pending} aria-label={'Remove playing window ' + (position + 1)} onClick={() => { setWindows((current) => current.filter((item) => item.id !== window.id)); changed() }}><Trash2Icon /></Button>}</div>
             <FieldSet className="gap-2"><FieldLegend variant="label" className="mb-0" required>Playing days</FieldLegend>
@@ -805,7 +848,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         </p>}
 
         <Button type="button" variant="outline" disabled={pending} onClick={onClose}>Cancel</Button>
-        {reviewing ? <Button type="button" variant="outline" disabled={pending} onClick={() => { if (confirmDiscardSchedulePreview()) { setDraft(null); setShowCapacity(false); preview.reset() } }}>Edit settings</Button> : <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending}>{estimate.isFetching ? 'Checking capacity…' : preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>}
+        {reviewing ? <Button type="button" variant="outline" disabled={pending} onClick={() => { if (confirmDiscardSchedulePreview()) { setDraft(null); setShowCapacity(false); preview.reset() } }}>Edit settings</Button> : <Button type="submit" variant={hasPreview ? 'outline' : 'default'} disabled={pending || playoffPreviewBlocked}>{estimate.isFetching ? 'Checking capacity…' : preview.isPending ? 'Generating preview…' : hasPreview ? 'Update preview' : 'Preview schedule'}</Button>}
         {draft && draft.seasonId === seasonId && draft.mode === mode && <Button type="button" disabled={pending || !draft.games.length || !!draft.unplaced.length || !validationReady || !!validation.data?.issues.length} onClick={saveSchedule}>{save.isPending ? 'Saving…' : 'Save schedule'}</Button>}
       </DialogFooter>
     </form>

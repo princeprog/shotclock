@@ -719,7 +719,7 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
                 <TooltipContent side="bottom" align="start" className="block max-w-sm px-3 py-2.5 text-left leading-relaxed">{generationBlockers(scheduleDivisions.map((item) => ({ name: item.name, reason: item.preliminaryReason || 'Not eligible for schedule generation.' })))}</TooltipContent>
               </Tooltip>
             })()}
-            {scheduleDivisions.some((item) => item.hasSchedule && item.teamCount >= 4) && <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/playoffs" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
+            {scheduleDivisions.some((item) => item.hasSchedule && item.teamCount >= 4) && <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/playoffs" />}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
             <Button onClick={openSchedule} disabled={!divisions.length}><PlusIcon data-icon="inline-start" />Schedule game</Button>
           </div>}
         </div>
