@@ -22,7 +22,7 @@ import { leagueRequest } from '@/lib/league-client'
 import { browserTimeZone, formatInZone, resolveZonedTime, zonedDate } from '@/lib/league-time'
 import { confirmDiscardSchedulePreview } from '@/lib/schedule-navigation-guard'
 import { SchedulePreviewCalendar } from '@/components/schedule-preview-calendar'
-import { PlayoffBracket, type BracketGame, type BracketSide } from '@/components/playoff-bracket'
+import { PlayoffBracketBoard, type BracketGame, type BracketSide } from '@/components/playoff-bracket'
 
 type ScheduleGame = {
   divisionId: string
@@ -820,16 +820,13 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
               initialDate={reviewDates[0] ?? draft.input.availability.startDate} rangeStart={draft.input.availability.startDate} rangeEnd={draft.input.playoffDates?.endDate ?? draft.input.availability.endDate} timeZone={draft.input.availability.timeZone}
               onSelect={focusGame} onMove={moveToDay} />
           </div>
-          {hasBracket && <div hidden={activeReview !== 'bracket'} className="flex flex-col gap-4">
-            {includedDivisions.filter((division) => activeDivision === 'all' || division.id === activeDivision).map((division) => {
-              const bracketGames = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id && item.game.stage !== 'preliminary')
-              if (!bracketGames.length) return null
-              return <section key={division.id} aria-labelledby={'schedule-bracket-' + division.id} className="flex flex-col gap-4 rounded-xl border bg-card p-5">
-                <h4 id={'schedule-bracket-' + division.id} className="font-semibold">{division.name}</h4>
-                <PlayoffBracket label={division.name + ' playoff bracket'} games={bracketGames.map(({ item, index }) => ({ key: String(index), stage: item.game.stage as BracketGame['stage'],
-                  home: draftSide(item.game.homeTeamId, item.game.homeName), away: draftSide(item.game.awayTeamId, item.game.awayName), when: formatGameSlot(item.localTime), venue: venueName(item.venueId) }))} />
-              </section>
-            })}
+          {hasBracket && <div hidden={activeReview !== 'bracket'}>
+            <PlayoffBracketBoard key={activeDivision} initialDivisionId={activeDivision === 'all' ? undefined : activeDivision} divisions={includedDivisions.flatMap((division) => {
+              const games = draft.games.map((item, index) => ({ item, index })).filter(({ item }) => item.game.divisionId === division.id && item.game.stage !== 'preliminary')
+                .map(({ item, index }): BracketGame => ({ key: String(index), stage: item.game.stage as BracketGame['stage'], when: formatGameSlot(item.localTime), venue: venueName(item.venueId),
+                  home: draftSide(item.game.homeTeamId, item.game.homeName), away: draftSide(item.game.awayTeamId, item.game.awayName) }))
+              return games.length && (activeDivision === 'all' || division.id === activeDivision) ? [{ id: division.id, name: division.name, games }] : []
+            })} />
           </div>}
           <div hidden={activeReview !== 'list'} className="flex flex-col gap-4">
             {draft.divisions.filter((division) => division.reason === undefined && (activeDivision === 'all' || division.id === activeDivision)).map((division) => {

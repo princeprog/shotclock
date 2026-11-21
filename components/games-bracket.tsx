@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { MoreHorizontalIcon, TrophyIcon } from 'lucide-react'
-import { PlayoffBracket, type BracketGame } from '@/components/playoff-bracket'
+import { PlayoffBracketBoard, type BracketGame } from '@/components/playoff-bracket'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -70,11 +70,7 @@ export function GamesBracket<T extends BracketRow>({ seasonId, divisions, divisi
   }
   // Semifinal 1 is seeds 1 and 4; brackets saved before seeds were recorded keep their time order.
   const order = (game: T) => [game.stage === 'semifinal' ? game.home_seed ?? 9 : 0, game.scheduled_at ?? ''].join(':')
-  return <div className="flex flex-col gap-4">
-    {brackets.map(({ division, games }) => <section key={division.id} aria-labelledby={'bracket-' + division.id} className="flex flex-col gap-4 rounded-xl border bg-card p-5">
-      <h3 id={'bracket-' + division.id} className="font-semibold">{division.name}</h3>
-      <PlayoffBracket label={division.name + ' playoff bracket'} games={[...games].sort((a, b) => order(a).localeCompare(order(b))).map(toBracket)} />
-    </section>)}
-  </div>
+  return <PlayoffBracketBoard key={divisionId} initialDivisionId={divisionId || undefined}
+    divisions={brackets.map(({ division, games }) => ({ id: division.id, name: division.name, games: [...games].sort((a, b) => order(a).localeCompare(order(b))).map(toBracket) }))} />
 }
 

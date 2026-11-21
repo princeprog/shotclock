@@ -30,7 +30,7 @@ function harness(result = response, diagnostics = {}) {
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : args[0].endsWith('/suggest') ? (diagnostics.suggestions ?? { suggestions: [] }) : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
-    if (name === '@/components/playoff-bracket') return { PlayoffBracket: 'PlayoffBracket' }
+    if (name === '@/components/playoff-bracket') return { PlayoffBracketBoard: 'PlayoffBracketBoard' }
     if (name === '@/lib/schedule-navigation-guard') return { confirmDiscardSchedulePreview: () => true }
     if (name === '@/lib/game-time') return { joinGameTime: () => '', splitGameTime: () => ({}) }
     if (name === '@/lib/league-time') return require('../lib/league-time.ts')
@@ -167,9 +167,11 @@ test('the review shows each playoff bracket with seeds and saves it with the rou
   assert.match(textOf(tree), /Championship/)
   tree.find((n) => n.type === 'ToggleGroup' && n.props['aria-label'] === 'Review view').props.onValueChange(['bracket'])
   tree = h.render()
-  const bracket = tree.find((n) => n.type === 'PlayoffBracket')
-  assert.deepEqual(bracket.props.games.map((item) => [item.stage, item.home.seed, item.away.seed, item.home.waiting]), [['semifinal', 1, 4, true], ['semifinal', 2, 3, true], ['final', null, null, true]])
-  assert.equal(bracket.props.games[0].venue, 'Court')
+  const board = tree.find((n) => n.type === 'PlayoffBracketBoard')
+  assert.deepEqual(board.props.divisions.map((division) => division.name), ['Boys'])
+  const bracket = board.props.divisions[0]
+  assert.deepEqual(bracket.games.map((item) => [item.stage, item.home.seed, item.away.seed, item.home.waiting]), [['semifinal', 1, 4, true], ['semifinal', 2, 3, true], ['final', null, null, true]])
+  assert.equal(bracket.games[0].venue, 'Court')
   tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
   await new Promise(setImmediate)
   const [path, , , body] = h.calls.at(-1)
