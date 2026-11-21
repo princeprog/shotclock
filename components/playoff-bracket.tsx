@@ -46,14 +46,14 @@ export function PlayoffBracket({ games, label }: { games: BracketGame[]; label: 
   const championship = games.find((game) => game.stage === 'final')
   const thirdPlace = games.find((game) => game.stage === 'third_place')
   const champion = championship && winnerOf(championship)
-  return <div role="group" aria-label={label} className="grid grid-cols-1 gap-y-4 md:grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)] md:gap-y-6">
+  return <div role="group" aria-label={label} className="grid w-full grid-cols-1 gap-y-4 md:max-w-3xl md:grid-cols-[minmax(0,1fr)_2.5rem_minmax(0,1fr)] md:gap-y-6">
     {semifinals.map((game, index) => <div key={game.key} className={index === 0 ? 'md:col-start-1 md:row-start-1' : 'md:col-start-1 md:row-start-2'}>
       <MatchCard game={game} label={`Semifinal ${index + 1}`} />
     </div>)}
     {semifinals.length === 2 && championship && <>
-      <div aria-hidden="true" className="relative hidden md:col-start-2 md:row-start-1 md:block"><div className="absolute top-1/2 right-1/2 -bottom-3 left-0 rounded-tr-md border-t border-r" /></div>
-      <div aria-hidden="true" className="relative hidden md:col-start-2 md:row-start-2 md:block"><div className="absolute -top-3 right-1/2 bottom-1/2 left-0 rounded-br-md border-r border-b" /></div>
-      <div aria-hidden="true" className="relative hidden md:col-start-2 md:row-span-2 md:row-start-1 md:block"><div className="absolute top-1/2 right-0 left-1/2 border-t" /></div>
+      <div aria-hidden="true" className="relative hidden md:col-start-2 md:row-start-1 md:block"><div className="absolute top-1/2 right-1/2 -bottom-3 left-0 rounded-tr-md border-t border-r border-muted-foreground/60" /></div>
+      <div aria-hidden="true" className="relative hidden md:col-start-2 md:row-start-2 md:block"><div className="absolute -top-3 right-1/2 bottom-1/2 left-0 rounded-br-md border-r border-b border-muted-foreground/60" /></div>
+      <div aria-hidden="true" className="relative hidden md:col-start-2 md:row-span-2 md:row-start-1 md:block"><div className="absolute top-1/2 right-0 left-1/2 border-t border-muted-foreground/60" /></div>
     </>}
     {championship && <div className="flex flex-col gap-2 md:col-start-3 md:row-span-2 md:row-start-1 md:self-center">
       {champion && <p className="flex items-center gap-1.5 text-sm font-medium"><TrophyIcon aria-hidden="true" className="size-4 text-amber-500" />Champion · {championship[champion].name}</p>}
