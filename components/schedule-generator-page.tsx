@@ -18,7 +18,7 @@ type Venue = { id: string; name: string }
 type Mode = 'preliminary' | 'playoffs'
 const copy: Record<Mode, { title: string; description?: string; saved: string; loading: string; noSeason: string; closed: string }> = {
   preliminary: { title: 'Generate preliminary schedule', saved: 'Schedule saved.', loading: 'Loading schedule settings…', noSeason: 'Choose a league and season in the header to generate a schedule.', closed: 'Schedules cannot be generated for a completed season.' },
-  playoffs: { title: 'Schedule playoffs', description: 'Choose playoff dates during the round robin. A division’s bracket can be previewed once all of its round-robin games have final scores.', saved: 'Playoff games saved.', loading: 'Loading playoff settings…', noSeason: 'Choose a league and season in the header to schedule playoffs.', closed: 'Playoffs cannot be scheduled for a completed season.' },
+  playoffs: { title: 'Schedule playoffs', description: 'Choose dates after the season’s last elimination game. A division’s bracket can be previewed once all of its elimination games have final scores.', saved: 'Playoff games saved.', loading: 'Loading playoff settings…', noSeason: 'Choose a league and season in the header to schedule playoffs.', closed: 'Playoffs cannot be scheduled for a completed season.' },
 }
 
 // Full-page schedule generation for the regular season or the playoff bracket.

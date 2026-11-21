@@ -66,13 +66,6 @@ test('games default to season scope and the division filter resets pagination wi
   assert.equal(generator.props.render.props.href, '/manage/games/generate')
 })
 
-test('playoff setup can be opened while the elimination round is still in progress', () => {
-  const h = harness([{ ...divisionStatuses[1], teamCount: 4, playoffStage: null }])
-  const link = find(h.render(), (node) => node.props?.render?.props.href === '/manage/games/playoffs')
-  assert.ok(link)
-  assert.ok(!link.props.disabled)
-})
-
 test('manual scheduling selects a division and uses only its registrations', () => {
   const h = harness()
   let tree = h.render()
@@ -173,6 +166,9 @@ test('unavailable schedule generation explains each division in a tooltip, witho
   assert.ok(find(tree, (node) => node.type === 'TooltipContent'))
   assert.doesNotMatch(text(tree), /Finish semifinals|Finish preliminary games|Playoffs not ready/)
   assert.equal(find(tree, (node) => node.props?.children?.includes?.('Generate schedule')).props.disabled, true)
+  const playoffs = find(tree, (node) => node.props?.children?.includes?.('Schedule playoffs'))
+  assert.equal(playoffs.props.disabled, true)
+  assert.equal(playoffs.props.render.props.href, '/manage/games/playoffs')
 })
 
 test('rapid next-page clicks show the newest page at once and fetch it once clicking settles', async () => {

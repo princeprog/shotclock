@@ -20,15 +20,13 @@ const readyDivisions = [{ id: 'b', name: 'Boys', playoffStage: 'semifinal', team
 
 function harness(mode = 'preliminary', result = response, diagnostics = {}) {
   const state = []; let cursor = 0; const calls = []; let estimateData; let estimateError
-  const storage = diagnostics.storage ?? new Map()
-  const localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }
-  const context = { exports: {}, document: { getElementById: () => null }, window: { localStorage, setTimeout: (callback) => { callback(); return 1 }, clearTimeout() {} }, require(name) {
+  const context = { exports: {}, document: { getElementById: () => null }, window: { setTimeout: (callback) => { callback(); return 1 }, clearTimeout() {} }, require(name) {
     if (name === 'react') return {
       useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (value) => { state[i] = typeof value === 'function' ? value(state[i]) : value }] },
       useRef(initial) { const i = cursor++; return state[i] ??= { current: initial } },
       useEffect(effect) { effect() }, useSyncExternalStore(_subscribe, getSnapshot) { return getSnapshot() },
     }
-    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: diagnostics.statusDivisions ?? readyDivisions } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [], maxGamesPerTeam: diagnostics.maxGamesPerTeam ?? null, limitedBy: diagnostics.limitedBy ?? null }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
+    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: diagnostics.statusDivisions ?? readyDivisions, lastPreliminaryGameAt: diagnostics.lastPreliminaryGameAt ?? null } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [], maxGamesPerTeam: diagnostics.maxGamesPerTeam ?? null, limitedBy: diagnostics.limitedBy ?? null }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : args[0].endsWith('/suggest') ? (diagnostics.suggestions ?? { suggestions: [] }) : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
@@ -102,33 +100,39 @@ test('playoffs uses season endpoint and input changes invalidate the preview', a
 const dateField = (tree, field) => tree.find((node) => node.type?.name === 'ScheduleDate' && node.props.id === `schedule-${field}-date`)
 const previewButton = (tree) => tree.find((node) => node.type === 'Button' && nodes(node).includes('Preview schedule'))
 
-test('playoff dates can be planned during elimination and reused once a division is ready', async () => {
-  const storage = new Map()
+test('playoff preview waits for an eligible division and explains the reason', async () => {
   const statusDivisions = [{ ...readyDivisions[0], playoffStage: null, playoffReason: 'Complete all preliminary games before generating playoffs' }]
-  const planning = harness('playoffs', response, { storage, statusDivisions })
-  planning.setup()
-  const tree = planning.render()
+  const h = harness('playoffs', response, { statusDivisions })
+  h.setup()
+  const tree = h.render()
   assert.equal(previewButton(tree).props.disabled, true)
   assert.match(tree.filter((node) => typeof node === 'string').join(' '), /Complete all preliminary games before generating playoffs/)
-  assert.equal(dateField(tree, 'start').props.disabled, false)
-  assert.equal(dateField(tree, 'end').props.disabled, false)
-  dateField(tree, 'start').props.onChange('2026-02-06')
-  dateField(planning.render(), 'end').props.onChange('2026-02-15')
-  await planning.preview()
-  assert.equal(planning.calls.length, 0)
+  await h.preview()
+  assert.equal(h.calls.length, 0)
+})
 
-  const reopened = harness('playoffs', response, { storage })
-  reopened.setup()
-  assert.equal(previewButton(reopened.render()).props.disabled, false)
-  await reopened.preview()
-  const [path, , , { availability }] = reopened.calls[0]
-  assert.equal(path, 'seasons/s1/playoffs/preview')
-  assert.equal(availability.startDate, '2026-02-06')
-  assert.equal(availability.endDate, '2026-02-15')
+test('both playoff date pickers start after the last elimination date in the league time zone', async () => {
+  const diagnostics = { lastPreliminaryGameAt: '2026-01-03T16:30:00.000Z' } // January 4 in Manila.
+  const h = harness('playoffs', response, diagnostics)
+  h.setup()
+  const tree = h.render()
+  assert.equal(dateField(tree, 'start').props.minDate, '2026-01-05')
+  assert.equal(dateField(tree, 'end').props.minDate, '2026-01-05')
+  assert.equal(dateField(tree, 'start').props.value, '2026-01-05')
+  assert.equal(dateField(tree, 'end').props.value, '2026-02-01')
+  dateField(tree, 'start').props.onChange('2026-01-05')
+  dateField(h.render(), 'end').props.onChange('2026-01-05')
 
-  const other = harness('playoffs', response, { storage })
-  other.props.seasonId = 's2'
-  assert.equal(dateField(other.render(), 'start').props.value, '2026-01-01')
+  // The cutoff moves forward if another division's elimination game is rescheduled.
+  diagnostics.lastPreliminaryGameAt = '2026-01-04T16:30:00.000Z'
+  assert.match(h.render().filter((node) => typeof node === 'string').join(' '), /on or after Jan 6, 2026/)
+  await h.preview()
+  assert.equal(h.calls.length, 0)
+  dateField(h.render(), 'start').props.onChange('2026-01-06')
+  dateField(h.render(), 'end').props.onChange('2026-01-06')
+  await h.preview()
+  assert.equal(h.calls[0][3].availability.startDate, '2026-01-06')
+  assert.equal(h.calls[0][3].availability.endDate, '2026-01-06')
 })
 
 test('playoff date validation explains reversed and overlong ranges before preview', async () => {
