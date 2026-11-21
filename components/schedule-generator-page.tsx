@@ -15,15 +15,8 @@ import { confirmDiscardSchedulePreview, installScheduleNavigationGuard } from '@
 
 type Venue = { id: string; name: string }
 
-type Mode = 'preliminary' | 'playoffs'
-const copy: Record<Mode, { title: string; description?: string; saved: string; loading: string; noSeason: string; closed: string }> = {
-  preliminary: { title: 'Generate preliminary schedule', saved: 'Schedule saved.', loading: 'Loading schedule settings…', noSeason: 'Choose a league and season in the header to generate a schedule.', closed: 'Schedules cannot be generated for a completed season.' },
-  playoffs: { title: 'Schedule playoffs', description: 'Choose dates after the season’s last elimination game. A division’s bracket can be previewed once all of its elimination games have final scores.', saved: 'Playoff games saved.', loading: 'Loading playoff settings…', noSeason: 'Choose a league and season in the header to schedule playoffs.', closed: 'Playoffs cannot be scheduled for a completed season.' },
-}
-
-// Full-page schedule generation for the regular season or the playoff bracket.
-export function ScheduleGeneratorPage({ mode = 'preliminary' }: { mode?: Mode }) {
-  const text = copy[mode]
+// Full-page schedule generation: each division's round robin and, when chosen, its playoff bracket.
+export function ScheduleGeneratorPage() {
   const { organizations, organization, leagues, league, seasons, season } = useWorkspace()
   const client = useQueryClient()
   const router = useRouter()
@@ -41,7 +34,7 @@ export function ScheduleGeneratorPage({ mode = 'preliminary' }: { mode?: Mode })
   }
   const saved = () => {
     unsaved.current = false
-    toast.success(text.saved)
+    toast.success('Schedule saved.')
     router.push('/manage/games')
   }
 
@@ -52,12 +45,12 @@ export function ScheduleGeneratorPage({ mode = 'preliminary' }: { mode?: Mode })
     <div className="flex flex-col gap-3">
       <Button type="button" variant="ghost" size="sm" className="-ml-2 w-fit" onClick={leave}><ArrowLeftIcon data-icon="inline-start" />Back to games</Button>
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{text.title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Generate schedule</h1>
         {league && season && <p className="text-sm text-muted-foreground">{league.name} · {season.name}</p>}
-        {text.description && <p className="max-w-2xl text-sm text-muted-foreground">{text.description}</p>}
+        <p className="max-w-2xl text-sm text-muted-foreground">Schedule each division’s round robin and its playoff bracket together. Divisions that already have a round robin can add their bracket here.</p>
       </div>
     </div>
-    {loading ? <p className="text-sm text-muted-foreground" role="status">{text.loading}</p> : failed ? <Alert variant="destructive"><AlertTitle>Couldn’t load schedule settings</AlertTitle><AlertDescription>{failed.error?.message} <Button type="button" variant="link" size="sm" onClick={() => void failed.refetch()}>Try again</Button></AlertDescription></Alert> : !organization || !league || !season ? <Alert><AlertTitle>Select a league and season</AlertTitle><AlertDescription>{text.noSeason}</AlertDescription></Alert> : season.status === 'completed' ? <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>{text.closed}</AlertDescription></Alert> : <ScheduleGenerator key={`${mode}-${season.id}`} presentation="page" seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues.data ?? []} timeZone={league.time_zone} mode={mode} onClose={leave} onSaved={saved} onUnsavedChange={setUnsaved} />}
+    {loading ? <p className="text-sm text-muted-foreground" role="status">Loading schedule settings…</p> : failed ? <Alert variant="destructive"><AlertTitle>Couldn’t load schedule settings</AlertTitle><AlertDescription>{failed.error?.message} <Button type="button" variant="link" size="sm" onClick={() => void failed.refetch()}>Try again</Button></AlertDescription></Alert> : !organization || !league || !season ? <Alert><AlertTitle>Select a league and season</AlertTitle><AlertDescription>Choose a league and season in the header to generate a schedule.</AlertDescription></Alert> : season.status === 'completed' ? <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>Schedules cannot be generated for a completed season.</AlertDescription></Alert> : <ScheduleGenerator key={season.id} presentation="page" seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues.data ?? []} timeZone={league.time_zone} onClose={leave} onSaved={saved} onUnsavedChange={setUnsaved} />}
     {!loading && !failed && !organization && <Button variant="outline" nativeButton={false} render={<Link href="/organizations" />} className="w-fit">Choose organization</Button>}
   </main>
 }

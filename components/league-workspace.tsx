@@ -73,6 +73,9 @@ function scheduleReason(reason: string, several: boolean): string {
   return /[.!?]$/.test(text) ? text : text + '.'
 }
 
+// Generating covers a division's round robin, or its playoff bracket once the round robin exists.
+const canGenerate = (division: ScheduleStatus) => division.canGeneratePreliminary || !!division.playoffStage
+
 function generationBlockers(items: { name: string; reason: string }[]) {
   const groups = new Map<string, string[]>()
   for (const item of items) groups.set(item.reason, [...(groups.get(item.reason) ?? []), item.name])
@@ -711,15 +714,14 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
           </div>
           {editable && <div className="flex flex-wrap items-center gap-2">
             {(() => {
-              const generate = <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.canGeneratePreliminary)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
+              const generate = <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some(canGenerate)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
               // A disabled control receives no hover events, so a focusable wrapper explains why generation is unavailable.
-              if (!scheduleStatus.isSuccess || !scheduleDivisions.length || scheduleDivisions.some((item) => item.canGeneratePreliminary)) return generate
+              if (!scheduleStatus.isSuccess || !scheduleDivisions.length || scheduleDivisions.some(canGenerate)) return generate
               return <Tooltip>
                 <TooltipTrigger render={<span tabIndex={0} aria-label="Generate schedule is unavailable" className="inline-flex cursor-not-allowed rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}>{generate}</TooltipTrigger>
-                <TooltipContent side="bottom" align="start" className="block max-w-sm px-3 py-2.5 text-left leading-relaxed">{generationBlockers(scheduleDivisions.map((item) => ({ name: item.name, reason: item.preliminaryReason || 'Not eligible for schedule generation.' })))}</TooltipContent>
+                <TooltipContent side="bottom" align="start" className="block max-w-sm px-3 py-2.5 text-left leading-relaxed">{generationBlockers(scheduleDivisions.map((item) => ({ name: item.name, reason: (item.hasSchedule ? item.playoffReason : item.preliminaryReason) || 'Not eligible for schedule generation.' })))}</TooltipContent>
               </Tooltip>
             })()}
-            {scheduleDivisions.some((item) => item.hasSchedule && item.teamCount >= 4) && <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/playoffs" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
             <Button onClick={openSchedule} disabled={!divisions.length}><PlusIcon data-icon="inline-start" />Schedule game</Button>
           </div>}
         </div>

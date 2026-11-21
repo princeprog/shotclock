@@ -155,20 +155,18 @@ test('opening manual scheduling defaults to the filter and a later filter change
   assert.ok(find(tree, (node) => node.type === h.ScheduleGameForm))
 })
 
-test('unavailable schedule generation explains each division in a tooltip, without a playoffs message', () => {
+test('unavailable schedule generation explains each division in a tooltip, using the playoff reason once a round robin exists', () => {
   const statuses = [
     { ...divisionStatuses[0], preliminaryReason: 'Needs another team', playoffs: true, playoffReason: 'Finish semifinals' },
     { ...divisionStatuses[1], teamCount: 4, canGeneratePreliminary: false, preliminaryReason: 'Already scheduled', playoffStage: null, playoffReason: 'Finish preliminary games' },
   ]
   const tree = harness(statuses).render()
   assert.match(text(tree), /Needs another team/)
-  assert.match(text(tree), /Already scheduled/)
   assert.ok(find(tree, (node) => node.type === 'TooltipContent'))
-  assert.doesNotMatch(text(tree), /Finish semifinals|Finish preliminary games|Playoffs not ready/)
+  assert.match(text(tree), /Finish preliminary games/)
+  assert.doesNotMatch(text(tree), /Finish semifinals|Already scheduled/)
   assert.equal(find(tree, (node) => node.props?.children?.includes?.('Generate schedule')).props.disabled, true)
-  const playoffs = find(tree, (node) => node.props?.children?.includes?.('Schedule playoffs'))
-  assert.equal(playoffs.props.disabled, true)
-  assert.equal(playoffs.props.render.props.href, '/manage/games/playoffs')
+  assert.equal(find(tree, (node) => node.props?.children?.includes?.('Schedule playoffs')), undefined)
 })
 
 test('rapid next-page clicks show the newest page at once and fetch it once clicking settles', async () => {

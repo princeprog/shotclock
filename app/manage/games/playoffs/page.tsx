@@ -1,6 +1,7 @@
-import { AuthenticatedShell } from '@/components/authenticated-shell'
-import { ScheduleGeneratorPage } from '@/components/schedule-generator-page'
+import { redirect } from 'next/navigation'
 
+// Playoffs are scheduled with the round robin on the Generate schedule page.
 export default function SchedulePlayoffsPage() {
-  return <AuthenticatedShell title="Schedule playoffs"><ScheduleGeneratorPage mode="playoffs" /></AuthenticatedShell>
+  redirect('/manage/games/generate')
 }
+
