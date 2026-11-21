@@ -19,7 +19,7 @@ const winnerOf = (game: BracketGame) => !game.final || game.home.score == null |
 function Side({ side, result }: { side: BracketSide; result: 'won' | 'lost' | null }) {
   return <div className="flex min-h-9 items-center gap-2.5 px-3 py-1.5 text-sm">
     <span className="w-4 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{side.seed ?? ''}</span>
-    <span className={cn('min-w-0 flex-1 truncate', side.waiting && 'italic text-muted-foreground', result === 'won' && 'font-semibold', result === 'lost' && 'text-muted-foreground')}>{side.name}</span>
+    <span title={side.name} className={cn('min-w-0 flex-1 truncate', side.waiting && 'italic text-muted-foreground', result === 'won' && 'font-semibold', result === 'lost' && 'text-muted-foreground')}>{side.name}</span>
     {side.score != null && <span className={cn('shrink-0 tabular-nums', result === 'won' ? 'font-semibold' : 'text-muted-foreground')}>{side.score}</span>}
   </div>
 }
