@@ -15,6 +15,7 @@ import { confirmDiscardSchedulePreview, installScheduleNavigationGuard } from '@
 
 type Venue = { id: string; name: string }
 
+// Full-page schedule generation: each division's round robin and, when chosen, its playoff bracket.
 export function ScheduleGeneratorPage() {
   const { organizations, organization, leagues, league, seasons, season } = useWorkspace()
   const client = useQueryClient()
@@ -44,11 +45,13 @@ export function ScheduleGeneratorPage() {
     <div className="flex flex-col gap-3">
       <Button type="button" variant="ghost" size="sm" className="-ml-2 w-fit" onClick={leave}><ArrowLeftIcon data-icon="inline-start" />Back to games</Button>
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Generate preliminary schedule</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Generate schedule</h1>
         {league && season && <p className="text-sm text-muted-foreground">{league.name} · {season.name}</p>}
+        <p className="max-w-2xl text-sm text-muted-foreground">Schedule each division’s round robin and its playoff bracket together. Divisions that already have a round robin can add their bracket here.</p>
       </div>
     </div>
-    {loading ? <p className="text-sm text-muted-foreground" role="status">Loading schedule settings…</p> : failed ? <Alert variant="destructive"><AlertTitle>Couldn’t load schedule settings</AlertTitle><AlertDescription>{failed.error?.message} <Button type="button" variant="link" size="sm" onClick={() => void failed.refetch()}>Try again</Button></AlertDescription></Alert> : !organization || !league || !season ? <Alert><AlertTitle>Select a league and season</AlertTitle><AlertDescription>Choose a league and season in the header to generate a schedule.</AlertDescription></Alert> : season.status === 'completed' ? <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>Schedules cannot be generated for a completed season.</AlertDescription></Alert> : <ScheduleGenerator key={season.id} presentation="page" seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues.data ?? []} timeZone={league.time_zone} mode="preliminary" onClose={leave} onSaved={saved} onUnsavedChange={setUnsaved} />}
+    {loading ? <p className="text-sm text-muted-foreground" role="status">Loading schedule settings…</p> : failed ? <Alert variant="destructive"><AlertTitle>Couldn’t load schedule settings</AlertTitle><AlertDescription>{failed.error?.message} <Button type="button" variant="link" size="sm" onClick={() => void failed.refetch()}>Try again</Button></AlertDescription></Alert> : !organization || !league || !season ? <Alert><AlertTitle>Select a league and season</AlertTitle><AlertDescription>Choose a league and season in the header to generate a schedule.</AlertDescription></Alert> : season.status === 'completed' ? <Alert><AlertTitle>Season completed</AlertTitle><AlertDescription>Schedules cannot be generated for a completed season.</AlertDescription></Alert> : <ScheduleGenerator key={season.id} presentation="page" seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues.data ?? []} timeZone={league.time_zone} onClose={leave} onSaved={saved} onUnsavedChange={setUnsaved} />}
     {!loading && !failed && !organization && <Button variant="outline" nativeButton={false} render={<Link href="/organizations" />} className="w-fit">Choose organization</Button>}
   </main>
 }
+

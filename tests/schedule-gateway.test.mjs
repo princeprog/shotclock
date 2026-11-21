@@ -61,17 +61,19 @@ test('forfeit and schedule history routes preserve gateway checks', async () => 
 
 
 test('season scheduling routes are allowlisted and reject unsupported paths', async () => {
-  for (const [method, path] of [['GET', `seasons/${id}/schedule/status`], ...['schedule', 'playoffs'].flatMap((kind) => [['POST', `seasons/${id}/${kind}`], ['POST', `seasons/${id}/${kind}/preview`]])]) {
+  for (const [method, path] of [['GET', `seasons/${id}/schedule/status`], ...['schedule'].flatMap((kind) => [['POST', `seasons/${id}/${kind}`], ['POST', `seasons/${id}/${kind}/preview`]])]) {
     assert.equal((await request(method, path, method === 'POST' ? '{}' : undefined)).status, 200, `${method} ${path}`)
   }
   assert.equal((await request('GET', `seasons/${id}/schedule`)).status, 404)
   assert.equal((await request('POST', `seasons/${id}/schedule/other`, '{}')).status, 404)
-  assert.equal((await request('POST', `seasons/${id}/playoffs`, '{}', { origin: 'https://evil.test' })).status, 403)
+  assert.equal((await request('POST', `seasons/${id}/schedule`, '{}', { origin: 'https://evil.test' })).status, 403)
+  // Playoffs are generated with the round robin, so the separate season playoff routes are gone.
+  for (const action of ['', '/preview', '/estimate', '/validate', '/suggest']) assert.equal((await request('POST', `seasons/${id}/playoffs${action}`, '{}')).status, 404)
 })
 
 test('season saves and previews accept at most 2 MiB', async () => {
   const sizedBody = (size) => `{"value":"${'x'.repeat(size - 12)}"}`
-  for (const kind of ['schedule', 'playoffs']) {
+  for (const kind of ['schedule']) {
     assert.equal((await request('POST', `seasons/${id}/${kind}`, sizedBody(2 * 1024 * 1024))).status, 200)
     assert.equal((await request('POST', `seasons/${id}/${kind}`, sizedBody(2 * 1024 * 1024 + 1))).status, 413)
     assert.equal((await request('POST', `seasons/${id}/${kind}/preview`, sizedBody(2 * 1024 * 1024))).status, 200)
@@ -82,7 +84,7 @@ test('season saves and previews accept at most 2 MiB', async () => {
 
 test('season preview diagnostics have bounded, owner-protected gateway routes', async () => {
   const sizedBody = (size) => `{"value":"${'x'.repeat(size - 12)}"}`
-  for (const kind of ['schedule', 'playoffs']) {
+  for (const kind of ['schedule']) {
     for (const action of ['estimate', 'validate', 'suggest']) {
       const path = `seasons/${id}/${kind}/${action}`
       assert.equal((await request('POST', path, '{}')).status, 200)

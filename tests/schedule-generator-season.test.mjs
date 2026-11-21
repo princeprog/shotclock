@@ -16,25 +16,28 @@ function nodes(element) {
   if (typeof element !== 'object') return [element]
   return [element, ...nodes(element.props?.children)]
 }
-function harness(mode = 'preliminary', result = response, diagnostics = {}) {
+const readyDivisions = [{ id: 'b', name: 'Boys', teamCount: 2, hasSchedule: false, canGeneratePreliminary: true, playoffStage: null, teams: [{ id: 'B1', name: 'B1' }, { id: 'B2', name: 'B2' }] }]
+
+function harness(result = response, diagnostics = {}) {
   const state = []; let cursor = 0; const calls = []; let estimateData; let estimateError
   const context = { exports: {}, document: { getElementById: () => null }, window: { setTimeout: (callback) => { callback(); return 1 }, clearTimeout() {} }, require(name) {
     if (name === 'react') return {
       useState(initial) { const i = cursor++; if (!(i in state)) state[i] = initial; return [state[i], (value) => { state[i] = typeof value === 'function' ? value(state[i]) : value }] },
       useRef(initial) { const i = cursor++; return state[i] ??= { current: initial } },
-      useEffect(effect) { effect() }, useSyncExternalStore() { return 'Asia/Manila' },
+      useEffect(effect) { effect() }, useSyncExternalStore(_subscribe, getSnapshot) { return getSnapshot() },
     }
-    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: [{ id: 'b', name: 'Boys', teams: [{ id: 'B1', name: 'B1' }, { id: 'B2', name: 'B2' }] }] } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [], maxGamesPerTeam: diagnostics.maxGamesPerTeam ?? null, limitedBy: diagnostics.limitedBy ?? null }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
+    if (name === '@tanstack/react-query') return { useQueryClient: () => 'client', useQuery: ({ queryKey, enabled }) => ({ isFetching: queryKey[0] === 'schedule-validation' && !!diagnostics.checking, isError: queryKey[0] === 'schedule-estimate' && !!estimateError, error: estimateError, data: queryKey[0] === 'league' ? { divisions: diagnostics.statusDivisions ?? readyDivisions, lastPreliminaryGameAt: diagnostics.lastPreliminaryGameAt ?? null } : queryKey[0] === 'schedule-estimate' ? estimateData : enabled ? queryKey[0] === 'schedule-validation' ? { issues: diagnostics.issues ?? [], existingGames: diagnostics.existingGames ?? [] } : { games: [] } : undefined, async refetch() { if (diagnostics.error) { estimateError = new Error(diagnostics.error); return { error: estimateError } } estimateData = { capacity: diagnostics.capacity ?? 100, required: diagnostics.required ?? 3, divisions: diagnostics.divisions ?? [], maxGamesPerTeam: diagnostics.maxGamesPerTeam ?? null, limitedBy: diagnostics.limitedBy ?? null }; return { data: estimateData } } }), useMutation: (options) => ({ isPending: false, isError: false, reset() {}, async mutate(input) { try { const value = await options.mutationFn(input); options.onSuccess?.(value, input) } catch (error) { options.onError?.(error) } } }) }
     if (name === '@/lib/league-client') return { leagueRequest: async (...args) => { calls.push(args); return args[0].endsWith('/preview') ? result : args[0].endsWith('/suggest') ? (diagnostics.suggestions ?? { suggestions: [] }) : {} } }
     if (name.startsWith('@/components/ui/')) return new Proxy({}, { get: (_target, key) => key })
     if (name === '@/components/schedule-preview-calendar') return { SchedulePreviewCalendar: 'SchedulePreviewCalendar' }
+    if (name === '@/components/playoff-bracket') return { PlayoffBracketBoard: 'PlayoffBracketBoard' }
     if (name === '@/lib/schedule-navigation-guard') return { confirmDiscardSchedulePreview: () => true }
     if (name === '@/lib/game-time') return { joinGameTime: () => '', splitGameTime: () => ({}) }
     if (name === '@/lib/league-time') return require('../lib/league-time.ts')
     return require(name)
   } }
   vm.runInNewContext(compiled, context)
-  const props = { seasonId: 's1', seasonName: 'Summer', seasonStart: '2026-01-01', seasonEnd: '2026-02-01', venues: [{ id: 'court', name: 'Court' }, { id: 'court2', name: 'Court 2' }], mode, onClose() {}, onSaved() {} }
+  const props = { seasonId: 's1', seasonName: 'Summer', seasonStart: '2026-01-01', seasonEnd: '2026-02-01', venues: [{ id: 'court', name: 'Court' }, { id: 'court2', name: 'Court 2' }], timeZone: 'Asia/Manila', onClose() {}, onSaved() {} }
   const render = () => { cursor = 0; context.exports.ScheduleGenerator(props); cursor = 0; return nodes(context.exports.ScheduleGenerator(props)) }
   const setup = () => {
     let tree = render()
@@ -49,14 +52,13 @@ function harness(mode = 'preliminary', result = response, diagnostics = {}) {
 test('season preview uses shared options and shows divisions, skipped reasons and grouped games', async () => {
   const h = harness(); h.setup()
   let tree = h.render()
-  tree.find((n) => n.type === 'label' && nodes(n).includes('Include playoffs')).props.children[0].props.onCheckedChange(true)
+  // The round robin no longer asks about playoffs; they are chosen on the playoff page.
+  assert.ok(!tree.some((n) => n.type === 'label' && nodes(n).includes('Include playoffs')))
   await h.preview(); tree = h.render()
   assert.equal(h.calls[0][0], 'seasons/s1/schedule/preview')
-  assert.equal(h.calls[0][3].playoffs, true)
+  assert.deepEqual(Object.keys(h.calls[0][3]).sort(), ['availability', 'format', 'playoffs'])
   const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ').replace(/\s+/g, ' ')
   for (const value of ['Boys', 'Adults', 'Junior', 'Not enough teams', 'Check availability', '3', 'Round 1', 'Round 2']) assert.ok(text.includes(value), value)
-  const adults = tree.find((n) => n.type === 'section' && n.props['aria-labelledby'] === 'schedule-division-a')
-  assert.match(nodes(adults).filter((n) => typeof n === 'string').join(' '), /four teams/i)
   assert.ok(text.indexOf('Boys') < text.indexOf('B1'))
   assert.ok(text.indexOf('B1') < text.indexOf('B2'))
   assert.ok(text.indexOf('B2') < text.lastIndexOf('Adults'))
@@ -85,24 +87,97 @@ test('save keeps preview order, exact included divisions and edits, without disp
   for (const g of body.games) for (const key of ['divisionName', 'homeName', 'awayName']) assert.equal(key in g, false)
 })
 
-test('playoffs uses season endpoint and input changes invalidate the preview', async () => {
-  const h = harness('playoffs'); h.setup(); await h.preview()
-  assert.equal(h.calls[0][0], 'seasons/s1/playoffs/preview')
-  assert.deepEqual(Object.keys(h.calls[0][3]), ['availability'])
+const dateField = (tree, id) => tree.find((node) => node.type?.name === 'ScheduleDate' && node.props.id === id)
+const previewButton = (tree) => tree.find((node) => node.type === 'Button' && nodes(node).includes('Preview schedule'))
+const textOf = (tree) => tree.filter((node) => typeof node === 'string' || typeof node === 'number').join(' ')
+const fourTeams = [{ ...readyDivisions[0], teamCount: 4 }]
+const bracketGame = (stage, round, homeTeamId, homeName, awayTeamId, awayName, scheduledAt) => ({ divisionId: 'b', divisionName: 'Boys', round, stage, homeTeamId, homeName, awayTeamId, awayName, scheduledAt, venueId: 'court', durationMinutes: 60 })
+
+test('the round robin and playoffs are requested together, with playoff dates after the round robin', async () => {
+  const h = harness(response, { statusDivisions: fourTeams }); h.setup()
   let tree = h.render()
-  tree.find((n) => n.type === 'Input' && n.props.id === 'schedule-duration').props.onChange({ target: { value: '90' } })
+  assert.equal(dateField(tree, 'schedule-playoff-start-date').props.minDate, '2026-02-02')
+  assert.equal(dateField(tree, 'schedule-playoff-start-date').props.value, '2026-02-02')
+  assert.equal(dateField(tree, 'schedule-playoff-end-date').props.value, '2026-02-08')
+  await h.preview()
+  const [path, , , body] = h.calls[0]
+  assert.equal(path, 'seasons/s1/schedule/preview')
+  assert.deepEqual(Object.keys(body).sort(), ['availability', 'format', 'playoffDates', 'playoffs', 'thirdPlace'])
+  assert.deepEqual(JSON.parse(JSON.stringify(body.playoffDates)), { startDate: '2026-02-02', endDate: '2026-02-08' })
+  assert.equal(body.availability.endDate, '2026-02-01')
+  // A playoff date inside the round robin is rejected before any request.
+  dateField(h.render(), 'schedule-playoff-start-date').props.onChange('2026-02-01')
   tree = h.render()
-  assert.equal(tree.some((n) => n.type === 'Button' && nodes(n).includes('Save schedule')), false)
+  assert.match(textOf(tree), /Choose playoff dates on or after Feb 2, 2026\./)
+  await h.preview()
+  assert.equal(h.calls.length, 1)
+  // Without playoffs only the round robin is requested.
+  tree.find((n) => n.type === 'label' && nodes(n).includes('Schedule playoffs')).props.children[0].props.onCheckedChange(false)
+  await h.preview()
+  assert.deepEqual(Object.keys(h.calls[1][3]).sort(), ['availability', 'format', 'playoffs'])
+  assert.equal(h.calls[1][3].playoffs, false)
 })
 
+test('a division with its round robin already scheduled gets only playoffs, after its last game in the league time zone', async () => {
+  const statusDivisions = [{ ...fourTeams[0], canGeneratePreliminary: false, hasSchedule: true, playoffStage: 'semifinal' }]
+  const h = harness(response, { statusDivisions, lastPreliminaryGameAt: '2026-01-03T16:30:00.000Z' }) // January 4 in Manila.
+  h.setup()
+  const tree = h.render()
+  assert.equal(dateField(tree, 'schedule-start-date'), undefined)
+  assert.match(textOf(tree), /Every division already has its round robin\./)
+  assert.match(textOf(tree), /Boys\s+Playoffs/)
+  assert.equal(dateField(tree, 'schedule-playoff-start-date').props.minDate, '2026-01-05')
+  await h.preview()
+  const { availability, playoffDates } = h.calls[0][3]
+  assert.deepEqual(JSON.parse(JSON.stringify(playoffDates)), { startDate: '2026-01-05', endDate: '2026-01-11' })
+  assert.equal(availability.startDate, '2026-01-05')
+})
 
-test('playoff save uses the included divisions and the playoff season route', async () => {
-  const h = harness('playoffs'); h.setup(); await h.preview()
-  h.render().find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
+test('preview is unavailable when every division has its round robin and playoffs are off', async () => {
+  const statusDivisions = [{ ...readyDivisions[0], canGeneratePreliminary: false, hasSchedule: true, playoffStage: null, preliminaryReason: 'This division already has preliminary games or a generated schedule.' }]
+  const h = harness(response, { statusDivisions }); h.setup()
+  const tree = h.render()
+  assert.equal(previewButton(tree).props.disabled, true)
+  assert.match(textOf(tree), /Playoffs need a division with at least four teams\./)
+  await h.preview()
+  assert.equal(h.calls.length, 0)
+})
+
+test('playoff date validation explains reversed and overlong ranges before preview', async () => {
+  const h = harness(response, { statusDivisions: fourTeams }); h.setup()
+  dateField(h.render(), 'schedule-playoff-end-date').props.onChange('2026-02-01')
+  assert.ok(h.render().includes('Choose playoff dates on or after Feb 2, 2026.'))
+  dateField(h.render(), 'schedule-playoff-start-date').props.onChange('2026-02-10')
+  dateField(h.render(), 'schedule-playoff-end-date').props.onChange('2026-02-09')
+  assert.ok(h.render().includes('The end date must be on or after the start date.'))
+  dateField(h.render(), 'schedule-playoff-end-date').props.onChange('2027-02-11')
+  assert.ok(h.render().includes('Choose a date range of 366 days or fewer.'))
+  await h.preview()
+  assert.equal(h.calls.length, 0)
+})
+
+test('the review shows each playoff bracket with seeds and saves it with the round robin', async () => {
+  const playoffs = { ...response, divisions: [{ id: 'b', name: 'Boys', teamCount: 4, roundRobin: true, playoffs: true }], games: [game('b', 'Boys', 1, 'B1'),
+    bracketGame('semifinal', 1, 'b:seed-1', '1st seed', 'b:seed-4', '4th seed', '2026-02-02T01:00:00.000Z'), bracketGame('semifinal', 1, 'b:seed-2', '2nd seed', 'b:seed-3', '3rd seed', '2026-02-02T02:00:00.000Z'),
+    bracketGame('final', 2, 'b:semifinal-1:winner', '1st seed / 4th seed winner', 'b:semifinal-2:winner', '2nd seed / 3rd seed winner', '2026-02-02T03:00:00.000Z')] }
+  const h = harness(playoffs, { statusDivisions: fourTeams }); h.setup(); await h.preview()
+  let tree = h.render()
+  assert.match(textOf(tree), /Round 1/)
+  assert.match(textOf(tree), /Semifinals/)
+  assert.match(textOf(tree), /Championship/)
+  tree.find((n) => n.type === 'ToggleGroup' && n.props['aria-label'] === 'Review view').props.onValueChange(['bracket'])
+  tree = h.render()
+  const board = tree.find((n) => n.type === 'PlayoffBracketBoard')
+  assert.deepEqual(board.props.divisions.map((division) => division.name), ['Boys'])
+  const bracket = board.props.divisions[0]
+  assert.deepEqual(bracket.games.map((item) => [item.stage, item.home.seed, item.away.seed, item.home.waiting]), [['semifinal', 1, 4, true], ['semifinal', 2, 3, true], ['final', null, null, true]])
+  assert.equal(bracket.games[0].venue, 'Court')
+  tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule')).props.onClick()
   await new Promise(setImmediate)
-  assert.equal(h.calls[1][0], 'seasons/s1/playoffs')
-  assert.deepEqual(Object.keys(h.calls[1][3]).sort(), ['availability', 'divisionIds', 'games'])
-  assert.deepEqual(Array.from(h.calls[1][3].divisionIds), ['b', 'a'])
+  const [path, , , body] = h.calls.at(-1)
+  assert.equal(path, 'seasons/s1/schedule')
+  assert.deepEqual(Array.from(body.games, (item) => item.stage), ['preliminary', 'semifinal', 'semifinal', 'final'])
+  assert.deepEqual(JSON.parse(JSON.stringify(body.playoffDates)), { startDate: '2026-02-02', endDate: '2026-02-08' })
 })
 
 test('the dedicated page switches from setup to review and can return to settings', async () => {
@@ -127,7 +202,7 @@ test('preview cannot be saved after switching seasons', async () => {
 
 test('rejects a preview that assigns a game to a skipped division', async () => {
   const bad = { ...response, games: [game('c', 'Junior', 1, 'A')] }
-  const h = harness('preliminary', bad); h.setup(); await h.preview()
+  const h = harness(bad); h.setup(); await h.preview()
   const tree = h.render()
   assert.ok(tree.includes('The preview contained incomplete game details. Please try again.'))
   assert.equal(tree.some((n) => n.type === 'Button' && nodes(n).includes('Save schedule')), false)
@@ -136,7 +211,7 @@ test('rejects a preview that assigns a game to a skipped division', async () => 
 const capacityDialog = (tree) => tree.some((n) => n.type === 'Dialog')
 
 test('capacity opens in a dialog only after requesting a preview and explains a shortfall', async () => {
-  const h = harness('preliminary', response, { capacity: 1 }); h.setup()
+  const h = harness(response, { capacity: 1 }); h.setup()
   let tree = h.render()
   assert.equal(capacityDialog(tree), false)
   assert.equal(tree.find((n) => n.type === 'Button' && nodes(n).includes('Preview schedule')).props.disabled, false)
@@ -156,7 +231,7 @@ test('capacity opens in a dialog only after requesting a preview and explains a 
 })
 
 test('a quick fix in the capacity dialog changes the setting and rechecks capacity', async () => {
-  const h = harness('preliminary', response, { capacity: 1 }); h.setup(); await h.preview()
+  const h = harness(response, { capacity: 1 }); h.setup(); await h.preview()
   h.render().find((n) => n.type === 'Button' && nodes(n).includes('Select all courts')).props.onClick()
   h.render()
   await new Promise(setImmediate)
@@ -173,7 +248,7 @@ test('the preview starts without a dialog when capacity is sufficient', async ()
 })
 
 test('explains when no division can be scheduled', async () => {
-  const h = harness('preliminary', response, { required: 0, divisions: [{ id: 'c', name: 'Junior', teamCount: 1, reason: 'At least two teams are required.' }] }); h.setup(); await h.preview()
+  const h = harness(response, { required: 0, divisions: [{ id: 'c', name: 'Junior', teamCount: 1, reason: 'At least two teams are required.' }] }); h.setup(); await h.preview()
   const text = h.render().filter((n) => typeof n === 'string').join(' ')
   assert.match(text, /No divisions are ready/)
   assert.match(text, /At least two teams are required/)
@@ -181,7 +256,7 @@ test('explains when no division can be scheduled', async () => {
 })
 
 test('reports a failed capacity check and lets the organizer retry', async () => {
-  const h = harness('preliminary', response, { error: 'Service unavailable' }); h.setup(); await h.preview()
+  const h = harness(response, { error: 'Service unavailable' }); h.setup(); await h.preview()
   const tree = h.render()
   assert.match(tree.filter((n) => typeof n === 'string').join(' '), /Capacity check unavailable.*Service unavailable/)
   assert.ok(tree.some((n) => n.type === 'Button' && nodes(n).includes('Try again')))
@@ -191,7 +266,7 @@ test('reports a failed capacity check and lets the organizer retry', async () =>
 
 test('conflicts and pending checks both prevent saving', async () => {
   for (const diagnostics of [{ issues: [{ index: 0, message: 'Venue conflict: choose another time.' }] }, { checking: true }]) {
-    const h = harness('preliminary', response, diagnostics); h.setup(); await h.preview()
+    const h = harness(response, diagnostics); h.setup(); await h.preview()
     const tree = h.render()
     const save = tree.find((n) => n.type === 'Button' && nodes(n).includes('Save schedule'))
     assert.equal(save.props.disabled, true)
@@ -208,7 +283,7 @@ test('conflicts name the related game and team, and the summary jumps to the fir
     { index: 2, type: 'team', teamId: 'B1', message: 'Team conflict: a team is playing.', with: { kind: 'draft', index: 1 } },
   ]
   const existingGames = [{ id: 'old', scheduledAt: '2026-01-05T02:00:00.000Z', venueName: 'Court', homeName: 'X', awayName: 'Y', divisionName: 'Other' }]
-  const h = harness('preliminary', response, { issues, existingGames }); h.setup(); await h.preview()
+  const h = harness(response, { issues, existingGames }); h.setup(); await h.preview()
   let tree = h.render()
   const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
   assert.match(text, /With X vs Y \(Other\) · Jan 5, 2026, 10:00 AM · Court/)
@@ -237,7 +312,7 @@ test('review opens with a compact summary and no capacity dialog', async () => {
 
 test('capacity check blocks a preview when pacing leaves too few dates', async () => {
   const divisions = [{ id: 'b', name: '18 under', teamCount: 8, gameCount: 28, gamesPerTeam: 7 }]
-  const h = harness('preliminary', response, { maxGamesPerTeam: 3, limitedBy: 'weekly', required: 28, divisions }); h.setup(); await h.preview()
+  const h = harness(response, { maxGamesPerTeam: 3, limitedBy: 'weekly', required: 28, divisions }); h.setup(); await h.preview()
   const text = h.render().filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
   assert.match(text, /Weekly pacing needs more weeks/)
   assert.match(text, /Each team plays up to 7 games, one per week, but only 3 weeks fit between Jan 1 and Feb 1, 2026\./)
@@ -249,7 +324,7 @@ test('capacity check blocks a preview when pacing leaves too few dates', async (
 
 test('unplaced games block saving until a suggested slot places them', async () => {
   const unplaced = [{ divisionId: 'a', divisionName: 'Adults', homeTeamId: 'A2', awayTeamId: 'A3', homeName: 'A2', awayName: 'A3', round: 2, stage: 'preliminary', reason: 'No court is free.', reasonCode: 'venues_busy' }]
-  const h = harness('preliminary', { ...response, unplaced }, { suggestions: { suggestions: [{ scheduledAt: '2026-01-12T01:00:00.000Z', venueId: 'court' }] } }); h.setup(); await h.preview()
+  const h = harness({ ...response, unplaced }, { suggestions: { suggestions: [{ scheduledAt: '2026-01-12T01:00:00.000Z', venueId: 'court' }] } }); h.setup(); await h.preview()
   let tree = h.render()
   const text = tree.filter((n) => typeof n === 'string' || typeof n === 'number').join(' ')
   assert.match(text, /Not scheduled/)
@@ -276,7 +351,7 @@ test('unplaced games block saving until a suggested slot places them', async () 
 })
 
 test('a draft game can move to a suggested open slot', async () => {
-  const h = harness('preliminary', response, { suggestions: { suggestions: [{ scheduledAt: '2026-01-06T03:00:00.000Z', venueId: 'court' }] } }); h.setup(); await h.preview()
+  const h = harness(response, { suggestions: { suggestions: [{ scheduledAt: '2026-01-06T03:00:00.000Z', venueId: 'court' }] } }); h.setup(); await h.preview()
   let tree = h.render()
   tree.find((n) => n.type === 'Button' && nodes(n).includes('Find open slots')).props.onClick()
   await new Promise(setImmediate)

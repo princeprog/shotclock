@@ -8,19 +8,20 @@ import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Cl
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
+import { EditLeagueDialog } from '@/components/edit-league-dialog'
 import { LeagueWebsiteDialog } from '@/components/league-website-dialog'
-import { ScheduleGenerator } from '@/components/schedule-generator'
 import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
 import { GameScoreDialog } from '@/components/game-score-dialog'
 import { GameScheduleHistory } from '@/components/game-schedule-history'
 import { VenuesWorkspace } from '@/components/venues-workspace'
 import { TimeZonePicker } from '@/components/time-zone-picker'
-import { DeleteRecordDialog, useArchiveAction, type DeleteTarget } from '@/components/record-actions'
+import { DeleteRecordDialog, useArchiveAction, useGuardedArchive, type DeleteTarget } from '@/components/record-actions'
 import { DivisionsWorkspace } from '@/components/divisions-workspace'
 import { SeasonStatusBadge } from '@/components/season-status-badge'
 import { DataPagination } from '@/components/data-pagination'
 import { GamesCalendar } from '@/components/games-calendar'
 import { readGamesView, saveGamesView, subscribeGamesView, type GamesView } from '@/lib/games-view'
+import { GamesBracket } from '@/components/games-bracket'
 import { defaultAnchor, periodLabel, shiftAnchor } from '@/lib/games-calendar'
 import { AnimatedTableBody, SortableHead, useTableSort } from '@/components/sortable-head'
 import { nextSort, sortParams, sortRows, type SortState } from '@/lib/table-sort'
@@ -59,7 +60,8 @@ type Team = Item & { abbreviation: string | null }
 type OrganizationTeamRow = Team & { league_id: string; league_name: string; season_team_id: string | null; season_id: string | null; season_name: string | null; season_status: 'draft' | 'active' | 'completed' | null; division_id: string | null; division_name: string | null }
 type Division = Item & { season_id: string; min_age: number | null; max_age: number | null }
 type SeasonTeam = Item & { team_id: string; division_id: string }
-type Game = { id: string; division_id: string; division_name: string; home_name: string; away_name: string; home_season_team_id: string; away_season_team_id: string; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; duration_minutes: number | null; forfeited_by_season_team_id: string | null; status: string; home_score: number | null; away_score: number | null; stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'; round?: number | null }
+// A playoff side waiting for a semifinal has no team id yet; its name says which result it takes.
+type Game = { id: string; division_id: string; division_name: string; home_name: string; away_name: string; home_season_team_id: string | null; away_season_team_id: string | null; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; duration_minutes: number | null; forfeited_by_season_team_id: string | null; status: string; home_score: number | null; away_score: number | null; stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'; round?: number | null }
 type ScheduleStatus = { id: string; name: string; teamCount: number; hasSchedule: boolean; canGeneratePreliminary: boolean; playoffStage: 'semifinal' | 'final' | null; playoffs: boolean; thirdPlace: boolean; preliminaryReason?: string | null; playoffReason?: string | null }
 type Standing = Item & { wins: number; losses: number; pointDifference: number }
 type Dashboard = { teamCount: number; upcoming: Game[]; recent: Game[]; standings: Standing[] }
@@ -71,6 +73,9 @@ function scheduleReason(reason: string, several: boolean): string {
   const text = reason.replace(/^This division /i, '').replace(/^already has /i, several ? 'already have ' : 'already has ').trim()
   return /[.!?]$/.test(text) ? text : text + '.'
 }
+
+// Generating covers a division's round robin, or its playoff bracket once the round robin exists.
+const canGenerate = (division: ScheduleStatus) => division.canGeneratePreliminary || !!division.playoffStage
 
 function generationBlockers(items: { name: string; reason: string }[]) {
   const groups = new Map<string, string[]>()
@@ -404,19 +409,24 @@ const gameStage = (game: Game) => {
 }
 
 
+const waitingForTeams = (game: Game) => !game.home_season_team_id || !game.away_season_team_id
+const sideClass = (teamId: string | null) => teamId ? undefined : 'font-normal text-muted-foreground'
+
 function GamesList({ games, season, teams, venues, timeZone }: { games: Game[]; season: Season; teams: SeasonTeam[]; venues: Item[]; timeZone?: string | null }) {
   const fields = (game: Game): InputField[] => [
-    { name: 'homeTeamId', label: 'Home team', required: true, value: game.home_season_team_id, options: names(teams) },
-    { name: 'awayTeamId', label: 'Away team', required: true, value: game.away_season_team_id, options: names(teams) },
+    ...(waitingForTeams(game) ? [] : [
+      { name: 'homeTeamId', label: 'Home team', required: true, value: game.home_season_team_id, options: names(teams) },
+      { name: 'awayTeamId', label: 'Away team', required: true, value: game.away_season_team_id, options: names(teams) },
+    ]),
     { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: zonedInput(game.scheduled_at, timeZone) },
     { name: 'venueId', label: 'Venue', value: game.venue_id, options: names(venues) },
     { name: 'durationMinutes', label: 'Game duration (minutes)', type: 'number', required: true, min: 1, max: 1440, value: game.duration_minutes ?? 60, description: game.duration_minutes === null ? 'Confirm the game duration for conflict checks.' : undefined },
   ]
   return <div className="flex flex-col gap-4">{games.length === 0 && <NoData>No games to show yet.</NoData>}{games.map((game) => <div key={game.id} className="flex flex-col gap-2 border-b pb-4 last:border-0 last:pb-0">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{game.home_name} <span className="tabular-nums">{game.home_score !== null && game.away_score !== null ? `${game.home_score} – ${game.away_score}` : 'vs'}</span> {game.away_name}</p><Badge variant="secondary" className="capitalize">{game.forfeited_by_season_team_id ? 'Forfeit' : game.status}</Badge></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium"><span className={sideClass(game.home_season_team_id)}>{game.home_name}</span> <span className="tabular-nums">{game.home_score !== null && game.away_score !== null ? `${game.home_score} – ${game.away_score}` : 'vs'}</span> <span className={sideClass(game.away_season_team_id)}>{game.away_name}</span></p><Badge variant="secondary" className="capitalize">{game.forfeited_by_season_team_id ? 'Forfeit' : game.status}</Badge></div>
     <p className="text-sm text-muted-foreground">{formatGameDateTime(game.scheduled_at, timeZone)}{game.venue_name ? ` · ${game.venue_name}` : ''}{gameStage(game) ? ` · ${gameStage(game)}` : ''}</p>
     {game.status === 'scheduled' && season.status !== 'completed' && <details><summary className="cursor-pointer text-sm underline">Edit schedule</summary><div className="pt-3"><Editor title="Edit game" path={`games/${game.id}`} method="PATCH" fields={fields(game)} transform={(v) => ({ ...v, scheduledAt: zonedInstant(v.scheduledAt, timeZone), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} /></div></details>}
-    {(season.status === 'active' || (season.status === 'completed' && game.status === 'completed')) && <details><summary className="cursor-pointer text-sm underline">{game.status === 'completed' ? 'Correct score' : 'Record final score'}</summary><div className="pt-3">{game.forfeited_by_season_team_id && <p className="mb-3 text-sm text-muted-foreground">Saving a score records a played result instead of a forfeit.</p>}<Editor title="Final score" path={`games/${game.id}/score`} fields={[{ name: 'homeScore', label: `${game.home_name} score`, type: 'number', required: true, value: game.home_score }, { name: 'awayScore', label: `${game.away_name} score`, type: 'number', required: true, value: game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} /></div></details>}
+    {!waitingForTeams(game) && (season.status === 'active' || (season.status === 'completed' && game.status === 'completed')) && <details><summary className="cursor-pointer text-sm underline">{game.status === 'completed' ? 'Correct score' : 'Record final score'}</summary><div className="pt-3">{game.forfeited_by_season_team_id && <p className="mb-3 text-sm text-muted-foreground">Saving a score records a played result instead of a forfeit.</p>}<Editor title="Final score" path={`games/${game.id}/score`} fields={[{ name: 'homeScore', label: `${game.home_name} score`, type: 'number', required: true, value: game.home_score }, { name: 'awayScore', label: `${game.away_name} score`, type: 'number', required: true, value: game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} /></div></details>}
   </div>)}</div>
 }
 
@@ -467,7 +477,7 @@ function StandingsView({ season, division, rows }: { season: Season; division: D
   </section>
 }
 
-type GameDialog = { kind: 'schedule' } | { kind: 'generator'; mode: 'preliminary' | 'playoffs' } | { kind: 'edit' | 'score' | 'remove' | 'forfeit' | 'history'; game: Game }
+type GameDialog = { kind: 'schedule' } | { kind: 'edit' | 'score' | 'remove' | 'forfeit' | 'history'; game: Game }
 
 function ScheduleGameForm({ seasonId, divisions, divisionId, onDivisionChange, teams, teamsLoading, teamsError, onRetryTeams, venues, onClose, onSaved, onPendingChange, timeZone }: {
   seasonId: string; divisions: Division[]; divisionId: string; onDivisionChange: (id: string) => void; teams: SeasonTeam[]; teamsLoading: boolean; teamsError: string | null; onRetryTeams: () => void; venues: Item[]; onClose: () => void; onSaved: () => void; onPendingChange: (pending: boolean) => void; timeZone?: string | null
@@ -636,8 +646,11 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const editable = season.status !== 'completed'
   const game = dialog && 'game' in dialog ? dialog.game : undefined
   const gameFields: InputField[] = [
-    { name: 'homeTeamId', label: 'Home team', required: true, value: game?.home_season_team_id, options: names(teams) },
-    { name: 'awayTeamId', label: 'Away team', required: true, value: game?.away_season_team_id, options: names(teams) },
+    // Teams of a game waiting for semifinal results fill in automatically.
+    ...(game && waitingForTeams(game) ? [] : [
+      { name: 'homeTeamId', label: 'Home team', required: true, value: game?.home_season_team_id, options: names(teams) },
+      { name: 'awayTeamId', label: 'Away team', required: true, value: game?.away_season_team_id, options: names(teams) },
+    ]),
     { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: zonedInput(game?.scheduled_at, timeZone) },
     { name: 'venueId', label: 'Venue', value: game?.venue_id, options: names(venues) },
     ...(dialog?.kind === 'edit' ? [{ name: 'durationMinutes', label: 'Game duration (minutes)', type: 'number', required: true, min: 1, max: 1440, value: game?.duration_minutes ?? 60, description: game?.duration_minutes == null ? 'No duration was recorded for this game. Check the duration to detect schedule conflicts.' : 'Used to check for team and venue conflicts.' }] : []),
@@ -654,11 +667,13 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   // The actions menu for one game, shared by the list rows and the calendar cards.
   const gameActions = (row: Game) => {
     const canEdit = row.status === 'scheduled' && editable
-    const canScore = (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
-    const canForfeit = (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
+    const waiting = waitingForTeams(row)
+    const canScore = !waiting && (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
+    const canForfeit = !waiting && (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
     return <><DropdownMenuGroup>
               {canEdit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'edit', game: row })}><PencilIcon />Edit schedule</DropdownMenuItem>}
               {canScore && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'score', game: row })}><CircleCheckIcon />{row.status === 'completed' ? 'Correct score' : 'Record final score'}</DropdownMenuItem>}
+              {waiting && season.status === 'active' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Waiting for semifinal results</span></span></DropdownMenuItem>}
               {editable && season.status === 'draft' && row.status === 'scheduled' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Start the season first</span></span></DropdownMenuItem>}
               {canForfeit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'forfeit', game: row })}><FlagIcon />{row.forfeited_by_season_team_id ? 'Correct forfeit' : 'Mark as forfeit'}</DropdownMenuItem>}
               <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'history', game: row })}><HistoryIcon />Schedule history</DropdownMenuItem>
@@ -669,14 +684,14 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
     <div className="flex items-start gap-4 sm:gap-6">
       {group.day && <div aria-hidden="true" className="hidden w-20 shrink-0 flex-col items-center rounded-lg border bg-card px-2 py-3 text-center sm:flex"><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'MMM')}</span><span className="text-2xl font-semibold tabular-nums">{format(group.day, 'd')}</span><span className="text-xs uppercase text-muted-foreground">{format(group.day, 'EEE')}</span></div>}
       <Table className="table-fixed border-y"><caption className="sr-only">{group.day ? format(group.day, 'EEEE, MMMM d, yyyy') : 'Date not scheduled'} games</caption>
-        <colgroup><col className="w-24 sm:w-28" /><col /><col className="hidden w-48 md:table-column" /><col className="hidden w-32 lg:table-column" /><col className="w-12" /></colgroup>
-        <TableHeader className={groupIndex === 0 ? 'bg-muted/30' : 'sr-only'}><TableRow className="hover:bg-transparent"><SortableHead column="time" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Time</SortableHead><SortableHead column="matchup" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Matchup and score</SortableHead><SortableHead column="venue" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground md:table-cell">Venue</SortableHead><SortableHead column="status" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground lg:table-cell">Status</SortableHead><TableHead scope="col"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
+        <colgroup><col className="w-24 sm:w-28" /><col /><col className="hidden w-48 lg:table-column" /><col className="hidden w-32 xl:table-column" /><col className="w-12" /></colgroup>
+        <TableHeader className={groupIndex === 0 ? 'bg-muted/30' : 'sr-only'}><TableRow className="hover:bg-transparent"><SortableHead column="time" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Time</SortableHead><SortableHead column="matchup" sort={gameSortState} onSort={onGameSort} className="text-muted-foreground">Matchup and score</SortableHead><SortableHead column="venue" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground lg:table-cell">Venue</SortableHead><SortableHead column="status" sort={gameSortState} onSort={onGameSort} className="hidden text-muted-foreground xl:table-cell">Status</SortableHead><TableHead scope="col"><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
         <AnimatedTableBody>{sortRows(group.rows, gameSortState, gameSort).map((row) => {
           return <TableRow key={row.id} data-key={row.id}>
             <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? formatGameTime(row.scheduled_at, timeZone) : '—'}</TableCell>
-            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium">{row.home_name} <span className="font-normal text-muted-foreground">vs</span> {row.away_name}</span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 lg:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground md:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
-            <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground md:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
-            <TableCell className="hidden w-32 lg:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
+            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium"><span className={sideClass(row.home_season_team_id)}>{row.home_name}</span> <span className="font-normal text-muted-foreground">vs</span> <span className={sideClass(row.away_season_team_id)}>{row.away_name}</span></span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 xl:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground lg:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
+            <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground lg:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
+            <TableCell className="hidden w-32 xl:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
             <TableCell className="pr-3 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.home_name} vs ${row.away_name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]">{gameActions(row)}</DropdownMenuContent></DropdownMenu></TableCell>
           </TableRow>
         })}</AnimatedTableBody>
@@ -700,20 +715,19 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
           </div>
           {editable && <div className="flex flex-wrap items-center gap-2">
             {(() => {
-              const generate = <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.canGeneratePreliminary)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
+              const generate = <Button variant="outline" nativeButton={false} render={<Link href="/manage/games/generate" />} className="data-disabled:pointer-events-none data-disabled:opacity-50" disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some(canGenerate)}><CalendarDaysIcon data-icon="inline-start" />Generate schedule</Button>
               // A disabled control receives no hover events, so a focusable wrapper explains why generation is unavailable.
-              if (!scheduleStatus.isSuccess || !scheduleDivisions.length || scheduleDivisions.some((item) => item.canGeneratePreliminary)) return generate
+              if (!scheduleStatus.isSuccess || !scheduleDivisions.length || scheduleDivisions.some(canGenerate)) return generate
               return <Tooltip>
                 <TooltipTrigger render={<span tabIndex={0} aria-label="Generate schedule is unavailable" className="inline-flex cursor-not-allowed rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50" />}>{generate}</TooltipTrigger>
-                <TooltipContent side="bottom" align="start" className="block max-w-sm px-3 py-2.5 text-left leading-relaxed">{generationBlockers(scheduleDivisions.map((item) => ({ name: item.name, reason: item.preliminaryReason || 'Not eligible for schedule generation.' })))}</TooltipContent>
+                <TooltipContent side="bottom" align="start" className="block max-w-sm px-3 py-2.5 text-left leading-relaxed">{generationBlockers(scheduleDivisions.map((item) => ({ name: item.name, reason: (item.hasSchedule ? item.playoffReason : item.preliminaryReason) || 'Not eligible for schedule generation.' })))}</TooltipContent>
               </Tooltip>
             })()}
-            {scheduleDivisions.some((item) => item.playoffs) && <Button variant="outline" onClick={() => setDialog({ kind: 'generator', mode: 'playoffs' })} disabled={!scheduleStatus.isSuccess || scheduleStatus.isFetching || !scheduleDivisions.some((item) => item.playoffStage)}><TrophyIcon data-icon="inline-start" />Schedule playoffs</Button>}
             <Button onClick={openSchedule} disabled={!divisions.length}><PlusIcon data-icon="inline-start" />Schedule game</Button>
           </div>}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          {gamesView === 'list' ? <TabsList className="relative"><TabsIndicator /><TabsTrigger value="scheduled" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Scheduled</TabsTrigger><TabsTrigger value="completed" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Final results</TabsTrigger></TabsList> : <div className="flex flex-wrap items-center gap-2">
+          {gamesView === 'list' ? <TabsList className="relative"><TabsIndicator /><TabsTrigger value="scheduled" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Scheduled</TabsTrigger><TabsTrigger value="completed" className="z-[1] data-active:bg-transparent group-data-[variant=default]/tabs-list:data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent">Final results</TabsTrigger></TabsList> : gamesView === 'bracket' ? <h3 className="text-base font-semibold tracking-tight">Playoff brackets</h3> : <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center rounded-lg border">
               <Button type="button" variant="ghost" size="icon-sm" aria-label={`Previous ${calendarView}`} onClick={() => setCalendarAnchor((anchor) => shiftAnchor(calendarView, anchor, -1))}><ChevronLeftIcon /></Button>
               <Button type="button" variant="ghost" size="icon-sm" aria-label={`Next ${calendarView}`} onClick={() => setCalendarAnchor((anchor) => shiftAnchor(calendarView, anchor, 1))}><ChevronRightIcon /></Button>
@@ -726,12 +740,12 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
             {gamesView === 'list' && <Popover open={datesOpen} onOpenChange={toggleDates}><PopoverTrigger render={<Button id="game-dates" type="button" variant="outline" aria-label="Filter games by date range" className="justify-start font-normal" />}><CalendarDaysIcon data-icon="inline-start" />{dateLabel}</PopoverTrigger><PopoverContent align="end" className="w-auto gap-0 p-0"><Calendar mode="range" selected={dateStart ? { from: dateStart, to: undefined } : dates} onSelect={(_value, day) => pickDate(day)} defaultMonth={dateStart ?? dates?.from ?? (seasonStart && isValid(seasonStart) ? seasonStart : undefined)} autoFocus /><div className="flex min-h-11 items-center justify-between gap-3 border-t px-3 py-1.5"><p className="text-xs text-muted-foreground">{dateStart ? 'Select an end date' : 'Select a start date'}</p>{(dates?.from || dateStart) && <Button type="button" variant="ghost" size="sm" onClick={() => { setDateStart(undefined); clearDates(); setDatesOpen(false) }}>Clear dates</Button>}</div></PopoverContent></Popover>}
             {(divisionFilter || (gamesView === 'list' && dates?.from)) && <Button type="button" variant="ghost" onClick={() => { setDivisionFilter(''); setPage(1); if (gamesView === 'list') clearDates() }}><XIcon data-icon="inline-start" />Clear filters</Button>}
             <div role="group" aria-label="Games view" className="inline-flex items-center gap-0.5 rounded-lg border p-0.5">
-              {([['list', ListIcon, 'List'], ['week', CalendarRangeIcon, 'Week'], ['month', CalendarDaysIcon, 'Month']] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={gamesView === value ? 'secondary' : 'ghost'} aria-pressed={gamesView === value} onClick={() => saveGamesView(value)} className="h-7 px-2.5"><Icon data-icon="inline-start" aria-hidden="true" /><span className="sr-only sm:not-sr-only">{label}</span></Button>)}
+              {([['list', ListIcon, 'List'], ['week', CalendarRangeIcon, 'Week'], ['month', CalendarDaysIcon, 'Month'], ['bracket', TrophyIcon, 'Bracket']] as const).map(([value, Icon, label]) => <Button key={value} type="button" size="sm" variant={gamesView === value ? 'secondary' : 'ghost'} aria-pressed={gamesView === value} onClick={() => saveGamesView(value)} className="h-7 px-2.5"><Icon data-icon="inline-start" aria-hidden="true" /><span className="sr-only sm:not-sr-only">{label}</span></Button>)}
             </div>
           </div>
         </div>
       </div>
-      {gamesView === 'list' ? <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none">{games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : showSkeleton ? <div className="flex flex-col gap-8"><GamesSkeleton />{paging && pageMeta ? <DataPagination meta={pageMeta} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /> : <PaginationSkeleton />}</div> : gameAgenda}</div></TabsContent> : <div className="pt-5"><div key={gamesView} className="animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none"><GamesCalendar seasonId={season.id} view={calendarView} anchor={calendarAnchor} todayKey={todayKey} timeZone={timeZone} divisionId={divisionFilter} onOpenWeek={openWeek} renderActions={gameActions} /></div></div>}
+      {gamesView === 'list' ? <TabsContent value={status} className="pt-5"><div key={status} className="animate-in fade-in-0 slide-in-from-bottom-1 duration-200 ease-out motion-reduce:animate-none">{games.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load games</AlertTitle><AlertDescription><p>{games.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void games.refetch()}>Try again</Button></AlertDescription></Alert> : showSkeleton ? <div className="flex flex-col gap-8"><GamesSkeleton />{paging && pageMeta ? <DataPagination meta={pageMeta} onPageChange={goToPage} onPageSizeChange={(size) => { setPage(1); setPageSize(size) }} /> : <PaginationSkeleton />}</div> : gameAgenda}</div></TabsContent> : <div className="pt-5"><div key={gamesView} className="animate-in fade-in-0 duration-200 ease-out motion-reduce:animate-none">{gamesView === 'bracket' ? <GamesBracket seasonId={season.id} divisions={divisions} divisionId={divisionFilter} timeZone={timeZone} renderActions={gameActions} /> : <GamesCalendar seasonId={season.id} view={calendarView} anchor={calendarAnchor} todayKey={todayKey} timeZone={timeZone} divisionId={divisionFilter} onOpenWeek={openWeek} renderActions={gameActions} />}</div></div>}
     </Tabs>
     <Dialog open={confirmStart} onOpenChange={(open) => { if (!startSeason.isPending) setConfirmStart(open) }}>
       <DialogContent showCloseButton={!startSeason.isPending} className="sm:max-w-md">
@@ -739,9 +753,8 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
         <DialogFooter><Button type="button" variant="outline" disabled={startSeason.isPending} onClick={() => setConfirmStart(false)}>Cancel</Button><Button type="button" disabled={startSeason.isPending} onClick={() => startSeason.mutate()}>{startSeason.isPending ? 'Starting…' : 'Start season'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
-    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className={dialog?.kind === 'generator' ? 'flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl' : 'max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg'}>{dialog?.kind !== 'generator' && dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && dialog?.kind !== 'score' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
-      {dialog?.kind === 'generator' && <ScheduleGenerator seasonId={season.id} seasonName={season.name} seasonStart={season.start_date} seasonEnd={season.end_date} venues={venues} mode={dialog.mode} timeZone={timeZone} onClose={closeDialog} onSaved={() => saved('Schedule saved.')} onPendingChange={setPending} />}
-      {dialog?.kind === 'forfeit' && <GameForfeitDialog game={dialog.game} onClose={closeDialog} onSaved={() => saved('Forfeit recorded.')} onPendingChange={setPending} />}
+    <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !pending && !removeGame.isPending) closeDialog() }}><DialogContent showCloseButton={!pending && !removeGame.isPending} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">{dialog?.kind !== 'forfeit' && dialog?.kind !== 'history' && dialog?.kind !== 'score' && <DialogHeader><DialogTitle>{dialog?.kind === 'schedule' ? 'Schedule a game' : dialog?.kind === 'edit' ? 'Edit schedule' : dialog?.kind === 'remove' ? 'Remove game?' : game?.status === 'completed' ? 'Correct final score' : 'Record final score'}</DialogTitle><DialogDescription>{dialog?.kind === 'remove' ? `Remove ${game?.home_name} vs ${game?.away_name}? Only unplayed games can be removed.` : game && waitingForTeams(game) ? 'Teams fill in automatically when the semifinal results are recorded.' : 'Choose a division and two teams, then enter the local date and time.'}</DialogDescription></DialogHeader>}
+      {dialog?.kind === 'forfeit' && <GameForfeitDialog game={{ ...dialog.game, home_season_team_id: dialog.game.home_season_team_id ?? '', away_season_team_id: dialog.game.away_season_team_id ?? '' }} onClose={closeDialog} onSaved={() => saved('Forfeit recorded.')} onPendingChange={setPending} />}
       {dialog?.kind === 'history' && <GameScheduleHistory gameId={dialog.game.id} timeZone={timeZone} />}
       {dialog?.kind === 'remove' && <><p className="text-sm text-muted-foreground">This removes the game from the schedule. Games with dependent playoff games or records may be blocked.</p>{removeGame.isError && <p role="alert" className="text-sm text-destructive">{removeGame.error.message}</p>}<DialogFooter><Button type="button" variant="outline" disabled={removeGame.isPending} onClick={closeDialog}>Cancel</Button><Button type="button" variant="destructive" disabled={removeGame.isPending} onClick={() => removeGame.mutate(dialog.game.id)}>{removeGame.isPending ? 'Removing…' : 'Remove game'}</Button></DialogFooter></>}
       {dialog?.kind === 'schedule' && <ScheduleGameForm seasonId={season.id} divisions={divisions} divisionId={scheduleDivision} onDivisionChange={setScheduleDivision} teams={teams} teamsLoading={!!scheduleDivision && registrations.isFetching} teamsError={registrations.isError ? registrations.error.message : null} onRetryTeams={() => void registrations.refetch()} venues={venues} onClose={closeDialog} onSaved={() => saved('Game scheduled.')} onPendingChange={setPending} timeZone={timeZone} />}
@@ -758,6 +771,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
   const [editing, setEditing] = useState('')
   const [websiteLeague, setWebsiteLeague] = useState<LeagueRow | null>(null)
   const archiveAction = useArchiveAction()
+  const guarded = useGuardedArchive()
   const showingArchived = view === 'archived'
   const archived = useLeagueQuery<LeagueRow[]>(`organizations/${organizationId}/leagues?archived=true`, !!organizationId && showingArchived)
   const rows = showingArchived ? archived.data ?? [] : leagues
@@ -769,6 +783,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
   if (!showingArchived && !leagues.length) return <Card className="mx-auto w-full max-w-3xl"><CardContent>
     <Empty className="px-4 py-10 sm:py-14"><EmptyHeader><EmptyMedia variant="icon"><TrophyIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No leagues yet</h3></EmptyTitle><EmptyDescription>Create your first league to start organizing seasons, teams, and games.</EmptyDescription></EmptyHeader><EmptyContent><div className="flex flex-wrap justify-center gap-2"><CreateLeagueDialog organizationId={organizationId} first /><Button variant="ghost" onClick={() => setView('archived')}><ArchiveIcon data-icon="inline-start" />View archived</Button></div></EmptyContent></Empty>
   </CardContent></Card>
+  const editingLeague = showingArchived ? null : rows.find((item) => item.id === editing) ?? null
   return <section aria-label="Leagues" className="flex flex-col gap-4">
     {toolbar}
     {showingArchived && archived.isLoading ? <LoadingContent /> : showingArchived && archived.isError ? <Alert variant="destructive"><AlertTitle>Couldn’t load archived leagues</AlertTitle><AlertDescription><p>{archived.error.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void archived.refetch()}>Try again</Button></AlertDescription></Alert> : !rows.length ? <Card><CardContent><Empty className="px-4 py-10"><EmptyHeader><EmptyMedia variant="icon"><ArchiveIcon aria-hidden="true" /></EmptyMedia><EmptyTitle><h3>No archived leagues</h3></EmptyTitle><EmptyDescription>Archived leagues appear here and can be restored.</EmptyDescription></EmptyHeader></Empty></CardContent></Card>
@@ -780,18 +795,19 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground sm:table-cell"><span className="break-words">{item.location || 'No location added'}</span></TableCell>
           <TableCell className="hidden max-w-0 py-3 whitespace-normal text-muted-foreground md:table-cell"><span className="break-words">{item.time_zone ? item.time_zone.replaceAll('_', ' ') : 'Not set'}</span></TableCell>
           <TableCell className="hidden py-3 lg:table-cell">{item.published_at && !showingArchived ? <Badge variant="seasonActive">Published</Badge> : <span className="text-muted-foreground">Hidden</span>}</TableCell>
-          <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
+          <TableCell className="py-3 pr-4 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label={`Actions for ${item.name}`} disabled={archiveAction.isPending || guarded.pending} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]"><DropdownMenuGroup>
             {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
-              <DropdownMenuItem className="py-2" onClick={() => setEditing(editing === item.id ? '' : item.id)}><PencilIcon />{editing === item.id ? 'Close editor' : 'Edit league'}</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => setEditing(item.id)}><PencilIcon />Edit league</DropdownMenuItem>
               <DropdownMenuItem className="py-2" onClick={() => setWebsiteLeague(item)}><GlobeIcon />Website settings</DropdownMenuItem>
-              <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/archive`, message: 'League archived.', undoPath: `leagues/${item.id}/restore` })}><ArchiveIcon />Archive league</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" disabled={guarded.pending} onClick={() => void guarded.archive({ kind: 'league', name: item.name, path: `leagues/${item.id}/archive`, undoPath: `leagues/${item.id}/restore`, message: 'League archived.', activeSeasonsPath: `leagues/${item.id}/seasons?status=active` })}><ArchiveIcon />Archive league</DropdownMenuItem>
             </>}
           </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>
-        {!showingArchived && editing === item.id && <TableRow><TableCell colSpan={5} className="px-5 py-5 whitespace-normal"><div id={`edit-league-${item.id}`} className="max-w-lg"><Editor title="Edit league" path={`leagues/${item.id}`} method="PATCH" fields={[{ name: 'name', label: 'Name', required: true, value: item.name }, { name: 'location', label: 'Location', value: item.location }, { name: 'timeZone', label: 'Time zone', type: 'timezone', value: item.time_zone ?? browserTimeZone(), description: 'Game times show in this zone.' }]} transform={(v) => ({ name: v.name, location: optional(v.location), timeZone: v.timeZone || null })} onSaved={() => setEditing('')} /></div></TableCell></TableRow>}
       </Fragment>)}</AnimatedTableBody>
     </Table></CardContent></Card>}
     <LeagueWebsiteDialog league={websiteLeague} onClose={() => setWebsiteLeague(null)} />
+    <EditLeagueDialog key={editingLeague?.id ?? 'none'} league={editingLeague} onClose={() => setEditing('')} />
+    {guarded.dialog}
   </section>
 }
 
@@ -1041,6 +1057,9 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     </>}
   </main>
 }
+
+
+
 
 
 

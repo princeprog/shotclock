@@ -1,9 +1,9 @@
-export type GamesView = 'list' | 'week' | 'month'
+export type GamesView = 'list' | 'week' | 'month' | 'bracket'
 type ViewStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 const key = 'shotclock:games-view'
 const eventName = 'shotclock:games-view-change'
-const views: GamesView[] = ['list', 'week', 'month']
+const views: GamesView[] = ['list', 'week', 'month', 'bracket']
 let memoryView: GamesView = 'list'
 let storageUnavailable = false
 

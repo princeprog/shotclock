@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
-import { checkSession } from '@/lib/client-session'
+import { RestoringSession } from '@/components/restoring-session'
+import { refreshSession } from '@/lib/client-session'
 import { publishSessionChange } from '@/lib/league-cache'
 import { useAppDispatch } from '@/lib/store-hooks'
 import { resetUi } from '@/lib/ui-slice'
@@ -18,25 +19,31 @@ export function RestoreSession() {
   const [error, setError] = useState('')
   useEffect(() => {
     let active = true
-    async function restore() {
-      if (!navigator.locks) { router.replace('/login'); return }
-      try {
-        await navigator.locks.request('shotclock-refresh', async () => {
-          if (!active) return
-          const status = await checkSession(queryClient)
-          if (status === 200) { router.refresh(); return }
-          if (status !== 401) { setError('The service is unavailable. Please try again.'); return }
-          const response = await fetch('/api/auth/refresh', { method: 'POST', headers: requestHeaders, body: '{}' })
-          if (response.ok) router.refresh()
-          else if (response.status === 401) router.replace('/login')
-          else setError('The service is unavailable. Please try again.')
-        })
-      } catch { if (active) setError('The service is unavailable. Please try again.') }
-    }
-    void restore()
+    refreshSession(queryClient).then((result) => {
+      if (!active) return
+      if (result === 'restored') router.refresh()
+      else if (result === 'signed-out') router.replace('/login')
+      else setError('The service is unavailable. Please try again.')
+    }, () => { if (active) setError('The service is unavailable. Please try again.') })
     return () => { active = false }
   }, [queryClient, router])
-  return <main className="flex min-h-svh items-center justify-center p-6"><div role="status" className="flex flex-col items-center gap-4 text-center"><p>{error || 'Restoring your session…'}</p>{error && <Button onClick={() => window.location.reload()}>Try again</Button>}</div></main>
+  return <main className="flex min-h-svh items-center justify-center p-6">{error ? <div role="alert" className="flex flex-col items-center gap-4 text-center"><p>{error}</p><Button onClick={() => window.location.reload()}>Try again</Button></div> : <RestoringSession />}</main>
+}
+
+// On the login page: a session that can still be restored continues to organization selection; otherwise the form shows.
+export function ResumeSession({ children }: { children: ReactNode }) {
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const [signIn, setSignIn] = useState(false)
+  useEffect(() => {
+    let active = true
+    refreshSession(queryClient).then((result) => {
+      if (!active) return
+      if (result === 'restored') { router.replace('/organizations'); router.refresh() } else setSignIn(true)
+    }, () => { if (active) setSignIn(true) })
+    return () => { active = false }
+  }, [queryClient, router])
+  return signIn ? children : <RestoringSession size="inline" />
 }
 
 export function useSignOut() {
@@ -68,3 +75,5 @@ export function SignOut() {
   const { signOut, pending, error } = useSignOut()
   return <div className="flex items-center gap-3">{error && <span role="alert" className="text-sm text-destructive">{error}</span>}<Button variant="outline" onClick={signOut} disabled={pending}>{pending ? 'Signing out…' : 'Sign out'}</Button></div>
 }
+
+
