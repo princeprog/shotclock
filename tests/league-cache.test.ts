@@ -323,3 +323,29 @@ test('season status and season edits refresh only their season schedule status',
     client.clear()
   }
 })
+test('roster changes and new venues refresh the season overview', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'leagues/l1/seasons'], [{ id: 's1' }])
+  for (const path of ['seasons/s1/dashboard', 'seasons/s2/dashboard', 'seasons/s1/standings']) client.setQueryData(['league', path], {})
+  await applyLeagueMutation(client, 'season-teams/st1/roster', 'POST', {}, { id: 'r1' })
+  assert.equal(client.getQueryState(['league', 'seasons/s1/dashboard'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/dashboard'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s1/standings'])?.isInvalidated, false)
+  for (const path of ['seasons/s1/dashboard', 'seasons/s2/dashboard']) client.setQueryData(['league', path], {})
+  await applyLeagueMutation(client, 'leagues/l1/venues', 'POST', {}, { id: 'v1', league_id: 'l1' })
+  assert.equal(client.getQueryState(['league', 'seasons/s1/dashboard'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/dashboard'])?.isInvalidated, false)
+  client.clear()
+})
+
+
+test('live plays refresh nothing while finishing a live game refreshes results and scorekeeping', async () => {
+  const client = makeQueryClient()
+  const paths = ['seasons/s1/games', 'seasons/s1/standings', 'seasons/s1/dashboard', 'scorekeeping/games', 'games/g1/live', 'organizations/o1/leagues']
+  for (const path of paths) client.setQueryData(['league', path], {})
+  for (const route of ['games/g1/live/events', 'games/g1/live/events/e1/void', 'games/g1/live/clock', 'games/g1/live/period', 'games/g1/live/claim']) await applyLeagueMutation(client, route, 'POST', {}, {})
+  assert.deepEqual(paths.filter((path) => client.getQueryState(['league', path])?.isInvalidated), [])
+  await applyLeagueMutation(client, 'games/g1/live/finish', 'POST', {}, { gameId: 'g1' })
+  assert.deepEqual(paths.filter((path) => client.getQueryState(['league', path])?.isInvalidated), ['seasons/s1/games', 'seasons/s1/standings', 'seasons/s1/dashboard', 'scorekeeping/games', 'games/g1/live'])
+  client.clear()
+})

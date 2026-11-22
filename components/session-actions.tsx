@@ -10,6 +10,7 @@ import { publishSessionChange } from '@/lib/league-cache'
 import { useAppDispatch } from '@/lib/store-hooks'
 import { resetUi } from '@/lib/ui-slice'
 import { clearOrganizationSelection } from '@/lib/organization-selection'
+import { pathAfterSignIn } from '@/lib/pending-invitation'
 
 const requestHeaders = { 'Content-Type': 'application/json', 'X-Requested-With': 'Shotclock' }
 
@@ -39,7 +40,7 @@ export function ResumeSession({ children }: { children: ReactNode }) {
     let active = true
     refreshSession(queryClient).then((result) => {
       if (!active) return
-      if (result === 'restored') { router.replace('/organizations'); router.refresh() } else setSignIn(true)
+      if (result === 'restored') { router.replace(pathAfterSignIn()); router.refresh() } else setSignIn(true)
     }, () => { if (active) setSignIn(true) })
     return () => { active = false }
   }, [queryClient, router])

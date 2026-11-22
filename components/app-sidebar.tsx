@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect } from "react"
 import { usePathname } from "next/navigation"
-import { ArrowLeftRightIcon, Building2Icon, CalendarDaysIcon, LayoutDashboardIcon, ListOrderedIcon, LayersIcon, LogOutIcon, MapPinIcon, UserCogIcon, MoreVerticalIcon, TrophyIcon, UsersIcon, CalendarRangeIcon } from "lucide-react"
+import { ArrowLeftRightIcon, Building2Icon, CalendarDaysIcon, ClipboardListIcon, LayoutDashboardIcon, ListOrderedIcon, LayersIcon, LogOutIcon, MapPinIcon, UserCogIcon, MoreVerticalIcon, TrophyIcon, UsersIcon, CalendarRangeIcon } from "lucide-react"
 import { useSignOut } from "@/components/session-actions"
 import { ShotclockLogo } from "@/components/shotclock-logo"
 import { useWorkspace } from "@/components/workspace-context"
@@ -26,7 +26,7 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
   const name = user.name?.trim()
   const initials = (name || user.email).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => Array.from(part)[0]).join('').toUpperCase()
   const items = [
-    { href: '/', label: 'Dashboard', icon: LayoutDashboardIcon },
+    { href: '/', label: 'Overview', icon: LayoutDashboardIcon },
     { href: '/manage/leagues', label: 'Leagues', icon: TrophyIcon },
     { href: '/manage/seasons', label: 'Seasons', icon: CalendarRangeIcon },
     { href: '/manage/divisions', label: 'Divisions', icon: LayersIcon },
@@ -34,11 +34,12 @@ export function AppSidebar({ user, ...props }: React.ComponentProps<typeof Sideb
     { href: '/manage/venues', label: 'Venues', icon: MapPinIcon },
     { href: '/manage/games', label: 'Games', icon: CalendarDaysIcon },
     { href: '/manage/standings', label: 'Standings', icon: ListOrderedIcon },
+    { href: '/scorekeeping', label: 'Scorekeeping', icon: ClipboardListIcon },
   ]
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader className="overflow-hidden p-4 transition-[padding] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none group-data-[collapsible=icon]:p-2">
-        <Link href="/" aria-label="Shotclock dashboard"><ShotclockLogo compactInSidebar /></Link>
+        <Link href="/" aria-label="Shotclock overview"><ShotclockLogo compactInSidebar /></Link>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

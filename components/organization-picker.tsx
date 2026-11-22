@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArchiveIcon, ArchiveRestoreIcon, ArrowRightIcon, Building2Icon, ChevronDownIcon, MoreVerticalIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { ArchiveIcon, ArchiveRestoreIcon, ArrowRightIcon, Building2Icon, ChevronDownIcon, ClipboardListIcon, MoreVerticalIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,11 +16,13 @@ import { DeleteRecordDialog, useArchiveAction, useGuardedArchive, type DeleteTar
 import { leagueRequest } from '@/lib/league-client'
 import { organizationReturnPath } from '@/lib/organization-navigation'
 import { saveOrganizationSelection } from '@/lib/organization-selection'
+import { readPendingInvitation } from '@/lib/pending-invitation'
 import { markWorkspaceFresh } from '@/lib/session-freshness'
 import { useAppDispatch } from '@/lib/store-hooks'
 import { selectOrganization } from '@/lib/ui-slice'
 
 type Organization = { id: string; name: string }
+type ScorekeepingLeague = { id: string; name: string; organization_name: string; role: 'owner' | 'scorekeeper' }
 
 export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
   const router = useRouter()
@@ -46,6 +49,19 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
     enabled: showArchived,
     retry: false,
   })
+  const scorekeeping = useQuery({
+    queryKey: ['league', 'scorekeeping/games'],
+    queryFn: () => leagueRequest<{ leagues: ScorekeepingLeague[] }>('scorekeeping/games', client),
+    retry: false,
+  })
+  const scoredLeagues = scorekeeping.data?.leagues.filter((league) => league.role === 'scorekeeper') ?? []
+  const onlyScorekeeper = organizations.data?.length === 0 && scoredLeagues.length > 0 && !returnTo
+
+  // An invitation opened before signing in continues here, and people who only keep score go straight to their games.
+  useEffect(() => {
+    if (readPendingInvitation()) router.replace('/invitations/accept')
+    else if (onlyScorekeeper) router.replace('/scorekeeping')
+  }, [onlyScorekeeper, router])
 
   function enterOrganization(organization: Organization) {
     saveOrganizationSelection(organization.id)
@@ -92,6 +108,11 @@ export function OrganizationPicker({ returnTo }: { returnTo?: string }) {
       </div>
 
       <section aria-labelledby="organizations-heading" className="mt-10 flex flex-col gap-4">
+        {scoredLeagues.length > 0 && <Card size="sm"><CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><ClipboardListIcon aria-hidden="true" /></span>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5"><p className="font-medium">You keep score for {scoredLeagues.length === 1 ? scoredLeagues[0].name : `${scoredLeagues.length} leagues`}</p><p className="truncate text-sm text-muted-foreground">{scoredLeagues.map((league) => `${league.name} · ${league.organization_name}`).join(', ')}</p></div>
+          <Button variant="outline" className="self-start sm:self-center" nativeButton={false} render={<Link href="/scorekeeping" />}>Open scorekeeping<ArrowRightIcon data-icon="inline-end" /></Button>
+        </CardContent></Card>}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="organizations-heading" className="text-sm font-medium">Your organizations</h2>
           {!creating && !!organizations.data?.length && <Button variant="outline" onClick={() => setCreating(true)}><PlusIcon data-icon="inline-start" />Create organization</Button>}

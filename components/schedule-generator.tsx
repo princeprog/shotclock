@@ -432,6 +432,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
         const unplaced = result.unplaced ?? []
         if (!Array.isArray(unplaced) || unplaced.some((item) => !includedIds.has(item.divisionId) || !item.homeTeamId || !item.awayTeamId || typeof item.reason !== 'string')) throw new Error()
         setSuggestions({})
+        setReviewView('list')
         setDraft({ input, games, unplaced, warnings: result.warnings, divisions: result.divisions, seasonId })
       } catch {
         setError('The preview contained incomplete game details. Please try again.')

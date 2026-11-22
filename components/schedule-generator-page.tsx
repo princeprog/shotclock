@@ -10,6 +10,7 @@ import { ScheduleGenerator } from '@/components/schedule-generator'
 import { useWorkspace } from '@/components/workspace-context'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { saveGamesView } from '@/lib/games-view'
 import { leagueRequest } from '@/lib/league-client'
 import { confirmDiscardSchedulePreview, installScheduleNavigationGuard } from '@/lib/schedule-navigation-guard'
 
@@ -35,6 +36,8 @@ export function ScheduleGeneratorPage() {
   const saved = () => {
     unsaved.current = false
     toast.success('Schedule saved.')
+    // The games page remembers the last view; a newly saved schedule opens in the list.
+    saveGamesView('list')
     router.push('/manage/games')
   }
 

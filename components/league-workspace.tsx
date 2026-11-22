@@ -4,14 +4,16 @@ import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, t
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO } from 'date-fns'
-import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon, XIcon, CalendarRangeIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
+import { ArchiveIcon, ArchiveRestoreIcon, AwardIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, TimerIcon, Trash2Icon, TrophyIcon, UsersIcon, XIcon, CalendarRangeIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
 import { EditLeagueDialog } from '@/components/edit-league-dialog'
 import { LeagueWebsiteDialog } from '@/components/league-website-dialog'
+import { ScorekeepersDialog } from '@/components/scorekeepers-dialog'
 import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
 import { GameScoreDialog } from '@/components/game-score-dialog'
+import { SeasonOverview } from '@/components/season-overview'
 import { GameScheduleHistory } from '@/components/game-schedule-history'
 import { VenuesWorkspace } from '@/components/venues-workspace'
 import { TimeZonePicker } from '@/components/time-zone-picker'
@@ -28,7 +30,7 @@ import { nextSort, sortParams, sortRows, type SortState } from '@/lib/table-sort
 import { requirePaginatedResult, type PaginatedResult } from '@/lib/pagination'
 import { leagueRequest } from '@/lib/league-client'
 import { joinGameTime, splitGameTime } from '@/lib/game-time'
-import { browserTimeZone, formatGameDateTime, formatGameTime, zonedDate, zonedDayStart, zonedInput, zonedInstant } from '@/lib/league-time'
+import { browserTimeZone, formatGameTime, zonedDate, zonedDayStart, zonedInput, zonedInstant } from '@/lib/league-time'
 import { teamListHref, type TeamFilters } from '@/lib/team-filter-links'
 import { readTeamView, saveTeamView, subscribeTeamView, availableTeamDivisions } from '@/lib/team-view'
 import { useWorkspace } from '@/components/workspace-context'
@@ -61,10 +63,9 @@ type OrganizationTeamRow = Team & { league_id: string; league_name: string; seas
 type Division = Item & { season_id: string; min_age: number | null; max_age: number | null }
 type SeasonTeam = Item & { team_id: string; division_id: string }
 // A playoff side waiting for a semifinal has no team id yet; its name says which result it takes.
-type Game = { id: string; division_id: string; division_name: string; home_name: string; away_name: string; home_season_team_id: string | null; away_season_team_id: string | null; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; duration_minutes: number | null; forfeited_by_season_team_id: string | null; status: string; home_score: number | null; away_score: number | null; stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'; round?: number | null }
+type Game = { id: string; division_id: string; division_name: string; home_name: string; away_name: string; home_season_team_id: string | null; away_season_team_id: string | null; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; duration_minutes: number | null; forfeited_by_season_team_id: string | null; status: string; home_score: number | null; away_score: number | null; stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'; round?: number | null; live_scored?: boolean; live_home_score?: number | null; live_away_score?: number | null; best_player?: { name: string; points: number; rebounds: number; assists: number } | null }
 type ScheduleStatus = { id: string; name: string; teamCount: number; hasSchedule: boolean; canGeneratePreliminary: boolean; playoffStage: 'semifinal' | 'final' | null; playoffs: boolean; thirdPlace: boolean; preliminaryReason?: string | null; playoffReason?: string | null }
 type Standing = Item & { wins: number; losses: number; pointDifference: number }
-type Dashboard = { teamCount: number; upcoming: Game[]; recent: Game[]; standings: Standing[] }
 type Option = { value: string; label: string }
 type InputField = { name: string; label: string; type?: string; required?: boolean; min?: number; max?: number; description?: string; value?: string | number | null; options?: Option[] }
 
@@ -89,7 +90,7 @@ function generationBlockers(items: { name: string; reason: string }[]) {
 }
 
 const pageCopy: Record<Section, { title: string; description: string }> = {
-  dashboard: { title: 'Season overview', description: 'Follow your season, upcoming games, and standings in one place.' },
+  dashboard: { title: 'Season overview', description: 'What’s next, what needs attention, and how each division stands.' },
   leagues: { title: 'Leagues', description: 'Create and manage the leagues in your organization.' },
   seasons: { title: 'Seasons', description: 'Set up seasons and manage their progress from draft to completion.' },
   divisions: { title: 'Divisions', description: 'Manage divisions for the selected season.' },
@@ -412,30 +413,10 @@ const gameStage = (game: Game) => {
 const waitingForTeams = (game: Game) => !game.home_season_team_id || !game.away_season_team_id
 const sideClass = (teamId: string | null) => teamId ? undefined : 'font-normal text-muted-foreground'
 
-function GamesList({ games, season, teams, venues, timeZone }: { games: Game[]; season: Season; teams: SeasonTeam[]; venues: Item[]; timeZone?: string | null }) {
-  const fields = (game: Game): InputField[] => [
-    ...(waitingForTeams(game) ? [] : [
-      { name: 'homeTeamId', label: 'Home team', required: true, value: game.home_season_team_id, options: names(teams) },
-      { name: 'awayTeamId', label: 'Away team', required: true, value: game.away_season_team_id, options: names(teams) },
-    ]),
-    { name: 'scheduledAt', label: 'Date and time', type: 'datetime-local', required: true, value: zonedInput(game.scheduled_at, timeZone) },
-    { name: 'venueId', label: 'Venue', value: game.venue_id, options: names(venues) },
-    { name: 'durationMinutes', label: 'Game duration (minutes)', type: 'number', required: true, min: 1, max: 1440, value: game.duration_minutes ?? 60, description: game.duration_minutes === null ? 'Confirm the game duration for conflict checks.' : undefined },
-  ]
-  return <div className="flex flex-col gap-4">{games.length === 0 && <NoData>No games to show yet.</NoData>}{games.map((game) => <div key={game.id} className="flex flex-col gap-2 border-b pb-4 last:border-0 last:pb-0">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium"><span className={sideClass(game.home_season_team_id)}>{game.home_name}</span> <span className="tabular-nums">{game.home_score !== null && game.away_score !== null ? `${game.home_score} – ${game.away_score}` : 'vs'}</span> <span className={sideClass(game.away_season_team_id)}>{game.away_name}</span></p><Badge variant="secondary" className="capitalize">{game.forfeited_by_season_team_id ? 'Forfeit' : game.status}</Badge></div>
-    <p className="text-sm text-muted-foreground">{formatGameDateTime(game.scheduled_at, timeZone)}{game.venue_name ? ` · ${game.venue_name}` : ''}{gameStage(game) ? ` · ${gameStage(game)}` : ''}</p>
-    {game.status === 'scheduled' && season.status !== 'completed' && <details><summary className="cursor-pointer text-sm underline">Edit schedule</summary><div className="pt-3"><Editor title="Edit game" path={`games/${game.id}`} method="PATCH" fields={fields(game)} transform={(v) => ({ ...v, scheduledAt: zonedInstant(v.scheduledAt, timeZone), venueId: optional(v.venueId), durationMinutes: Number(v.durationMinutes) })} /></div></details>}
-    {!waitingForTeams(game) && (season.status === 'active' || (season.status === 'completed' && game.status === 'completed')) && <details><summary className="cursor-pointer text-sm underline">{game.status === 'completed' ? 'Correct score' : 'Record final score'}</summary><div className="pt-3">{game.forfeited_by_season_team_id && <p className="mb-3 text-sm text-muted-foreground">Saving a score records a played result instead of a forfeit.</p>}<Editor title="Final score" path={`games/${game.id}/score`} fields={[{ name: 'homeScore', label: `${game.home_name} score`, type: 'number', required: true, value: game.home_score }, { name: 'awayScore', label: `${game.away_name} score`, type: 'number', required: true, value: game.away_score }]} transform={(v) => ({ homeScore: Number(v.homeScore), awayScore: Number(v.awayScore) })} /></div></details>}
-  </div>)}</div>
-}
-
 // Column accessors for tables sorted in the browser. Defined once so sorting is memoized per table.
 type RankedStanding = Standing & { rank: number }
 const standingSort = { rank: (row: RankedStanding) => row.rank, team: (row: RankedStanding) => row.name, wins: (row: RankedStanding) => row.wins, losses: (row: RankedStanding) => row.losses, difference: (row: RankedStanding) => row.pointDifference }
-const dashboardStandingSort = { team: (row: Standing) => row.name, wins: (row: Standing) => row.wins, losses: (row: Standing) => row.losses, difference: (row: Standing) => row.pointDifference }
-const noStandings: Standing[] = []
-const gameStatusLabel = (row: Game) => row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'
+const gameStatusLabel = (row: Game) => row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : row.status === 'live' ? 'Live' : 'Scheduled'
 const gameSort = { time: (row: Game) => row.scheduled_at ? Date.parse(row.scheduled_at) : null, matchup: (row: Game) => `${row.home_name} ${row.away_name}`, venue: (row: Game) => row.venue_name, status: (row: Game) => gameStatusLabel(row) }
 const leagueSort = { name: (row: LeagueRow) => row.name, location: (row: LeagueRow) => row.location, timeZone: (row: LeagueRow) => row.time_zone, website: (row: LeagueRow) => row.published_at ? 'Published' : 'Hidden' }
 type SeasonSortKey = 'name' | 'league' | 'status' | 'startDate' | 'endDate'
@@ -594,7 +575,8 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const gamesQuery = (gamePath: string) => ({ queryKey: ['league', gamePath], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(gamePath, client)), retry: false })
   const path = gamesPath(status, page, pageSize)
   // While a filter or page change loads, keep showing this tab's current list instead of a loading state.
-  const games = useQuery({ ...gamesQuery(path), enabled: gamesView === 'list', placeholderData: (previous: PaginatedResult<Game> | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && new URLSearchParams(String(previousQuery.queryKey[1]).split('?')[1]).get('status') === status ? previous : undefined })
+  // Live games refresh every 10 seconds so their running score keeps up.
+  const games = useQuery({ ...gamesQuery(path), enabled: gamesView === 'list', refetchInterval: (query) => query.state.data?.items.some((game) => game.status === 'live') ? 10_000 : false, placeholderData: (previous: PaginatedResult<Game> | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && new URLSearchParams(String(previousQuery.queryKey[1]).split('?')[1]).get('status') === status ? previous : undefined })
   // Load the other tab's first page in the background so switching tabs shows games right away.
   const otherTabPath = gamesPath(status === 'completed' ? 'scheduled' : 'completed', 1, 10)
   useEffect(() => { void client.prefetchQuery({ ...gamesQuery(otherTabPath), staleTime: 30_000 }) }, [otherTabPath]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -604,6 +586,11 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const registrations = useLeagueQuery<SeasonTeam[]>(`seasons/${season.id}/teams?divisionId=${encodeURIComponent(teamDivision)}`, !!teamDivision)
   const teams = registrations.data ?? []
   const openSchedule = () => { setScheduleDivision(divisionFilter); setDialog({ kind: 'schedule' }) }
+  const reopenLive = useMutation({
+    mutationFn: (id: string) => leagueRequest(`games/${id}/live/reopen`, client, 'POST', {}),
+    onSuccess: (_result, id) => { toast.success(<span>Game reopened. <Link href={`/scorekeeping/games/${id}`} className="font-medium underline underline-offset-4">Open live scoring</Link> to correct it.</span>) },
+    onError: (error) => toast.error(error.message),
+  })
   const removeGame = useMutation({
     mutationFn: (id: string) => leagueRequest(`games/${id}`, client, 'DELETE'),
     onSuccess: () => { setDialog(null); setPage(1); toast.success('Game removed.') },
@@ -668,10 +655,15 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const gameActions = (row: Game) => {
     const canEdit = row.status === 'scheduled' && editable
     const waiting = waitingForTeams(row)
-    const canScore = !waiting && (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
-    const canForfeit = !waiting && (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
+    // A live-scored game's score and stats come from its plays, so it is corrected by reopening it in the console.
+    const canScore = !row.live_scored && (!waiting && (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed')))
+    const canForfeit = !row.live_scored && (!waiting && (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed')))
+    const canScoreLive = !waiting && season.status === 'active' && (row.status === 'scheduled' || row.status === 'live')
     return <><DropdownMenuGroup>
               {canEdit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'edit', game: row })}><PencilIcon />Edit schedule</DropdownMenuItem>}
+              {canScoreLive && <DropdownMenuItem className="whitespace-nowrap py-2" render={<Link href={`/scorekeeping/games/${row.id}`} />}><TimerIcon />{row.status === 'live' ? 'Open live scoring' : 'Score live'}</DropdownMenuItem>}
+              {row.live_scored && row.status === 'completed' && season.status === 'active' && <DropdownMenuItem className="whitespace-nowrap py-2" disabled={reopenLive.isPending} onClick={() => reopenLive.mutate(row.id)}><Undo2Icon />Reopen live scoring</DropdownMenuItem>}
+              {row.live_scored && row.status === 'completed' && <DropdownMenuItem className="whitespace-nowrap py-2" render={<Link href={`/scorekeeping/games/${row.id}`} />}><ClipboardListIcon />Box score</DropdownMenuItem>}
               {canScore && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'score', game: row })}><CircleCheckIcon />{row.status === 'completed' ? 'Correct score' : 'Record final score'}</DropdownMenuItem>}
               {waiting && season.status === 'active' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Waiting for semifinal results</span></span></DropdownMenuItem>}
               {editable && season.status === 'draft' && row.status === 'scheduled' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Start the season first</span></span></DropdownMenuItem>}
@@ -689,9 +681,9 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
         <AnimatedTableBody>{sortRows(group.rows, gameSortState, gameSort).map((row) => {
           return <TableRow key={row.id} data-key={row.id}>
             <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? formatGameTime(row.scheduled_at, timeZone) : '—'}</TableCell>
-            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium"><span className={sideClass(row.home_season_team_id)}>{row.home_name}</span> <span className="font-normal text-muted-foreground">vs</span> <span className={sideClass(row.away_season_team_id)}>{row.away_name}</span></span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 xl:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground lg:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
+            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium"><span className={sideClass(row.home_season_team_id)}>{row.home_name}</span> <span className="font-normal text-muted-foreground">vs</span> <span className={sideClass(row.away_season_team_id)}>{row.away_name}</span></span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.status === 'live' && <span className="ml-2 font-semibold tabular-nums text-red-600 dark:text-red-400">{row.live_home_score ?? 0} – {row.live_away_score ?? 0}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 xl:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div>{row.best_player && <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><AwardIcon aria-hidden="true" className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" /><span className="min-w-0 truncate">Best player <span className="font-medium text-foreground">{row.best_player.name}</span> · {row.best_player.points} PTS, {row.best_player.rebounds} REB, {row.best_player.assists} AST</span></div>}<div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground lg:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
             <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground lg:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
-            <TableCell className="hidden w-32 xl:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
+            <TableCell className="hidden w-32 xl:table-cell">{row.status === 'live' ? <Badge className="bg-red-600 text-white">Live</Badge> : <Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{gameStatusLabel(row)}</Badge>}</TableCell>
             <TableCell className="pr-3 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.home_name} vs ${row.away_name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]">{gameActions(row)}</DropdownMenuContent></DropdownMenu></TableCell>
           </TableRow>
         })}</AnimatedTableBody>
@@ -770,6 +762,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
   const [view, setView] = useState('')
   const [editing, setEditing] = useState('')
   const [websiteLeague, setWebsiteLeague] = useState<LeagueRow | null>(null)
+  const [scorekeepersLeague, setScorekeepersLeague] = useState<LeagueRow | null>(null)
   const archiveAction = useArchiveAction()
   const guarded = useGuardedArchive()
   const showingArchived = view === 'archived'
@@ -799,6 +792,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
             {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
               <DropdownMenuItem className="py-2" onClick={() => setEditing(item.id)}><PencilIcon />Edit league</DropdownMenuItem>
               <DropdownMenuItem className="py-2" onClick={() => setWebsiteLeague(item)}><GlobeIcon />Website settings</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => setScorekeepersLeague(item)}><ClipboardListIcon />Scorekeepers</DropdownMenuItem>
               <DropdownMenuItem className="py-2" disabled={guarded.pending} onClick={() => void guarded.archive({ kind: 'league', name: item.name, path: `leagues/${item.id}/archive`, undoPath: `leagues/${item.id}/restore`, message: 'League archived.', activeSeasonsPath: `leagues/${item.id}/seasons?status=active` })}><ArchiveIcon />Archive league</DropdownMenuItem>
             </>}
           </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
@@ -806,6 +800,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
       </Fragment>)}</AnimatedTableBody>
     </Table></CardContent></Card>}
     <LeagueWebsiteDialog league={websiteLeague} onClose={() => setWebsiteLeague(null)} />
+    <ScorekeepersDialog league={scorekeepersLeague} onClose={() => setScorekeepersLeague(null)} />
     <EditLeagueDialog key={editingLeague?.id ?? 'none'} league={editingLeague} onClose={() => setEditing('')} />
     {guarded.dialog}
   </section>
@@ -909,10 +904,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
     const seasonId = team.season_id
     return { href: `/manage/rosters/${team.season_team_id}${teamReturnQuery}`, onClick: () => changeWorkspace(team.league_id, seasonId, team.division_id ?? undefined) }
   }
-  const seasonTeams = useLeagueQuery<SeasonTeam[]>(`seasons/${season?.id}/teams?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'dashboard')
-  const venues = useLeagueQuery<Item[]>(`leagues/${league}/venues`, !!league && ['dashboard', 'games'].includes(section))
-  const dashboard = useLeagueQuery<Dashboard>(`seasons/${season?.id}/dashboard?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'dashboard')
-  const dashboardStandings = useTableSort(dashboard.data?.standings ?? noStandings, dashboardStandingSort)
+  const venues = useLeagueQuery<Item[]>(`leagues/${league}/venues`, !!league && section === 'games')
   const standings = useLeagueQuery<Standing[]>(`seasons/${season?.id}/standings?divisionId=${encodeURIComponent(division?.id ?? '')}`, !!season && !!division && section === 'standings')
   const [seasonToEdit, setSeasonToEdit] = useState<Season | null>(null)
   const [createSeasonOpen, setCreateSeasonOpen] = useState(false)
@@ -924,7 +916,7 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
   const [teamToCorrect, setTeamToCorrect] = useState<OrganizationTeamRow | null>(null)
   const [teamToRemove, setTeamToRemove] = useState<OrganizationTeamRow | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
-  const relevantQueries = [leagues, ...(section === 'seasons' ? [seasonPage] : ['dashboard', 'games', 'standings', 'teams', 'divisions'].includes(section) ? [seasons, divisions] : []), ...(section === 'teams' ? [organizationTeams] : []), ...(section === 'games' ? [venues] : []), ...(section === 'dashboard' ? [seasonTeams, venues, dashboard] : []), ...(section === 'standings' ? [standings] : [])]
+  const relevantQueries = [leagues, ...(section === 'seasons' ? [seasonPage] : ['dashboard', 'games', 'standings', 'teams', 'divisions'].includes(section) ? [seasons, divisions] : []), ...(section === 'teams' ? [organizationTeams] : []), ...(section === 'games' ? [venues] : []), ...(section === 'standings' ? [standings] : [])]
   const failedQuery = searchPending || teamSearchPending ? undefined : relevantQueries.find((query) => query.isError)
   // Seasons and teams show their own list skeletons.
   const loading = relevantQueries.some((query) => query !== seasonPage && query !== organizationTeams && query.isLoading)
@@ -966,17 +958,13 @@ export function LeagueWorkspace({ section, initialTeamFilters }: { section: Sect
           </div>
         </div>
       </div> : null}
-      {['dashboard', 'standings'].includes(section) && season && <div className="flex flex-wrap items-end justify-between gap-4"><Field className="w-full sm:w-56"><FieldLabel htmlFor="page-division">Division</FieldLabel><Select value={division?.id ?? null} onValueChange={(value) => { if (value) changeDivision(value) }} items={(divisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={!divisions.data?.length}><SelectTrigger id="page-division" className="w-full"><SelectValue placeholder={divisions.isLoading ? 'Loading divisions…' : divisions.isError ? 'Divisions unavailable' : divisions.data?.length ? 'Choose division' : 'No divisions'} /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{divisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{section === 'standings' && <Button nativeButton={false} variant="outline" render={<Link href="/manage/games" />}><CalendarDaysIcon data-icon="inline-start" />View games</Button>}</div>}
+      {section === 'standings' && season && <div className="flex flex-wrap items-end justify-between gap-4"><Field className="w-full sm:w-56"><FieldLabel htmlFor="page-division">Division</FieldLabel><Select value={division?.id ?? null} onValueChange={(value) => { if (value) changeDivision(value) }} items={(divisions.data ?? []).map((item) => ({ value: item.id, label: item.name }))} disabled={!divisions.data?.length}><SelectTrigger id="page-division" className="w-full"><SelectValue placeholder={divisions.isLoading ? 'Loading divisions…' : divisions.isError ? 'Divisions unavailable' : divisions.data?.length ? 'Choose division' : 'No divisions'} /></SelectTrigger><SelectContent alignItemWithTrigger={false}><SelectGroup>{divisions.data?.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field><Button nativeButton={false} variant="outline" render={<Link href="/manage/games" />}><CalendarDaysIcon data-icon="inline-start" />View games</Button></div>}
     </div>
     {failedQuery ? <Alert variant="destructive"><AlertTitle>Couldn’t load this page</AlertTitle><AlertDescription><p>{failedQuery.error?.message}</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void failedQuery.refetch()}>Try again</Button></AlertDescription></Alert> : loading ? <LoadingContent /> : <>
     <DeleteRecordDialog target={deleteTarget} onClose={() => setDeleteTarget(null)} />
     {['dashboard', 'games'].includes(section) && selectedLeague && !selectedLeague.time_zone && <Alert><Clock3Icon /><AlertTitle>Set {selectedLeague.name}’s time zone</AlertTitle><AlertDescription><p>Until it’s set, game times follow each viewer’s device.</p><Button variant="outline" size="sm" className="mt-3" nativeButton={false} render={<Link href="/manage/leagues" />}>Set time zone</Button></AlertDescription></Alert>}
     {section === 'dashboard' && <>
-      {!league || !season ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : !division ? <NoData>Choose a division to view the dashboard.</NoData> : <>
-        <Panel title={season.name} description={`${division?.name ?? 'Division'} · Season ${season.status} · ${dashboard.data?.teamCount ?? 0} registered teams`}><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/teams" />}>Manage teams</Button></Panel>
-        <div className="grid gap-4 lg:grid-cols-2"><Panel title="Upcoming games"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.upcoming ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /><Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/games" />}>Manage games</Button></Panel><Panel title="Recent results"><GamesList timeZone={selectedLeague?.time_zone} games={dashboard.data?.recent ?? []} season={season} teams={seasonTeams.data ?? []} venues={venues.data ?? []} /></Panel></div>
-        <Panel title="Standings" description="Ordered by wins, point difference, and team name.">{dashboard.data?.standings.length ? <Table><TableHeader><TableRow><SortableHead column="team" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Team</SortableHead><SortableHead column="wins" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Wins</SortableHead><SortableHead column="losses" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Losses</SortableHead><SortableHead column="difference" sort={dashboardStandings.sort} onSort={dashboardStandings.onSort} >Point difference</SortableHead></TableRow></TableHeader><AnimatedTableBody>{dashboardStandings.sorted.map((row) => <TableRow key={row.id} data-key={row.id}><TableCell>{row.name}</TableCell><TableCell>{row.wins}</TableCell><TableCell>{row.losses}</TableCell><TableCell>{row.pointDifference}</TableCell></TableRow>)}</AnimatedTableBody></Table> : <NoData>Register teams to see standings.</NoData>}<Button className="self-start" nativeButton={false} variant="outline" render={<Link href="/manage/standings" />}>View standings</Button></Panel>
-      </>}
+      {!league || !season || !selectedLeague ? <WorkspacePrompt leagueCount={leagues.data?.length ?? 0} leagueSelected={!!league} seasonCount={seasons.data?.length ?? 0} /> : <SeasonOverview key={season.id} season={season} league={selectedLeague} />}
     </>}
     {section === 'leagues' && <LeaguesSection organizationId={org} leagues={leagues.data ?? []} onDelete={setDeleteTarget} />}
     {section === 'seasons' && (!leagues.data?.length ? <Panel title="A league is needed" description="Create a league before setting up a season."><Button className="self-start" nativeButton={false} render={<Link href="/manage/leagues" />}>Set up a league</Button></Panel> : <>
