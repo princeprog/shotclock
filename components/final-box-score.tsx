@@ -136,7 +136,7 @@ function TeamBoxScore({ team, totals, won, bestRosterId }: { team: LiveTeam; tot
       <div className="flex items-center gap-3 border-b px-4 py-3.5 sm:px-6">
         <TeamMark name={team.name} className="size-9 text-xs" />
         <h2 id={headingId} className="min-w-0 flex-1 truncate text-base font-semibold">{team.name}</h2>
-        <Badge variant={won ? 'seasonActive' : 'secondary'}>{won ? 'Won' : 'Lost'}</Badge>
+        {won ? <Badge variant="seasonActive">Won</Badge> : <Badge className="bg-red-600 text-white">Lost</Badge>}
         <span className="text-lg font-semibold tabular-nums">{team.score}</span>
       </div>
       <Table className="min-w-[36rem]">
