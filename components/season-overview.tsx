@@ -1,19 +1,19 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon, ClockIcon, MapPinIcon, ShirtIcon, SparklesIcon, TrophyIcon, UserPlusIcon, UsersIcon, type LucideIcon } from 'lucide-react'
+import { ArrowRightIcon, CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon, ClockIcon, MapPinIcon, ShirtIcon, SparklesIcon, TrophyIcon, UserPlusIcon, UsersIcon, type LucideIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
 import { leagueRequest } from '@/lib/league-client'
-import { formatGameDateTime, zonedDate } from '@/lib/league-time'
-import { buildAttentionItems, buildSetupSteps, seasonDay, stageLabel, unscheduledDivisions, type AttentionItem, type OverviewGame, type SeasonOverviewData } from '@/lib/season-overview'
+import { formatGameDateTime, formatGameTime, zonedDate } from '@/lib/league-time'
+import { buildAttentionItems, buildSetupSteps, groupGamesByDay, seasonDay, stageLabel, unscheduledDivisions, type AttentionItem, type OverviewGame, type SeasonOverviewData } from '@/lib/season-overview'
 import { GameScoreDialog } from '@/components/game-score-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -54,6 +54,12 @@ export function SeasonOverview({ season, league }: { season: OverviewSeason; lea
     {season.status === 'draft' ? <SetupChecklist data={data} season={season} today={today} />
       : season.status === 'active' ? <NeedsAttention data={data} season={season} league={league} timeZone={timeZone} />
       : <SeasonResults data={data} />}
+    <div className="grid items-start gap-6 lg:grid-cols-3">
+      <div className="flex min-w-0 flex-col gap-6 lg:col-span-2">
+        <UpcomingGames games={data.upcoming} timeZone={timeZone} today={today} />
+        <RecentResults games={data.recent} timeZone={timeZone} />
+      </div>
+    </div>
   </div>
 }
 
@@ -135,7 +141,7 @@ function NeedsAttention({ data, season, league, timeZone }: { data: SeasonOvervi
   </Card>
 
   return <Card className="gap-0 py-0">
-    <CardHeader className="border-b py-4">
+    <CardHeader className="border-b py-4 [.border-b]:pb-4">
       <CardTitle><h3 className="flex items-center gap-2 text-base font-semibold">Needs attention<Badge variant="secondary" className="tabular-nums">{items.length}</Badge></h3></CardTitle>
     </CardHeader>
     <ul className="divide-y">{items.map((item) => {
@@ -172,7 +178,7 @@ function SetupChecklist({ data, season, today }: { data: SeasonOverviewData; sea
   const done = steps.filter((step) => step.done).length
   const firstOpen = steps.find((step) => !step.done)
   return <Card className="gap-0 py-0">
-    <CardHeader className="border-b py-4">
+    <CardHeader className="border-b py-4 [.border-b]:pb-4">
       <CardTitle><h3 className="text-base font-semibold">Season setup</h3></CardTitle>
       <CardDescription>{done} of {steps.length} steps done</CardDescription>
     </CardHeader>
@@ -194,7 +200,7 @@ function SetupChecklist({ data, season, today }: { data: SeasonOverviewData; sea
 // A completed season's winners: the playoff champion, or the first-place team when a division had no playoffs.
 function SeasonResults({ data }: { data: SeasonOverviewData }) {
   return <Card className="gap-0 py-0">
-    <CardHeader className="border-b py-4"><CardTitle><h3 className="text-base font-semibold">Season results</h3></CardTitle></CardHeader>
+    <CardHeader className="border-b py-4 [.border-b]:pb-4"><CardTitle><h3 className="text-base font-semibold">Season results</h3></CardTitle></CardHeader>
     <ul className="grid divide-y sm:grid-cols-2 sm:divide-y-0">{data.divisions.map((division) => {
       const winner = division.playoffs?.champion ?? division.standings[0]?.name
       return <li key={division.id} className="flex items-center gap-3 px-(--card-spacing) py-4">
@@ -208,4 +214,53 @@ function SeasonResults({ data }: { data: SeasonOverviewData }) {
   </Card>
 }
 
+// A side waiting for the standings or a semifinal has no team yet, so its placeholder name is muted.
+function TeamName({ name, teamId, bold = false }: { name: string; teamId: string | null; bold?: boolean }) {
+  return <span className={cn(!teamId && 'text-muted-foreground', bold && 'font-semibold')}>{name}</span>
+}
 
+function SectionCard({ title, href, linkLabel, children }: { title: string; href: string; linkLabel: string; children: ReactNode }) {
+  return <Card className="gap-0 py-0">
+    <CardHeader className="items-center border-b py-3 [.border-b]:pb-3">
+      <CardTitle><h3 className="text-base font-semibold">{title}</h3></CardTitle>
+      <CardAction className="self-center"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href={href} />}>{linkLabel}<ArrowRightIcon data-icon="inline-end" /></Button></CardAction>
+    </CardHeader>
+    {children}
+  </Card>
+}
+
+function UpcomingGames({ games, timeZone, today }: { games: OverviewGame[]; timeZone?: string | null; today: string }) {
+  return <SectionCard title="Upcoming games" href="/manage/games" linkLabel="All games">
+    {games.length ? groupGamesByDay(games, timeZone, today).map((group) => <section key={group.key} aria-label={group.label}>
+      <h4 className="border-b bg-muted/30 px-(--card-spacing) py-1.5 text-xs font-medium text-muted-foreground">{group.label}</h4>
+      <ul className="divide-y border-b last:border-b-0">{group.games.map((game) => <li key={game.id} className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 px-(--card-spacing) py-3 sm:grid-cols-[5rem_minmax(0,1fr)_auto]">
+        <span className="pt-px text-sm tabular-nums text-muted-foreground">{game.scheduled_at ? formatGameTime(game.scheduled_at, timeZone) : '—'}</span>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className="truncate text-sm font-medium"><TeamName name={game.home_name} teamId={game.home_season_team_id} /> <span className="font-normal text-muted-foreground">vs</span> <TeamName name={game.away_name} teamId={game.away_season_team_id} /></p>
+          <p className="truncate text-xs text-muted-foreground">{[game.division_name, game.venue_name].filter(Boolean).join(' · ')}</p>
+        </div>
+        {stageLabel(game.stage) && <Badge variant="outline" className="col-start-2 justify-self-start sm:col-start-3">{stageLabel(game.stage)}</Badge>}
+      </li>)}</ul>
+    </section>) : <p className="px-(--card-spacing) py-8 text-center text-sm text-muted-foreground">No upcoming games. Generated and scheduled games appear here.</p>}
+  </SectionCard>
+}
+
+function RecentResults({ games, timeZone }: { games: OverviewGame[]; timeZone?: string | null }) {
+  return <SectionCard title="Recent results" href="/manage/games" linkLabel="All results">
+    {games.length ? <ul className="divide-y">{games.map((game) => {
+      const homeWon = (game.home_score ?? 0) > (game.away_score ?? 0)
+      return <li key={game.id} className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 px-(--card-spacing) py-3 sm:grid-cols-[5rem_minmax(0,1fr)_auto]">
+        <span className="pt-px text-sm tabular-nums text-muted-foreground">{formatGameDateTime(game.scheduled_at, timeZone, { month: 'short', day: 'numeric' })}</span>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className="flex min-w-0 items-baseline gap-2 text-sm">
+            <span className="truncate"><TeamName name={game.home_name} teamId={game.home_season_team_id} bold={homeWon} /></span>
+            <span className="shrink-0 tabular-nums"><span className={cn(homeWon ? 'font-semibold' : 'text-muted-foreground')}>{game.home_score}</span> – <span className={cn(!homeWon ? 'font-semibold' : 'text-muted-foreground')}>{game.away_score}</span></span>
+            <span className="truncate"><TeamName name={game.away_name} teamId={game.away_season_team_id} bold={!homeWon} /></span>
+          </p>
+          <p className="truncate text-xs text-muted-foreground">{[game.division_name, stageLabel(game.stage), game.venue_name].filter(Boolean).join(' · ')}</p>
+        </div>
+        {game.forfeited_by_season_team_id && <Badge variant="secondary" className="col-start-2 justify-self-start sm:col-start-3">Forfeit</Badge>}
+      </li>
+    })}</ul> : <p className="px-(--card-spacing) py-8 text-center text-sm text-muted-foreground">No results yet. Final scores appear here once recorded.</p>}
+  </SectionCard>
+}
