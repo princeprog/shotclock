@@ -21,6 +21,7 @@ export type LiveState = {
   clock: LiveClock | null
   home: LiveTeam
   away: LiveTeam
+  periodScores: { period: number; home: number; away: number }[]
   finalScore: { home: number; away: number } | null
   bestPlayer: (LivePlayer & { seasonTeamId: string | null; teamName: string }) | null
   plays: LivePlay[]

@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, AwardIcon, CloudOffIcon, LoaderCircleIcon, PauseIcon, PencilIcon, PlayIcon, TimerIcon, TrophyIcon, Undo2Icon } from 'lucide-react'
+import { ArrowLeftIcon, CloudOffIcon, LoaderCircleIcon, PauseIcon, PencilIcon, PlayIcon, TimerIcon, TrophyIcon, Undo2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
+import { FinalBoxScore } from '@/components/final-box-score'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,7 +15,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { leagueRequest } from '@/lib/league-client'
 import { clockRemaining, describePlay, deviceId, formatClock, nextBatch, periodLabel, readOutbox, saveOutbox, SCORER_MOVED, withPending, type LivePlay, type LiveState, type LiveTeam, type OutboxItem, type PlayKind } from '@/lib/live-scoring'
 
@@ -190,10 +190,10 @@ function Console({ gameId }: { gameId: string }) {
 
     {view.status === 'live' && !isScorer && <Alert><TimerIcon /><AlertTitle>{view.scorer ? `${view.scorer.name ?? 'Someone'} is scoring this game on another device` : 'No device is scoring this game'}</AlertTitle><AlertDescription><p>Take over to record plays here. The other device will stop saving plays.{outbox.length ? ` ${outbox.length} unsaved ${outbox.length === 1 ? 'change' : 'changes'} on this device will be sent after you take over.` : ''}</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" onClick={() => setDialog('claim')}>Take over scoring</Button>{outbox.length > 0 && <Button size="sm" variant="ghost" onClick={() => setOutbox([])}>Discard unsaved changes</Button>}</div></AlertDescription></Alert>}
 
-    {view.status !== 'scheduled' && <section aria-label="Scoreboard" className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-2 rounded-xl border bg-card p-3 sm:gap-4 sm:p-5">
+    {view.status === 'live' && <section aria-label="Scoreboard" className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-2 rounded-xl border bg-card p-3 sm:gap-4 sm:p-5">
       <TeamScore team={view.home} align="start" />
       <div className="flex flex-col items-center justify-center gap-2 px-1">
-        <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{view.status === 'completed' ? 'Final' : label}</span>
+        <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{label}</span>
         {view.status === 'live' && <>
           <span aria-live="off" className={cn('font-mono text-4xl font-semibold tabular-nums sm:text-5xl', remaining === 0 && 'text-destructive')}>{formatClock(remaining)}</span>
           {isScorer && <div className="flex gap-1.5">
@@ -217,8 +217,7 @@ function Console({ gameId }: { gameId: string }) {
     </div>}
 
     {view.status === 'live' && <RecentPlays view={view} canUndo={isScorer} onUndo={undo} />}
-    {view.status === 'completed' && view.bestPlayer && <BestPlayer player={view.bestPlayer} />}
-    {view.status === 'completed' && <BoxScore view={view} />}
+    {view.status === 'completed' && <FinalBoxScore view={view} />}
 
     {view.status === 'live' && isScorer && <ActionPad selected={selected} view={view} onAction={(kind, points) => record(kind, points)} onClear={() => setSelected(null)} />}
 
@@ -294,34 +293,6 @@ function RecentPlays({ view, canUndo, onUndo }: { view: LiveState; canUndo: bool
   </Card>
 }
 
-// The winning team's best player, picked by the API when the game finished.
-function BestPlayer({ player }: { player: NonNullable<LiveState['bestPlayer']> }) {
-  const stats = [['PTS', player.points], ['REB', player.rebounds], ['AST', player.assists], ['STL', player.steals], ['BLK', player.blocks]] as const
-  return <Card className="py-0"><CardContent className="flex flex-wrap items-center gap-x-6 gap-y-4 py-4">
-    <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"><AwardIcon /></span>
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <h2 className="text-xs font-medium text-muted-foreground">Best player</h2>
-      <p className="truncate text-lg font-semibold">{player.name}{player.jersey !== null && <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">#{player.jersey}</span>}</p>
-      <p className="truncate text-sm text-muted-foreground">{player.teamName}</p>
-    </div>
-    <dl className="flex gap-5">{stats.map(([label, value]) => <div key={label} className="flex flex-col-reverse items-center gap-0.5">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-lg font-semibold tabular-nums">{value}</dd>
-    </div>)}</dl>
-  </CardContent></Card>
-}
-
-function BoxScore({ view }: { view: LiveState }) {
-  return <div className="grid gap-4 md:grid-cols-2">{[view.home, view.away].map((team) => <Card key={team.seasonTeamId} className="gap-0 py-0">
-    <CardHeader className="border-b py-3 [.border-b]:pb-3"><CardTitle><h2 className="text-base font-semibold">{team.name}</h2></CardTitle><CardDescription>{team.score} points</CardDescription></CardHeader>
-    <Table>
-      <TableHeader className="bg-muted/30"><TableRow><TableHead className="pl-4">Player</TableHead>{['PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF'].map((label) => <TableHead key={label} className="w-11 text-right last:pr-4">{label}</TableHead>)}</TableRow></TableHeader>
-      <TableBody>{team.players.map((player) => <TableRow key={player.rosterId}><TableCell className="max-w-0 truncate pl-4"><span className="mr-1.5 font-mono text-xs text-muted-foreground">{player.jersey ?? '–'}</span>{player.name}{view.bestPlayer?.rosterId === player.rosterId && <><AwardIcon aria-hidden="true" className="ml-1.5 inline size-3.5 align-[-2px] text-amber-600 dark:text-amber-400" /><span className="sr-only"> (best player)</span></>}</TableCell>
-        {[player.points, player.rebounds, player.assists, player.steals, player.blocks, player.turnovers, player.fouls].map((value, index) => <TableCell key={index} className="text-right tabular-nums last:pr-4">{value}</TableCell>)}</TableRow>)}</TableBody>
-    </Table>
-  </Card>)}</div>
-}
-
 function StartGame({ view, pending, onStart }: { view: LiveState; pending: boolean; onStart: (format: LiveState['format']) => void }) {
   const [format, setFormat] = useState(view.format)
   const teamsKnown = !!view.home.seasonTeamId && !!view.away.seasonTeamId
@@ -372,4 +343,5 @@ function ClockForm({ remaining, max, onSave, onCancel }: { remaining: number; ma
     <DialogFooter><Button type="button" variant="outline" onClick={onCancel}>Cancel</Button><Button type="submit" disabled={invalid}>Set clock</Button></DialogFooter>
   </form>
 }
+
 
