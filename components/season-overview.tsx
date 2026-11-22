@@ -8,15 +8,18 @@ import { toast } from 'sonner'
 import { cn } from 'cn'
 import { leagueRequest } from '@/lib/league-client'
 import { formatGameDateTime, formatGameTime, zonedDate } from '@/lib/league-time'
-import { buildAttentionItems, buildSetupSteps, groupGamesByDay, seasonDay, stageLabel, unscheduledDivisions, type AttentionItem, type OverviewGame, type SeasonOverviewData } from '@/lib/season-overview'
+import { buildAttentionItems, buildSetupSteps, groupGamesByDay, seasonDay, stageLabel, unscheduledDivisions, type AttentionItem, type OverviewDivision, type OverviewGame, type SeasonOverviewData } from '@/lib/season-overview'
 import { GameScoreDialog } from '@/components/game-score-dialog'
+import { useWorkspace } from '@/components/workspace-context'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 type OverviewSeason = { id: string; name: string; status: 'draft' | 'active' | 'completed'; start_date: string | null; end_date: string | null }
 type OverviewLeague = { id: string; name: string; time_zone?: string | null }
@@ -59,6 +62,7 @@ export function SeasonOverview({ season, league }: { season: OverviewSeason; lea
         <UpcomingGames games={data.upcoming} timeZone={timeZone} today={today} />
         <RecentResults games={data.recent} timeZone={timeZone} />
       </div>
+      <StandingsCard divisions={data.divisions} />
     </div>
   </div>
 }
@@ -263,4 +267,44 @@ function RecentResults({ games, timeZone }: { games: OverviewGame[]; timeZone?: 
       </li>
     })}</ul> : <p className="px-(--card-spacing) py-8 text-center text-sm text-muted-foreground">No results yet. Final scores appear here once recorded.</p>}
   </SectionCard>
+}
+
+const signed = (value: number) => value > 0 ? `+${value}` : String(value)
+
+// Standings for one division at a time. The picker follows the workspace division, so Full standings opens the same one.
+function StandingsCard({ divisions }: { divisions: OverviewDivision[] }) {
+  const { division: workspaceDivision, changeDivision } = useWorkspace()
+  const selected = divisions.find((division) => division.id === workspaceDivision?.id) ?? divisions[0]
+  const rows = selected?.standings.slice(0, 6) ?? []
+  const playoffLine = !!selected?.playoffs && selected.standings.length > 4
+  return <Card className="gap-0 py-0">
+    <CardHeader className="items-center border-b py-3 [.border-b]:pb-3">
+      <CardTitle><h3 className="text-base font-semibold">Standings</h3></CardTitle>
+      {divisions.length > 1 && <CardAction className="self-center">
+        <Select value={selected?.id ?? null} onValueChange={(value) => { if (value) changeDivision(value) }} items={divisions.map((division) => ({ value: division.id, label: division.name }))}>
+          <SelectTrigger size="sm" aria-label="Standings division" className="w-36"><SelectValue /></SelectTrigger>
+          <SelectContent alignItemWithTrigger={false}><SelectGroup>{divisions.map((division) => <SelectItem key={division.id} value={division.id}>{division.name}</SelectItem>)}</SelectGroup></SelectContent>
+        </Select>
+      </CardAction>}
+    </CardHeader>
+    {rows.length ? <Table className="table-fixed">
+      <caption className="sr-only">Top teams in {selected!.name}, ordered by wins and point difference</caption>
+      <TableHeader className="bg-muted/30"><TableRow>
+        <TableHead scope="col" className="w-10 pl-(--card-spacing)">#</TableHead>
+        <TableHead scope="col">Team</TableHead>
+        <TableHead scope="col" className="w-16 text-right"><abbr title="Wins and losses" className="no-underline">W–L</abbr></TableHead>
+        <TableHead scope="col" className="w-16 pr-(--card-spacing) text-right"><abbr title="Point difference" className="no-underline">Diff</abbr></TableHead>
+      </TableRow></TableHeader>
+      <TableBody>{rows.map((row, index) => <TableRow key={row.id} className={cn(playoffLine && index === 3 && 'border-b-2 border-dashed border-b-primary/30')}>
+        <TableCell className="pl-(--card-spacing) tabular-nums text-muted-foreground">{index + 1}</TableCell>
+        <TableCell className="truncate font-medium" title={row.name}>{row.name}</TableCell>
+        <TableCell className="text-right tabular-nums">{row.wins}–{row.losses}</TableCell>
+        <TableCell className="pr-(--card-spacing) text-right tabular-nums text-muted-foreground">{signed(row.pointDifference)}</TableCell>
+      </TableRow>)}</TableBody>
+    </Table> : <p className="px-(--card-spacing) py-8 text-center text-sm text-muted-foreground">{selected ? 'No teams in this division yet.' : 'Add divisions to see standings.'}</p>}
+    <div className="flex items-center justify-between gap-3 border-t px-(--card-spacing) py-2.5">
+      <span className="text-xs text-muted-foreground">{playoffLine ? 'Top four advance to the playoffs' : 'Ordered by wins, then point difference'}</span>
+      <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/manage/standings" onClick={() => { if (selected) changeDivision(selected.id) }} />}>Full standings<ArrowRightIcon data-icon="inline-end" /></Button>
+    </div>
+  </Card>
 }
