@@ -2,9 +2,10 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO } from 'date-fns'
-import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, Trash2Icon, TrophyIcon, UsersIcon, XIcon, CalendarRangeIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
+import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, TimerIcon, Trash2Icon, TrophyIcon, UsersIcon, XIcon, CalendarRangeIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
 import type { DateRange } from 'react-day-picker'
 import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
@@ -63,7 +64,7 @@ type OrganizationTeamRow = Team & { league_id: string; league_name: string; seas
 type Division = Item & { season_id: string; min_age: number | null; max_age: number | null }
 type SeasonTeam = Item & { team_id: string; division_id: string }
 // A playoff side waiting for a semifinal has no team id yet; its name says which result it takes.
-type Game = { id: string; division_id: string; division_name: string; home_name: string; away_name: string; home_season_team_id: string | null; away_season_team_id: string | null; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; duration_minutes: number | null; forfeited_by_season_team_id: string | null; status: string; home_score: number | null; away_score: number | null; stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'; round?: number | null }
+type Game = { id: string; division_id: string; division_name: string; home_name: string; away_name: string; home_season_team_id: string | null; away_season_team_id: string | null; scheduled_at: string | null; venue_id: string | null; venue_name: string | null; duration_minutes: number | null; forfeited_by_season_team_id: string | null; status: string; home_score: number | null; away_score: number | null; stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'; round?: number | null; live_scored?: boolean; live_home_score?: number | null; live_away_score?: number | null }
 type ScheduleStatus = { id: string; name: string; teamCount: number; hasSchedule: boolean; canGeneratePreliminary: boolean; playoffStage: 'semifinal' | 'final' | null; playoffs: boolean; thirdPlace: boolean; preliminaryReason?: string | null; playoffReason?: string | null }
 type Standing = Item & { wins: number; losses: number; pointDifference: number }
 type Option = { value: string; label: string }
@@ -416,7 +417,7 @@ const sideClass = (teamId: string | null) => teamId ? undefined : 'font-normal t
 // Column accessors for tables sorted in the browser. Defined once so sorting is memoized per table.
 type RankedStanding = Standing & { rank: number }
 const standingSort = { rank: (row: RankedStanding) => row.rank, team: (row: RankedStanding) => row.name, wins: (row: RankedStanding) => row.wins, losses: (row: RankedStanding) => row.losses, difference: (row: RankedStanding) => row.pointDifference }
-const gameStatusLabel = (row: Game) => row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'
+const gameStatusLabel = (row: Game) => row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : row.status === 'live' ? 'Live' : 'Scheduled'
 const gameSort = { time: (row: Game) => row.scheduled_at ? Date.parse(row.scheduled_at) : null, matchup: (row: Game) => `${row.home_name} ${row.away_name}`, venue: (row: Game) => row.venue_name, status: (row: Game) => gameStatusLabel(row) }
 const leagueSort = { name: (row: LeagueRow) => row.name, location: (row: LeagueRow) => row.location, timeZone: (row: LeagueRow) => row.time_zone, website: (row: LeagueRow) => row.published_at ? 'Published' : 'Hidden' }
 type SeasonSortKey = 'name' | 'league' | 'status' | 'startDate' | 'endDate'
@@ -584,7 +585,13 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const teamDivision = dialog?.kind === 'edit' ? dialog.game.division_id : dialog?.kind === 'schedule' ? scheduleDivision : ''
   const registrations = useLeagueQuery<SeasonTeam[]>(`seasons/${season.id}/teams?divisionId=${encodeURIComponent(teamDivision)}`, !!teamDivision)
   const teams = registrations.data ?? []
+  const router = useRouter()
   const openSchedule = () => { setScheduleDivision(divisionFilter); setDialog({ kind: 'schedule' }) }
+  const reopenLive = useMutation({
+    mutationFn: (id: string) => leagueRequest(`games/${id}/live/reopen`, client, 'POST', {}),
+    onSuccess: (_result, id) => { toast.success('Game reopened. Take over scoring to correct it.'); router.push(`/scorekeeping/games/${id}`) },
+    onError: (error) => toast.error(error.message),
+  })
   const removeGame = useMutation({
     mutationFn: (id: string) => leagueRequest(`games/${id}`, client, 'DELETE'),
     onSuccess: () => { setDialog(null); setPage(1); toast.success('Game removed.') },
@@ -649,10 +656,14 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const gameActions = (row: Game) => {
     const canEdit = row.status === 'scheduled' && editable
     const waiting = waitingForTeams(row)
-    const canScore = !waiting && (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
-    const canForfeit = !waiting && (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed'))
+    // A live-scored game's score and stats come from its plays, so it is corrected by reopening it in the console.
+    const canScore = !row.live_scored && (!waiting && (row.status === 'scheduled' && season.status === 'active') || (row.status === 'completed' && (season.status === 'active' || season.status === 'completed')))
+    const canForfeit = !row.live_scored && (!waiting && (row.status === 'scheduled' && season.status === 'active') || (!!row.forfeited_by_season_team_id && row.status === 'completed' && (season.status === 'active' || season.status === 'completed')))
+    const canScoreLive = !waiting && season.status === 'active' && (row.status === 'scheduled' || row.status === 'live')
     return <><DropdownMenuGroup>
               {canEdit && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'edit', game: row })}><PencilIcon />Edit schedule</DropdownMenuItem>}
+              {canScoreLive && <DropdownMenuItem className="whitespace-nowrap py-2" render={<Link href={`/scorekeeping/games/${row.id}`} />}><TimerIcon />{row.status === 'live' ? 'Open live scoring' : 'Score live'}</DropdownMenuItem>}
+              {row.live_scored && row.status === 'completed' && season.status === 'active' && <DropdownMenuItem className="whitespace-nowrap py-2" disabled={reopenLive.isPending} onClick={() => reopenLive.mutate(row.id)}><Undo2Icon />Reopen live scoring</DropdownMenuItem>}
               {canScore && <DropdownMenuItem className="whitespace-nowrap py-2" onClick={() => setDialog({ kind: 'score', game: row })}><CircleCheckIcon />{row.status === 'completed' ? 'Correct score' : 'Record final score'}</DropdownMenuItem>}
               {waiting && season.status === 'active' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Waiting for semifinal results</span></span></DropdownMenuItem>}
               {editable && season.status === 'draft' && row.status === 'scheduled' && <DropdownMenuItem disabled className="items-start py-2"><CircleCheckIcon className="mt-0.5" /><span className="flex flex-col gap-0.5"><span>Record final score</span><span className="text-xs text-muted-foreground">Start the season first</span></span></DropdownMenuItem>}
@@ -670,9 +681,9 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
         <AnimatedTableBody>{sortRows(group.rows, gameSortState, gameSort).map((row) => {
           return <TableRow key={row.id} data-key={row.id}>
             <TableCell className="w-24 py-4 font-medium tabular-nums sm:w-28">{row.scheduled_at ? formatGameTime(row.scheduled_at, timeZone) : '—'}</TableCell>
-            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium"><span className={sideClass(row.home_season_team_id)}>{row.home_name}</span> <span className="font-normal text-muted-foreground">vs</span> <span className={sideClass(row.away_season_team_id)}>{row.away_name}</span></span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 xl:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground lg:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
+            <TableCell className="max-w-0 whitespace-normal"><span className="break-words font-medium"><span className={sideClass(row.home_season_team_id)}>{row.home_name}</span> <span className="font-normal text-muted-foreground">vs</span> <span className={sideClass(row.away_season_team_id)}>{row.away_name}</span></span>{row.home_score !== null && row.away_score !== null && <span className="ml-2 font-semibold tabular-nums">{row.home_score} – {row.away_score}</span>}{row.status === 'live' && <span className="ml-2 font-semibold tabular-nums text-red-600 dark:text-red-400">{row.live_home_score ?? 0} – {row.live_away_score ?? 0}</span>}{row.forfeited_by_season_team_id && <Badge variant="secondary" className="ml-2 xl:hidden">Forfeit</Badge>}<div className="mt-1 text-xs text-muted-foreground">{row.division_name}{gameStage(row) ? ` · ${gameStage(row)}` : ''}</div><div className="mt-1 flex flex-col gap-1 text-xs text-muted-foreground lg:hidden"><span>{row.venue_name ?? 'No venue'}</span></div></TableCell>
             <TableCell className="hidden w-48 max-w-0 whitespace-normal text-muted-foreground lg:table-cell">{row.venue_name ? <span className="flex items-center gap-1.5 break-words"><MapPinIcon aria-hidden="true" className="size-4 shrink-0" />{row.venue_name}</span> : '—'}</TableCell>
-            <TableCell className="hidden w-32 xl:table-cell"><Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{row.forfeited_by_season_team_id ? 'Forfeit' : row.status === 'completed' ? 'Final result' : 'Scheduled'}</Badge></TableCell>
+            <TableCell className="hidden w-32 xl:table-cell">{row.status === 'live' ? <Badge className="bg-red-600 text-white">Live</Badge> : <Badge variant={row.status === 'completed' ? 'seasonActive' : 'gameScheduled'}>{gameStatusLabel(row)}</Badge>}</TableCell>
             <TableCell className="pr-3 text-right"><DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${row.home_name} vs ${row.away_name}`} />}><MoreVerticalIcon /></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]">{gameActions(row)}</DropdownMenuContent></DropdownMenu></TableCell>
           </TableRow>
         })}</AnimatedTableBody>

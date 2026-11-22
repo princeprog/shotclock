@@ -63,8 +63,13 @@ export function ScorekeepingGames() {
               <p className="truncate font-medium">{game.home_name} <span className="font-normal text-muted-foreground">vs</span> {game.away_name}</p>
               <p className="truncate text-sm text-muted-foreground">{[game.league_name, game.division_name, game.venue_name].filter(Boolean).join(' · ')}</p>
             </div>
-            {game.status === 'live' ? <Badge className="self-start bg-red-600 text-white sm:self-center">Live</Badge>
-              : <span className="text-sm tabular-nums text-muted-foreground">{formatGameDateTime(game.scheduled_at, game.time_zone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
+            <div className="flex items-center justify-between gap-3 sm:justify-end">
+              {game.status === 'live' ? <Badge className="bg-red-600 text-white">Live</Badge>
+                : <span className="text-sm tabular-nums text-muted-foreground">{formatGameDateTime(game.scheduled_at, game.time_zone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>}
+              {game.home_season_team_id && game.away_season_team_id
+                ? <Button size="sm" variant={game.status === 'live' ? 'default' : 'outline'} nativeButton={false} render={<Link href={`/scorekeeping/games/${game.id}`} />}>{game.status === 'live' ? 'Open' : 'Score game'}</Button>
+                : <span className="text-xs text-muted-foreground">Teams not set</span>}
+            </div>
           </li>)}</ul></Card>
         </section>) : <p className="rounded-xl border px-4 py-10 text-center text-sm text-muted-foreground">No games today or in the next 7 days.</p>}
       </>}
