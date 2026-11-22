@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { useAppDispatch } from '@/lib/store-hooks'
 import { resetUi } from '@/lib/ui-slice'
 import { clearOrganizationSelection } from '@/lib/organization-selection'
+import { pathAfterSignIn } from '@/lib/pending-invitation'
 
 type Mode = 'login' | 'register' | 'forgot-password' | 'resend-verification' | 'reset-password' | 'verify-email' | 'confirm-email'
 const tokenModes: Mode[] = ['verify-email', 'reset-password', 'confirm-email']
@@ -58,7 +59,7 @@ export function LoginForm({ mode = 'login' }: { mode?: Mode }) {
         publishSessionChange()
         dispatch(resetUi())
         clearOrganizationSelection()
-        router.replace('/organizations')
+        router.replace(pathAfterSignIn())
         router.refresh()
       } else {
         if (mode === 'reset-password') { queryClient.clear(); publishSessionChange() }
