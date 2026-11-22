@@ -323,3 +323,18 @@ test('season status and season edits refresh only their season schedule status',
     client.clear()
   }
 })
+test('roster changes and new venues refresh the season overview', async () => {
+  const client = makeQueryClient()
+  client.setQueryData(['league', 'leagues/l1/seasons'], [{ id: 's1' }])
+  for (const path of ['seasons/s1/dashboard', 'seasons/s2/dashboard', 'seasons/s1/standings']) client.setQueryData(['league', path], {})
+  await applyLeagueMutation(client, 'season-teams/st1/roster', 'POST', {}, { id: 'r1' })
+  assert.equal(client.getQueryState(['league', 'seasons/s1/dashboard'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/dashboard'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s1/standings'])?.isInvalidated, false)
+  for (const path of ['seasons/s1/dashboard', 'seasons/s2/dashboard']) client.setQueryData(['league', path], {})
+  await applyLeagueMutation(client, 'leagues/l1/venues', 'POST', {}, { id: 'v1', league_id: 'l1' })
+  assert.equal(client.getQueryState(['league', 'seasons/s1/dashboard'])?.isInvalidated, true)
+  assert.equal(client.getQueryState(['league', 'seasons/s2/dashboard'])?.isInvalidated, false)
+  client.clear()
+})
+
