@@ -44,7 +44,9 @@ function seasonDates(season: OverviewSeason) {
 export function SeasonOverview({ season, league }: { season: OverviewSeason; league: OverviewLeague }) {
   const client = useQueryClient()
   const path = `seasons/${season.id}/dashboard`
-  const overview = useQuery({ queryKey: ['league', path], queryFn: () => leagueRequest<SeasonOverviewData>(path, client), retry: false })
+  // While a game is live, the overview refreshes so its score keeps up.
+  const overview = useQuery({ queryKey: ['league', path], queryFn: () => leagueRequest<SeasonOverviewData>(path, client), retry: false,
+    refetchInterval: (query) => query.state.data?.live?.length ? 10_000 : false })
   const timeZone = league.time_zone
   const today = zonedDate(new Date().toISOString(), timeZone)
 
@@ -54,6 +56,7 @@ export function SeasonOverview({ season, league }: { season: OverviewSeason; lea
 
   return <div className="flex flex-col gap-6">
     <SeasonSummary season={season} data={data} today={today} />
+    <LiveNow games={data.live ?? []} />
     <StatCards data={data} timeZone={timeZone} />
     {season.status === 'draft' ? <SetupChecklist data={data} season={season} today={today} />
       : season.status === 'active' ? <NeedsAttention data={data} season={season} league={league} timeZone={timeZone} />
@@ -385,4 +388,21 @@ function PlayoffsSection({ divisions, timeZone }: { divisions: OverviewDivision[
       </Card>
     })}</div>
   </section>
+}
+
+// Games being scored right now, with their running score and a link to the console.
+function LiveNow({ games }: { games: OverviewGame[] }) {
+  if (!games.length) return null
+  return <Card className="gap-0 border-red-600/30 py-0">
+    <CardHeader className="items-center border-b py-3 [.border-b]:pb-3">
+      <CardTitle><h3 className="flex items-center gap-2 text-base font-semibold"><span aria-hidden="true" className="size-2 animate-pulse rounded-full bg-red-600" />Live now</h3></CardTitle>
+    </CardHeader>
+    <ul className="divide-y">{games.map((game) => <li key={game.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-(--card-spacing) py-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <p className="flex min-w-0 items-baseline gap-2 text-sm font-medium"><span className="truncate">{game.home_name}</span><span className="shrink-0 tabular-nums text-red-600 dark:text-red-400">{game.live_home_score ?? 0} – {game.live_away_score ?? 0}</span><span className="truncate">{game.away_name}</span></p>
+        <p className="truncate text-xs text-muted-foreground">{[game.division_name, stageLabel(game.stage), game.venue_name].filter(Boolean).join(' · ')}</p>
+      </div>
+      <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/scorekeeping/games/${game.id}`} />}>Open<ArrowRightIcon data-icon="inline-end" /></Button>
+    </li>)}</ul>
+  </Card>
 }

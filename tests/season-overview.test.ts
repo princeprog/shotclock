@@ -5,7 +5,7 @@ import { buildAttentionItems, buildSetupSteps, dayLabel, groupGamesByDay, season
 const division = (values: Partial<OverviewDivision>): OverviewDivision => ({ id: 'd', name: 'Open', teams: 4, players: 40, games: 6, completedGames: 0, scheduled: true, playoffs: null, standings: [], ...values })
 const overview = (values: Partial<SeasonOverviewData> = {}): SeasonOverviewData => ({
   totals: { divisions: 1, teams: 4, players: 40, venues: 1, games: 6, completedGames: 0 },
-  upcoming: [], awaitingResults: { count: 0, games: [] }, recent: [], shortRosters: { count: 0, teams: [] },
+  live: [], upcoming: [], awaitingResults: { count: 0, games: [] }, recent: [], shortRosters: { count: 0, teams: [] },
   divisions: [division({})], ...values,
 })
 

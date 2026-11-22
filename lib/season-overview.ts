@@ -11,11 +11,13 @@ export type OverviewGame = {
   away_season_team_id: string | null
   scheduled_at: string | null
   venue_name: string | null
-  status: string
+  status: 'scheduled' | 'live' | 'completed'
   stage: 'preliminary' | 'semifinal' | 'final' | 'third_place'
   home_score: number | null
   away_score: number | null
   forfeited_by_season_team_id: string | null
+  live_home_score?: number | null
+  live_away_score?: number | null
 }
 export type OverviewStanding = { id: string; name: string; wins: number; losses: number; pointDifference: number }
 export type PlayoffStatus = { stage: 'waiting' | 'semifinals' | 'final' | 'complete'; nextGame: OverviewGame | null; champion: string | null }
@@ -32,6 +34,7 @@ export type OverviewDivision = {
 }
 export type SeasonOverviewData = {
   totals: { divisions: number; teams: number; players: number; venues: number; games: number; completedGames: number }
+  live: OverviewGame[]
   upcoming: OverviewGame[]
   awaitingResults: { count: number; games: OverviewGame[] }
   recent: OverviewGame[]

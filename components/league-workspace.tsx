@@ -576,7 +576,8 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const gamesQuery = (gamePath: string) => ({ queryKey: ['league', gamePath], queryFn: async () => requirePaginatedResult<Game>(await leagueRequest<unknown>(gamePath, client)), retry: false })
   const path = gamesPath(status, page, pageSize)
   // While a filter or page change loads, keep showing this tab's current list instead of a loading state.
-  const games = useQuery({ ...gamesQuery(path), enabled: gamesView === 'list', placeholderData: (previous: PaginatedResult<Game> | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && new URLSearchParams(String(previousQuery.queryKey[1]).split('?')[1]).get('status') === status ? previous : undefined })
+  // Live games refresh every 10 seconds so their running score keeps up.
+  const games = useQuery({ ...gamesQuery(path), enabled: gamesView === 'list', refetchInterval: (query) => query.state.data?.items.some((game) => game.status === 'live') ? 10_000 : false, placeholderData: (previous: PaginatedResult<Game> | undefined, previousQuery?: { queryKey: readonly unknown[] }) => previousQuery && new URLSearchParams(String(previousQuery.queryKey[1]).split('?')[1]).get('status') === status ? previous : undefined })
   // Load the other tab's first page in the background so switching tabs shows games right away.
   const otherTabPath = gamesPath(status === 'completed' ? 'scheduled' : 'completed', 1, 10)
   useEffect(() => { void client.prefetchQuery({ ...gamesQuery(otherTabPath), staleTime: 30_000 }) }, [otherTabPath]) // eslint-disable-line react-hooks/exhaustive-deps
