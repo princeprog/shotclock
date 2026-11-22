@@ -12,7 +12,7 @@ const state: LiveState = {
   format: { periodCount: 4, periodMinutes: 10, overtimeMinutes: 5, bonusFouls: 2 }, period: 2, clock: { remainingMs: 300000, running: false, serverTime: '2026-11-22T00:00:00.000Z' },
   home: { seasonTeamId: 'h', name: 'Home', score: 10, teamFouls: 1, timeouts: 0, inBonus: false, players: [player('h1', 'Ana Cruz')] },
   away: { seasonTeamId: 'a', name: 'Away', score: 8, teamFouls: 0, timeouts: 0, inBonus: false, players: [player('a1', 'Ben Lim')] },
-  finalScore: null, plays: [{ id: 'p1', sequence: 5, kind: 'points', points: 3, seasonTeamId: 'h', rosterId: 'h1', player: 'Ana Cruz', period: 2, clockMs: 310000, voided: false }], scorer: null, live: true,
+  finalScore: null, bestPlayer: null, plays: [{ id: 'p1', sequence: 5, kind: 'points', points: 3, seasonTeamId: 'h', rosterId: 'h1', player: 'Ana Cruz', period: 2, clockMs: 310000, voided: false }], scorer: null, live: true,
 }
 const play = (id: string, kind: 'points' | 'foul' | 'timeout', team: string, rosterId?: string, points?: number): OutboxItem => ({ type: 'play', play: { id, kind, ...(points ? { points } : {}), seasonTeamId: team, ...(rosterId ? { rosterId } : {}), period: 2, clockMs: 290000, recordedAt: '2026-11-22T00:00:01.000Z' } })
 

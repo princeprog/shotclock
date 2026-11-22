@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, CloudOffIcon, LoaderCircleIcon, PauseIcon, PencilIcon, PlayIcon, TimerIcon, TrophyIcon, Undo2Icon } from 'lucide-react'
+import { ArrowLeftIcon, AwardIcon, CloudOffIcon, LoaderCircleIcon, PauseIcon, PencilIcon, PlayIcon, TimerIcon, TrophyIcon, Undo2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -217,6 +217,7 @@ function Console({ gameId }: { gameId: string }) {
     </div>}
 
     {view.status === 'live' && <RecentPlays view={view} canUndo={isScorer} onUndo={undo} />}
+    {view.status === 'completed' && view.bestPlayer && <BestPlayer player={view.bestPlayer} />}
     {view.status === 'completed' && <BoxScore view={view} />}
 
     {view.status === 'live' && isScorer && <ActionPad selected={selected} view={view} onAction={(kind, points) => record(kind, points)} onClear={() => setSelected(null)} />}
@@ -293,12 +294,29 @@ function RecentPlays({ view, canUndo, onUndo }: { view: LiveState; canUndo: bool
   </Card>
 }
 
+// The winning team's best player, picked by the API when the game finished.
+function BestPlayer({ player }: { player: NonNullable<LiveState['bestPlayer']> }) {
+  const stats = [['PTS', player.points], ['REB', player.rebounds], ['AST', player.assists], ['STL', player.steals], ['BLK', player.blocks]] as const
+  return <Card className="py-0"><CardContent className="flex flex-wrap items-center gap-x-6 gap-y-4 py-4">
+    <span aria-hidden="true" className="flex size-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300"><AwardIcon /></span>
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <h2 className="text-xs font-medium text-muted-foreground">Best player</h2>
+      <p className="truncate text-lg font-semibold">{player.name}{player.jersey !== null && <span className="ml-2 font-mono text-sm font-normal text-muted-foreground">#{player.jersey}</span>}</p>
+      <p className="truncate text-sm text-muted-foreground">{player.teamName}</p>
+    </div>
+    <dl className="flex gap-5">{stats.map(([label, value]) => <div key={label} className="flex flex-col-reverse items-center gap-0.5">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-lg font-semibold tabular-nums">{value}</dd>
+    </div>)}</dl>
+  </CardContent></Card>
+}
+
 function BoxScore({ view }: { view: LiveState }) {
   return <div className="grid gap-4 md:grid-cols-2">{[view.home, view.away].map((team) => <Card key={team.seasonTeamId} className="gap-0 py-0">
     <CardHeader className="border-b py-3 [.border-b]:pb-3"><CardTitle><h2 className="text-base font-semibold">{team.name}</h2></CardTitle><CardDescription>{team.score} points</CardDescription></CardHeader>
     <Table>
       <TableHeader className="bg-muted/30"><TableRow><TableHead className="pl-4">Player</TableHead>{['PTS', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF'].map((label) => <TableHead key={label} className="w-11 text-right last:pr-4">{label}</TableHead>)}</TableRow></TableHeader>
-      <TableBody>{team.players.map((player) => <TableRow key={player.rosterId}><TableCell className="max-w-0 truncate pl-4"><span className="mr-1.5 font-mono text-xs text-muted-foreground">{player.jersey ?? '–'}</span>{player.name}</TableCell>
+      <TableBody>{team.players.map((player) => <TableRow key={player.rosterId}><TableCell className="max-w-0 truncate pl-4"><span className="mr-1.5 font-mono text-xs text-muted-foreground">{player.jersey ?? '–'}</span>{player.name}{view.bestPlayer?.rosterId === player.rosterId && <><AwardIcon aria-hidden="true" className="ml-1.5 inline size-3.5 align-[-2px] text-amber-600 dark:text-amber-400" /><span className="sr-only"> (best player)</span></>}</TableCell>
         {[player.points, player.rebounds, player.assists, player.steals, player.blocks, player.turnovers, player.fouls].map((value, index) => <TableCell key={index} className="text-right tabular-nums last:pr-4">{value}</TableCell>)}</TableRow>)}</TableBody>
     </Table>
   </Card>)}</div>

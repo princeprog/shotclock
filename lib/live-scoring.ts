@@ -22,6 +22,7 @@ export type LiveState = {
   home: LiveTeam
   away: LiveTeam
   finalScore: { home: number; away: number } | null
+  bestPlayer: (LivePlayer & { seasonTeamId: string | null; teamName: string }) | null
   plays: LivePlay[]
   scorer: { deviceId: string; name: string | null } | null
   live: boolean
