@@ -2,7 +2,6 @@
 
 import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { addDays, format, isValid, parseISO } from 'date-fns'
 import { ArchiveIcon, ArchiveRestoreIcon, CalendarDaysIcon, CalendarPlusIcon, Clock3Icon, Undo2Icon, CircleCheckIcon, ClipboardListIcon, ClipboardPenLineIcon, FlagIcon, GlobeIcon, HistoryIcon, InfoIcon, LayoutGridIcon, ListIcon, MapPinIcon, MoreVerticalIcon, PencilIcon, PlayIcon, PlusIcon, TimerIcon, Trash2Icon, TrophyIcon, UsersIcon, XIcon, CalendarRangeIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-react'
@@ -586,11 +585,10 @@ function GamesManager({ season, divisions, venues, timeZone }: { season: Season;
   const teamDivision = dialog?.kind === 'edit' ? dialog.game.division_id : dialog?.kind === 'schedule' ? scheduleDivision : ''
   const registrations = useLeagueQuery<SeasonTeam[]>(`seasons/${season.id}/teams?divisionId=${encodeURIComponent(teamDivision)}`, !!teamDivision)
   const teams = registrations.data ?? []
-  const router = useRouter()
   const openSchedule = () => { setScheduleDivision(divisionFilter); setDialog({ kind: 'schedule' }) }
   const reopenLive = useMutation({
     mutationFn: (id: string) => leagueRequest(`games/${id}/live/reopen`, client, 'POST', {}),
-    onSuccess: (_result, id) => { toast.success('Game reopened. Take over scoring to correct it.'); router.push(`/scorekeeping/games/${id}`) },
+    onSuccess: (_result, id) => { toast.success(<span>Game reopened. <Link href={`/scorekeeping/games/${id}`} className="font-medium underline underline-offset-4">Open live scoring</Link> to correct it.</span>) },
     onError: (error) => toast.error(error.message),
   })
   const removeGame = useMutation({
