@@ -73,7 +73,7 @@ export function SeasonOverview({ season, league }: { season: OverviewSeason; lea
 function OverviewSkeleton() {
   return <div role="status" aria-label="Loading the season overview" className="flex flex-col gap-6">
     <Skeleton className="h-36 w-full rounded-xl" />
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map((item) => <Skeleton key={item} className="h-28 rounded-xl" />)}</div>
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">{[0, 1, 2, 3].map((item) => <Skeleton key={item} className="h-28 rounded-xl" />)}</div>
     <div className="grid gap-6 lg:grid-cols-3"><Skeleton className="h-80 rounded-xl lg:col-span-2" /><Skeleton className="h-80 rounded-xl" /></div>
   </div>
 }
@@ -115,7 +115,7 @@ function StatCard({ icon: Icon, label, value, detail }: { icon: LucideIcon; labe
   return <Card size="sm">
     <CardContent className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground"><span>{label}</span><Icon aria-hidden="true" className="size-4" /></div>
-      <p className="truncate text-2xl font-semibold tracking-tight tabular-nums" title={value}>{value}</p>
+      <p className="truncate text-xl font-semibold tracking-tight tabular-nums sm:text-2xl" title={value}>{value}</p>
       <p className="truncate text-xs text-muted-foreground" title={detail}>{detail}</p>
     </CardContent>
   </Card>
@@ -124,7 +124,7 @@ function StatCard({ icon: Icon, label, value, detail }: { icon: LucideIcon; labe
 function StatCards({ data, timeZone }: { data: SeasonOverviewData; timeZone?: string | null }) {
   const { teams, players, divisions, games, completedGames } = data.totals
   const next = data.upcoming[0]
-  return <section aria-label="Season totals" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+  return <section aria-label="Season totals" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
     <StatCard icon={UsersIcon} label="Teams" value={String(teams)} detail={`In ${divisions} ${divisions === 1 ? 'division' : 'divisions'}`} />
     <StatCard icon={ShirtIcon} label="Players" value={String(players)} detail="On season rosters" />
     <StatCard icon={CalendarDaysIcon} label="Games played" value={`${completedGames}/${games}`} detail={games ? `${games - completedGames} left to play` : 'No games scheduled'} />
