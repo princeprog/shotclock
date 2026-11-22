@@ -1,15 +1,20 @@
 'use client'
 
 import Link from 'next/link'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarDaysIcon, ClockIcon, ShirtIcon, SparklesIcon, UsersIcon, type LucideIcon } from 'lucide-react'
+import { CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, ClipboardListIcon, ClockIcon, MapPinIcon, ShirtIcon, SparklesIcon, TrophyIcon, UserPlusIcon, UsersIcon, type LucideIcon } from 'lucide-react'
+import { toast } from 'sonner'
+import { cn } from 'cn'
 import { leagueRequest } from '@/lib/league-client'
 import { formatGameDateTime, zonedDate } from '@/lib/league-time'
-import { seasonDay, unscheduledDivisions, type SeasonOverviewData } from '@/lib/season-overview'
+import { buildAttentionItems, buildSetupSteps, seasonDay, stageLabel, unscheduledDivisions, type AttentionItem, type OverviewGame, type SeasonOverviewData } from '@/lib/season-overview'
+import { GameScoreDialog } from '@/components/game-score-dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -46,6 +51,9 @@ export function SeasonOverview({ season, league }: { season: OverviewSeason; lea
   return <div className="flex flex-col gap-6">
     <SeasonSummary season={season} data={data} today={today} />
     <StatCards data={data} timeZone={timeZone} />
+    {season.status === 'draft' ? <SetupChecklist data={data} season={season} today={today} />
+      : season.status === 'active' ? <NeedsAttention data={data} season={season} league={league} timeZone={timeZone} />
+      : <SeasonResults data={data} />}
   </div>
 }
 
@@ -111,4 +119,93 @@ function StatCards({ data, timeZone }: { data: SeasonOverviewData; timeZone?: st
       detail={next ? `${formatGameDateTime(next.scheduled_at, timeZone, { hour: 'numeric', minute: '2-digit' })} · ${next.home_name} vs ${next.away_name}` : 'Upcoming games appear here'} />
   </section>
 }
+
+const attentionIcon: Record<AttentionItem['key'], LucideIcon> = { scores: ClipboardListIcon, schedule: CalendarPlusIcon, rosters: UserPlusIcon, venues: MapPinIcon }
+
+// Problems in a started season, each with one action. Games that ended without a score can be scored right here.
+function NeedsAttention({ data, season, league, timeZone }: { data: SeasonOverviewData; season: OverviewSeason; league: OverviewLeague; timeZone?: string | null }) {
+  const [scoring, setScoring] = useState<OverviewGame | null>(null)
+  const [pending, setPending] = useState(false)
+  const items = buildAttentionItems(data, league.name)
+  if (!items.length) return <Card size="sm">
+    <CardContent className="flex-row items-center gap-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300"><CircleCheckIcon aria-hidden="true" className="size-4.5" /></span>
+      <div className="flex flex-col gap-0.5"><h3 className="font-medium">Everything is up to date</h3><p className="text-sm text-muted-foreground">No missing scores, schedules, short rosters or venues.</p></div>
+    </CardContent>
+  </Card>
+
+  return <Card className="gap-0 py-0">
+    <CardHeader className="border-b py-4">
+      <CardTitle><h3 className="flex items-center gap-2 text-base font-semibold">Needs attention<Badge variant="secondary" className="tabular-nums">{items.length}</Badge></h3></CardTitle>
+    </CardHeader>
+    <ul className="divide-y">{items.map((item) => {
+      const Icon = attentionIcon[item.key]
+      const scoreGames = item.key === 'scores' && season.status === 'active' ? data.awaitingResults.games : []
+      return <li key={item.key} className="flex flex-col gap-3 px-(--card-spacing) py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"><Icon aria-hidden="true" className="size-4.5" /></span>
+            <div className="flex min-w-0 flex-col gap-0.5"><p className="font-medium">{item.title}</p><p className="text-sm break-words text-muted-foreground">{item.detail}</p></div>
+          </div>
+          <Button variant="outline" size="sm" className="self-start sm:self-center" nativeButton={false} render={<Link href={item.href} />}>{item.action}</Button>
+        </div>
+        {scoreGames.length > 0 && <ul className="flex flex-col divide-y rounded-lg border sm:ml-12">{scoreGames.map((game) => <li key={game.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2.5">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="truncate text-sm font-medium">{game.home_name} vs {game.away_name}</span>
+            <span className="truncate text-xs text-muted-foreground">{[game.division_name, stageLabel(game.stage), formatGameDateTime(game.scheduled_at, timeZone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })].filter(Boolean).join(' · ')}</span>
+          </div>
+          <Button size="sm" onClick={() => setScoring(game)}>Record score</Button>
+        </li>)}</ul>}
+      </li>
+    })}</ul>
+    <Dialog open={!!scoring} onOpenChange={(open) => { if (!open && !pending) setScoring(null) }}>
+      <DialogContent showCloseButton={!pending} className="sm:max-w-lg">
+        {scoring && <GameScoreDialog key={scoring.id} game={scoring} stage={stageLabel(scoring.stage)} timeZone={timeZone} onClose={() => setScoring(null)} onSaved={() => { setScoring(null); toast.success('Final score saved.') }} onPendingChange={setPending} />}
+      </DialogContent>
+    </Dialog>
+  </Card>
+}
+
+// The steps that take a draft season to its start. Only the first open step gets the primary button.
+function SetupChecklist({ data, season, today }: { data: SeasonOverviewData; season: OverviewSeason; today: string }) {
+  const steps = buildSetupSteps(data, season.start_date?.slice(0, 10) ?? null, today)
+  const done = steps.filter((step) => step.done).length
+  const firstOpen = steps.find((step) => !step.done)
+  return <Card className="gap-0 py-0">
+    <CardHeader className="border-b py-4">
+      <CardTitle><h3 className="text-base font-semibold">Season setup</h3></CardTitle>
+      <CardDescription>{done} of {steps.length} steps done</CardDescription>
+    </CardHeader>
+    <ol className="divide-y">{steps.map((step, index) => <li key={step.key} className="flex flex-col gap-3 px-(--card-spacing) py-4 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        {step.done
+          ? <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300"><CircleCheckIcon aria-hidden="true" className="size-4" /></span>
+          : <span className="flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-medium tabular-nums text-muted-foreground">{index + 1}</span>}
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <p className={cn('font-medium', step.done && 'text-muted-foreground')}>{step.title}<span className="sr-only">{step.done ? ' (done)' : ' (to do)'}</span></p>
+          <p className="text-sm text-muted-foreground">{step.detail}</p>
+        </div>
+      </div>
+      {!step.done && <Button variant={step === firstOpen ? 'default' : 'outline'} size="sm" className="self-start sm:self-center" nativeButton={false} render={<Link href={step.href} />}>{step.action}</Button>}
+    </li>)}</ol>
+  </Card>
+}
+
+// A completed season's winners: the playoff champion, or the first-place team when a division had no playoffs.
+function SeasonResults({ data }: { data: SeasonOverviewData }) {
+  return <Card className="gap-0 py-0">
+    <CardHeader className="border-b py-4"><CardTitle><h3 className="text-base font-semibold">Season results</h3></CardTitle></CardHeader>
+    <ul className="grid divide-y sm:grid-cols-2 sm:divide-y-0">{data.divisions.map((division) => {
+      const winner = division.playoffs?.champion ?? division.standings[0]?.name
+      return <li key={division.id} className="flex items-center gap-3 px-(--card-spacing) py-4">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300"><TrophyIcon aria-hidden="true" className="size-4.5" /></span>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-xs text-muted-foreground">{division.name} · {division.playoffs?.champion ? 'Champion' : 'First place'}</span>
+          <span className="truncate font-medium">{winner ?? 'No results'}</span>
+        </div>
+      </li>
+    })}</ul>
+  </Card>
+}
+
 
