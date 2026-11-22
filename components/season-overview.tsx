@@ -66,7 +66,10 @@ export function SeasonOverview({ season, league }: { season: OverviewSeason; lea
         <UpcomingGames games={data.upcoming} timeZone={timeZone} today={today} />
         <RecentResults games={data.recent} timeZone={timeZone} />
       </div>
-      <StandingsCard divisions={data.divisions} />
+      <div className="flex min-w-0 flex-col gap-6">
+        <StandingsCard divisions={data.divisions} />
+        <SeasonLeaders leaders={data.leaders} />
+      </div>
     </div>
     <DivisionsTable divisions={data.divisions} />
     <PlayoffsSection divisions={data.divisions} timeZone={timeZone} />
@@ -404,5 +407,23 @@ function LiveNow({ games }: { games: OverviewGame[] }) {
       </div>
       <Button size="sm" variant="outline" nativeButton={false} render={<Link href={`/scorekeeping/games/${game.id}`} />}>Open<ArrowRightIcon data-icon="inline-end" /></Button>
     </li>)}</ul>
+  </Card>
+}
+
+const leaderCategories = [{ key: 'points', label: 'Points' }, { key: 'rebounds', label: 'Rebounds' }, { key: 'assists', label: 'Assists' }] as const
+
+// The season's best per-game players from games scored live.
+function SeasonLeaders({ leaders }: { leaders: SeasonOverviewData['leaders'] }) {
+  if (!leaders || leaderCategories.every(({ key }) => !leaders[key].length)) return null
+  return <Card className="gap-0 py-0">
+    <CardHeader className="border-b py-3 [.border-b]:pb-3"><CardTitle><h3 className="text-base font-semibold">Season leaders</h3></CardTitle><CardDescription>Per game, from games scored live</CardDescription></CardHeader>
+    <div className="divide-y">{leaderCategories.map(({ key, label }) => leaders[key].length > 0 && <section key={key} aria-label={`${label} leaders`} className="flex flex-col gap-2 px-(--card-spacing) py-3">
+      <h4 className="text-xs font-medium text-muted-foreground">{label}</h4>
+      <ol className="flex flex-col gap-1.5">{leaders[key].slice(0, 3).map((leader, index) => <li key={leader.rosterId} className="flex items-center gap-3 text-sm">
+        <span className="w-3 shrink-0 tabular-nums text-muted-foreground">{index + 1}</span>
+        <span className="flex min-w-0 flex-1 flex-col"><span className={cn('truncate', index === 0 && 'font-medium')}>{leader.name}</span><span className="truncate text-xs text-muted-foreground">{leader.teamName} · {leader.divisionName}</span></span>
+        <span className="shrink-0 font-semibold tabular-nums">{leader.perGame.toFixed(1)}</span>
+      </li>)}</ol>
+    </section>)}</div>
   </Card>
 }

@@ -35,6 +35,7 @@ export type OverviewDivision = {
 export type SeasonOverviewData = {
   totals: { divisions: number; teams: number; players: number; venues: number; games: number; completedGames: number }
   live: OverviewGame[]
+  leaders?: { points: SeasonLeader[]; rebounds: SeasonLeader[]; assists: SeasonLeader[] }
   upcoming: OverviewGame[]
   awaitingResults: { count: number; games: OverviewGame[] }
   recent: OverviewGame[]
@@ -43,6 +44,7 @@ export type SeasonOverviewData = {
 }
 
 export type AttentionItem = { key: 'scores' | 'schedule' | 'rosters' | 'venues'; title: string; detail: string; href: string; action: string }
+export type SeasonLeader = { rosterId: string; name: string; teamName: string; divisionName: string; games: number; perGame: number }
 export type SetupStep = { key: 'divisions' | 'teams' | 'venues' | 'schedule' | 'activate'; title: string; detail: string; href: string; action: string; done: boolean }
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
