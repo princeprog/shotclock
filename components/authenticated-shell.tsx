@@ -11,7 +11,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { sessionState } from "@/lib/auth-server"
 
-export async function AuthenticatedShell({ children, title = 'Dashboard' }: { children: ReactNode; title?: string }) {
+export async function AuthenticatedShell({ children, title = 'Overview' }: { children: ReactNode; title?: string }) {
   const session = await sessionState()
   if (session.state === "anonymous") redirect("/login")
   if (session.state === "restore") return <RestoreSession />
