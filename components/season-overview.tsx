@@ -7,6 +7,7 @@ import { ArrowRightIcon, CalendarDaysIcon, CalendarPlusIcon, CircleCheckIcon, Cl
 import { toast } from 'sonner'
 import { cn } from 'cn'
 import { leagueRequest } from '@/lib/league-client'
+import { saveGamesView } from '@/lib/games-view'
 import { formatGameDateTime, formatGameTime, zonedDate } from '@/lib/league-time'
 import { buildAttentionItems, buildSetupSteps, groupGamesByDay, seasonDay, stageLabel, unscheduledDivisions, type AttentionItem, type OverviewDivision, type OverviewGame, type SeasonOverviewData } from '@/lib/season-overview'
 import { GameScoreDialog } from '@/components/game-score-dialog'
@@ -64,6 +65,8 @@ export function SeasonOverview({ season, league }: { season: OverviewSeason; lea
       </div>
       <StandingsCard divisions={data.divisions} />
     </div>
+    <DivisionsTable divisions={data.divisions} />
+    <PlayoffsSection divisions={data.divisions} timeZone={timeZone} />
   </div>
 }
 
@@ -307,4 +310,79 @@ function StandingsCard({ divisions }: { divisions: OverviewDivision[] }) {
       <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/manage/standings" onClick={() => { if (selected) changeDivision(selected.id) }} />}>Full standings<ArrowRightIcon data-icon="inline-end" /></Button>
     </div>
   </Card>
+}
+
+function divisionStatus(division: OverviewDivision) {
+  if (!division.scheduled) return { label: 'Not scheduled', className: 'border-border text-muted-foreground' }
+  const finished = division.playoffs ? division.playoffs.stage === 'complete' : division.games > 0 && division.completedGames === division.games
+  if (finished) return { label: 'Complete', className: 'border-transparent bg-secondary text-secondary-foreground' }
+  if (division.playoffs && division.playoffs.stage !== 'waiting') return { label: 'Playoffs', className: 'border-amber-600/20 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' }
+  return { label: 'Round robin', className: 'border-sky-600/20 bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300' }
+}
+
+function DivisionsTable({ divisions }: { divisions: OverviewDivision[] }) {
+  return <Card className="gap-0 py-0">
+    <CardHeader className="items-center border-b py-3 [.border-b]:pb-3">
+      <CardTitle><h3 className="text-base font-semibold">Divisions</h3></CardTitle>
+      <CardAction className="self-center"><Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/manage/divisions" />}>Manage<ArrowRightIcon data-icon="inline-end" /></Button></CardAction>
+    </CardHeader>
+    {divisions.length ? <Table>
+      <caption className="sr-only">Progress of each division</caption>
+      <TableHeader className="bg-muted/30"><TableRow>
+        <TableHead scope="col" className="pl-(--card-spacing)">Division</TableHead>
+        <TableHead scope="col" className="w-20 text-right">Teams</TableHead>
+        <TableHead scope="col" className="hidden w-20 text-right sm:table-cell">Players</TableHead>
+        <TableHead scope="col" className="hidden w-56 md:table-cell">Games played</TableHead>
+        <TableHead scope="col" className="w-32 pr-(--card-spacing)">Status</TableHead>
+      </TableRow></TableHeader>
+      <TableBody>{divisions.map((division) => {
+        const status = divisionStatus(division)
+        return <TableRow key={division.id}>
+          <TableCell className="pl-(--card-spacing) font-medium">{division.name}</TableCell>
+          <TableCell className="text-right tabular-nums">{division.teams}</TableCell>
+          <TableCell className="hidden text-right tabular-nums sm:table-cell">{division.players}</TableCell>
+          <TableCell className="hidden md:table-cell">
+            <div className="flex items-center gap-3">
+              <Progress value={division.games ? Math.round((division.completedGames / division.games) * 100) : 0} aria-label={`${division.name} games played`} className="flex-1" />
+              <span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{division.completedGames}/{division.games}</span>
+            </div>
+          </TableCell>
+          <TableCell className="pr-(--card-spacing)"><Badge variant="outline" className={status.className}>{status.label}</Badge></TableCell>
+        </TableRow>
+      })}</TableBody>
+    </Table> : <p className="px-(--card-spacing) py-8 text-center text-sm text-muted-foreground">No divisions in this season yet.</p>}
+  </Card>
+}
+
+const playoffStageLabel = { waiting: 'After round robin', semifinals: 'Semifinals', final: 'Championship', complete: 'Champion decided' }
+
+// One compact card per division with playoffs: its stage and next playoff game, or the champion.
+function PlayoffsSection({ divisions, timeZone }: { divisions: OverviewDivision[]; timeZone?: string | null }) {
+  const withPlayoffs = divisions.filter((division) => division.playoffs)
+  if (!withPlayoffs.length) return null
+  return <section aria-labelledby="overview-playoffs-heading" className="flex flex-col gap-3">
+    <div className="flex items-center justify-between gap-3">
+      <h3 id="overview-playoffs-heading" className="text-base font-semibold">Playoffs</h3>
+      <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/manage/games" onClick={() => saveGamesView('bracket')} />}>View brackets<ArrowRightIcon data-icon="inline-end" /></Button>
+    </div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{withPlayoffs.map((division) => {
+      const playoffs = division.playoffs!
+      const next = playoffs.nextGame
+      return <Card key={division.id} size="sm">
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate font-medium">{division.name}</span>
+            <Badge variant="outline" className="shrink-0">{playoffStageLabel[playoffs.stage]}</Badge>
+          </div>
+          {playoffs.champion ? <div className="flex items-center gap-2.5">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-300"><TrophyIcon aria-hidden="true" className="size-4" /></span>
+            <div className="flex min-w-0 flex-col"><span className="text-xs text-muted-foreground">Champion</span><span className="truncate font-semibold" title={playoffs.champion}>{playoffs.champion}</span></div>
+          </div> : next ? <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-xs text-muted-foreground">{stageLabel(next.stage)} · {formatGameDateTime(next.scheduled_at, timeZone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+            <span className="truncate text-sm font-medium"><TeamName name={next.home_name} teamId={next.home_season_team_id} /> <span className="font-normal text-muted-foreground">vs</span> <TeamName name={next.away_name} teamId={next.away_season_team_id} /></span>
+          </div> : <span className="text-sm text-muted-foreground">No playoff games left to schedule.</span>}
+        </CardContent>
+      </Card>
+    })}</div>
+  </section>
 }
