@@ -11,6 +11,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { leagueRequest } from '@/lib/league-client'
 import { formatGameDateTime, zonedDate } from '@/lib/league-time'
 
+const DAY_MS = 24 * 60 * 60 * 1000
+
 type League = { id: string; name: string; organization_name: string; role: 'owner' | 'scorekeeper' }
 export type ScorekeepingGame = {
   id: string
@@ -29,21 +31,24 @@ export type ScorekeepingGame = {
 
 function group(game: ScorekeepingGame) {
   if (game.status === 'live') return 'Live now'
-  const today = zonedDate(new Date().toISOString(), game.time_zone)
-  return game.scheduled_at && zonedDate(game.scheduled_at, game.time_zone) === today ? 'Today' : 'Next 7 days'
+  if (!game.scheduled_at) return 'Later'
+  const now = Date.now()
+  const gameDate = zonedDate(game.scheduled_at, game.time_zone)
+  if (gameDate === zonedDate(new Date(now).toISOString(), game.time_zone)) return 'Today'
+  return gameDate <= zonedDate(new Date(now + 7 * DAY_MS).toISOString(), game.time_zone) ? 'Next 7 days' : 'Later'
 }
 
 export function ScorekeepingGames() {
   const client = useQueryClient()
   const data = useQuery({ queryKey: ['league', 'scorekeeping/games'], queryFn: () => leagueRequest<{ leagues: League[]; games: ScorekeepingGame[] }>('scorekeeping/games', client), retry: false, refetchInterval: 30_000 })
   const owns = data.data?.leagues.some((league) => league.role === 'owner')
-  const groups = ['Live now', 'Today', 'Next 7 days'].map((label) => ({ label, games: (data.data?.games ?? []).filter((game) => group(game) === label) })).filter((item) => item.games.length)
+  const groups = ['Live now', 'Today', 'Next 7 days', 'Later'].map((label) => ({ label, games: (data.data?.games ?? []).filter((game) => group(game) === label) })).filter((item) => item.games.length)
 
   return <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-4 pt-8 pb-16 sm:px-8 sm:pt-12">
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex flex-col gap-1.5">
         <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Scorekeeping</h1>
-        <p className="text-sm text-muted-foreground">Live games and games from today through the next 7 days.</p>
+        <p className="text-sm text-muted-foreground">Live games and upcoming scheduled games in active seasons.</p>
       </div>
       {owns && <Button variant="outline" nativeButton={false} render={<Link href="/organizations" />}>Manage leagues<ArrowRightIcon data-icon="inline-end" /></Button>}
     </div>
@@ -71,7 +76,7 @@ export function ScorekeepingGames() {
                 : <span className="text-xs text-muted-foreground">Teams not set</span>}
             </div>
           </li>)}</ul></Card>
-        </section>) : <p className="rounded-xl border px-4 py-10 text-center text-sm text-muted-foreground">No games today or in the next 7 days.</p>}
+        </section>) : <p className="rounded-xl border px-4 py-10 text-center text-sm text-muted-foreground">No upcoming games. Generate a schedule for an active season to see games here.</p>}
       </>}
   </main>
 }
