@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { CreateLeagueDialog } from '@/components/create-league-dialog'
 import { EditLeagueDialog } from '@/components/edit-league-dialog'
 import { LeagueWebsiteDialog } from '@/components/league-website-dialog'
+import { ScorekeepersDialog } from '@/components/scorekeepers-dialog'
 import { GameForfeitDialog } from '@/components/game-forfeit-dialog'
 import { GameScoreDialog } from '@/components/game-score-dialog'
 import { SeasonOverview } from '@/components/season-overview'
@@ -750,6 +751,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
   const [view, setView] = useState('')
   const [editing, setEditing] = useState('')
   const [websiteLeague, setWebsiteLeague] = useState<LeagueRow | null>(null)
+  const [scorekeepersLeague, setScorekeepersLeague] = useState<LeagueRow | null>(null)
   const archiveAction = useArchiveAction()
   const guarded = useGuardedArchive()
   const showingArchived = view === 'archived'
@@ -779,6 +781,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
             {showingArchived ? <DropdownMenuItem className="py-2" onClick={() => archiveAction.mutate({ path: `leagues/${item.id}/restore`, message: 'League restored.' })}><ArchiveRestoreIcon />Restore league</DropdownMenuItem> : <>
               <DropdownMenuItem className="py-2" onClick={() => setEditing(item.id)}><PencilIcon />Edit league</DropdownMenuItem>
               <DropdownMenuItem className="py-2" onClick={() => setWebsiteLeague(item)}><GlobeIcon />Website settings</DropdownMenuItem>
+              <DropdownMenuItem className="py-2" onClick={() => setScorekeepersLeague(item)}><ClipboardListIcon />Scorekeepers</DropdownMenuItem>
               <DropdownMenuItem className="py-2" disabled={guarded.pending} onClick={() => void guarded.archive({ kind: 'league', name: item.name, path: `leagues/${item.id}/archive`, undoPath: `leagues/${item.id}/restore`, message: 'League archived.', activeSeasonsPath: `leagues/${item.id}/seasons?status=active` })}><ArchiveIcon />Archive league</DropdownMenuItem>
             </>}
           </DropdownMenuGroup><DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuItem variant="destructive" className="py-2" onClick={() => deleteLeague(item)}><Trash2Icon />{showingArchived ? 'Delete permanently' : 'Delete league'}</DropdownMenuItem></DropdownMenuGroup></DropdownMenuContent></DropdownMenu></TableCell>
@@ -786,6 +789,7 @@ function LeaguesSection({ organizationId, leagues, onDelete }: { organizationId:
       </Fragment>)}</AnimatedTableBody>
     </Table></CardContent></Card>}
     <LeagueWebsiteDialog league={websiteLeague} onClose={() => setWebsiteLeague(null)} />
+    <ScorekeepersDialog league={scorekeepersLeague} onClose={() => setScorekeepersLeague(null)} />
     <EditLeagueDialog key={editingLeague?.id ?? 'none'} league={editingLeague} onClose={() => setEditing('')} />
     {guarded.dialog}
   </section>

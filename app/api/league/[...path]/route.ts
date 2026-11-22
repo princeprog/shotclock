@@ -4,10 +4,10 @@ import { isTrustedMutation } from '@/lib/auth-security'
 
 const uuid = '[0-9a-fA-F-]{36}'
 const routes: Record<string, RegExp[]> = {
-  GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions|schedule/status)|teams/${uuid}|season-teams/${uuid}(/roster)?|games/${uuid}/schedule-history|divisions/${uuid}/schedule/status)$`)],
-  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork|archive|restore)|(leagues|seasons)/${uuid}/(archive|restore)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/(score|forfeit)|divisions/${uuid}/(schedule|playoffs)(/preview)?|seasons/${uuid}/schedule(/preview)?|seasons/${uuid}/schedule/(estimate|validate|suggest)|seasons/${uuid}/schedule/calendar)$`)],
+  GET: [new RegExp(`^(organizations|organizations/${uuid}|organizations/${uuid}/(leagues|seasons|teams|team-seasons|venues|players)|leagues/${uuid}|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}|seasons/${uuid}/(teams|games|standings|dashboard|divisions|schedule/status)|teams/${uuid}|season-teams/${uuid}(/roster)?|games/${uuid}/schedule-history|divisions/${uuid}/schedule/status|leagues/${uuid}/scorekeepers|scorekeeping/games)$`)],
+  POST: [new RegExp(`^(organizations|organizations/${uuid}/(leagues|players|players/${uuid}/fork|archive|restore)|(leagues|seasons)/${uuid}/(archive|restore)|leagues/${uuid}/(seasons|teams|venues)|seasons/${uuid}/(status|teams|games|divisions)|season-teams/${uuid}/roster|games/${uuid}/(score|forfeit)|divisions/${uuid}/(schedule|playoffs)(/preview)?|seasons/${uuid}/schedule(/preview)?|seasons/${uuid}/schedule/(estimate|validate|suggest)|seasons/${uuid}/schedule/calendar|leagues/${uuid}/invitations|invitations/accept)$`)],
   PATCH: [new RegExp(`^((organizations|leagues|seasons|teams|season-teams|rosters|games|venues|divisions|players)/${uuid}|leagues/${uuid}/publication)$`)],
-  DELETE: [new RegExp(`^((divisions|season-teams|rosters|games|teams|venues|organizations|leagues|seasons)/${uuid}|organizations/${uuid}/players/${uuid})$`)],
+  DELETE: [new RegExp(`^((divisions|season-teams|rosters|games|teams|venues|organizations|leagues|seasons|invitations|league-members)/${uuid}|organizations/${uuid}/players/${uuid})$`)],
 }
 
 async function readBoundedBody(request: NextRequest, limit: number): Promise<string | null> {
