@@ -34,6 +34,13 @@ test('a queued undo reverses a saved play once', () => {
   assert.equal(view.plays[0].voided, true)
 })
 
+test('an in-flight play followed by its undo leaves totals unchanged', () => {
+  const view = withPending(state, [play('q1', 'points', 'a', 'a1', 2), { type: 'void', eventId: 'q1' }])
+  assert.equal(view.away.score, state.away.score)
+  assert.equal(view.away.players[0].points, 0)
+  assert.equal(view.plays.find((item) => item.id === 'q1')?.voided, true)
+})
+
 test('the latest queued clock change wins', () => {
   const view = withPending(state, [{ type: 'clock', running: true, remainingMs: 280000, at: '2026-11-22T00:00:05.000Z' }])
   assert.deepEqual(view.clock, { remainingMs: 280000, running: true, serverTime: '2026-11-22T00:00:05.000Z' })
