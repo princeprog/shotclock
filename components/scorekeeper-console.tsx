@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 import { cn } from 'cn'
 import { FinalBoxScore } from '@/components/final-box-score'
 import { LiveBoxScore } from '@/components/live-box-score'
+import { ShotClockControls } from '@/components/shot-clock-controls'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,7 +18,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { leagueRequest } from '@/lib/league-client'
-import { clockRemaining, describePlay, deviceId, formatClock, nextBatch, periodLabel, readOutbox, saveOutbox, SCORER_MOVED, withPending, type LivePlay, type LiveState, type LiveTeam, type OutboxItem, type PlayKind } from '@/lib/live-scoring'
+import { clockRemaining, clockServerOffset, clockServerTimestamp, describePlay, deviceId, formatClock, nextBatch, periodLabel, readOutbox, saveOutbox, SCORER_MOVED, withPending, type LivePlay, type LiveState, type LiveTeam, type OutboxItem, type PlayKind } from '@/lib/live-scoring'
 
 const noSubscription = () => () => {}
 const subscribeOnline = (callback: () => void) => {
@@ -26,6 +27,7 @@ const subscribeOnline = (callback: () => void) => {
   return () => { window.removeEventListener('online', callback); window.removeEventListener('offline', callback) }
 }
 type Selection = { teamId: string; rosterId: string } | null
+type StartFormat = LiveState['format'] & { shotClockEnabled: boolean; shotClockFullSeconds: number; shotClockShortSeconds: number }
 const actions: { kind: PlayKind; points?: number; label: string; tone?: 'score' | 'foul' }[] = [
   { kind: 'points', points: 1, label: '+1', tone: 'score' }, { kind: 'points', points: 2, label: '+2', tone: 'score' }, { kind: 'points', points: 3, label: '+3', tone: 'score' },
   { kind: 'rebound', label: 'REB' }, { kind: 'assist', label: 'AST' }, { kind: 'steal', label: 'STL' }, { kind: 'block', label: 'BLK' }, { kind: 'turnover', label: 'TO' },
@@ -65,16 +67,21 @@ function Console({ gameId }: { gameId: string }) {
   const live = useQuery({ queryKey: key, retry: false, refetchInterval: 5000, queryFn: async () => {
     const fresh = await leagueRequest<LiveState>(path, client)
     const previous = client.getQueryData<LiveState>(key)
-    return previous && previous.status === fresh.status && fresh.version < previous.version ? previous : fresh
+    if (previous && previous.status === fresh.status && fresh.version < previous.version) throw new Error('Received an older game state')
+    return fresh
   } })
   const saved = live.data
   const view = saved ? withPending(saved, outbox) : null
   const isScorer = saved?.status === 'live' && saved.scorer?.deviceId === device
+  const queueBlocked = syncProblem.startsWith('Clock control changed')
+  const serverOffset = clockServerOffset(saved?.clock ?? null, live.dataUpdatedAt)
   const lastClock = [...outbox].reverse().find((item) => item.type === 'clock')
-  const clockReadAt = lastClock?.type === 'clock' ? Date.parse(lastClock.at) : live.dataUpdatedAt
+  const clockReadAt = lastClock?.type === 'clock' ? Date.parse(lastClock.at) - serverOffset : live.dataUpdatedAt
   const remaining = view ? clockRemaining(view.clock, clockReadAt, now) : 0
   const running = !!view?.clock?.running && remaining > 0
   const clockRef = useRef({ running, remaining })
+  const epochRef = useRef(saved?.shotClock?.scorerEpoch)
+  const offsetRef = useRef(serverOffset)
 
   useEffect(() => {
     const node = scoreboardRef.current
@@ -84,20 +91,29 @@ function Console({ gameId }: { gameId: string }) {
     return () => observer.disconnect()
   }, [saved?.status])
   useEffect(() => { saveOutbox(gameId, outbox) }, [gameId, outbox])
-  useEffect(() => { clockRef.current = { running, remaining } })
+  useEffect(() => { clockRef.current = { running, remaining }; epochRef.current = saved?.shotClock?.scorerEpoch; offsetRef.current = serverOffset })
+
+  useEffect(() => {
+    if (!isScorer || !online || outbox.length || saved?.shotClock?.mode !== 'dual') return
+    const epoch = saved.shotClock.epoch
+    const send = () => { void leagueRequest(`${path}/shot-clock/heartbeat`, client, 'POST', { deviceId: device, epoch }).catch(() => {}) }
+    send()
+    const timer = window.setInterval(send, 5000)
+    return () => window.clearInterval(timer)
+  }, [isScorer, online, outbox.length, saved?.shotClock?.mode, saved?.shotClock?.epoch, path, client, device])
 
   // The clock ticks locally. When it reaches zero it stops itself, like a shot clock horn.
   useEffect(() => {
     if (!running) return
     const timer = window.setInterval(() => {
       setNow(Date.now())
-      if (clockRef.current.running && clockRef.current.remaining <= 100) {
+      if (isScorer && !queueBlocked && clockRef.current.running && clockRef.current.remaining <= 100) {
         clockRef.current = { running: false, remaining: 0 }
-        setOutbox((current) => [...current, { type: 'clock', running: false, remainingMs: 0, at: new Date().toISOString() }])
+        setOutbox((current) => [...current, { type: 'clock', running: false, remainingMs: 0, at: clockServerTimestamp(offsetRef.current), epoch: epochRef.current }])
       }
     }, 100)
     return () => window.clearInterval(timer)
-  }, [running])
+  }, [running, isScorer, queueBlocked])
 
   // Sends the queue in order. Network failures retry with a growing delay; a rejected play is dropped and reported.
   useEffect(() => {
@@ -109,10 +125,12 @@ function Console({ gameId }: { gameId: string }) {
       const first = batch.items[0]
       try {
         const result = first.type === 'play'
-          ? await leagueRequest<LiveState>(`${path}/events`, client, 'POST', { deviceId: device, events: batch.items.map((item) => item.type === 'play' ? item.play : null) })
+          ? await leagueRequest<LiveState>(`${path}/events`, client, 'POST', { deviceId: device, epoch: first.epoch, events: batch.items.map((item) => item.type === 'play' ? item.play : null) })
           : first.type === 'void'
-            ? await leagueRequest<LiveState>(`${path}/events/${first.eventId}/void`, client, 'POST', { deviceId: device })
-            : await leagueRequest<LiveState>(`${path}/clock`, client, 'POST', { deviceId: device, running: first.running, remainingMs: first.remainingMs, at: first.at })
+            ? await leagueRequest<LiveState>(`${path}/events/${first.eventId}/void`, client, 'POST', { deviceId: device, epoch: first.epoch })
+            : first.type === 'shot-clock'
+              ? await leagueRequest<LiveState>(`${path}/shot-clock`, client, 'POST', { deviceId: device, commandId: first.commandId, epoch: first.epoch, running: first.running, remainingMs: first.remainingMs, visible: first.visible, at: first.at })
+            : await leagueRequest<LiveState>(`${path}/clock`, client, 'POST', { deviceId: device, epoch: first.epoch, running: first.running, remainingMs: first.remainingMs, at: first.at })
         client.setQueryData(['league', path], result)
         setOutbox((current) => current.slice(batch.items.length))
         setSyncProblem('')
@@ -120,6 +138,7 @@ function Console({ gameId }: { gameId: string }) {
       } catch (error) {
         const message = error instanceof Error ? error.message : ''
         if (message === SCORER_MOVED) { void client.invalidateQueries({ queryKey: ['league', path] }); return }
+        if (/shot-clock control changed/i.test(message)) { setSyncProblem('Clock control changed. These unsent changes need review before scoring can continue.'); void client.invalidateQueries({ queryKey: ['league', path] }); return }
         if (error instanceof TypeError || /unavailable|too many/i.test(message)) {
           setSyncProblem('Couldn’t reach Shotclock. Retrying…')
           timer = window.setTimeout(() => setRetry((value) => value + 1), retryDelay.current)
@@ -137,7 +156,7 @@ function Console({ gameId }: { gameId: string }) {
   }, [outbox, online, isScorer, retry, client, device, path])
 
   const direct = useMutation({
-    mutationFn: ({ action, body }: { action: 'start' | 'claim' | 'period' | 'finish'; body: object }) => leagueRequest<LiveState>(`${path}/${action}`, client, 'POST', { deviceId: device, ...body }),
+    mutationFn: ({ action, body }: { action: 'start' | 'claim' | 'period' | 'finish'; body: object }) => leagueRequest<LiveState>(`${path}/${action}`, client, 'POST', { deviceId: device, epoch: saved?.shotClock?.scorerEpoch, ...body }),
     onSuccess: (result, { action }) => {
       client.setQueryData(key, result)
       setDialog(null)
@@ -147,8 +166,13 @@ function Console({ gameId }: { gameId: string }) {
     },
     onError: (error) => toast.error(error.message),
   })
+  const clockMode = useMutation({
+    mutationFn: (mode: 'single' | 'dual') => leagueRequest<LiveState>(`${path}/shot-clock/mode`, client, 'POST', { deviceId: device, mode, epoch: saved?.shotClock?.epoch }),
+    onSuccess: (result) => client.setQueryData(key, result),
+    onError: (error) => toast.error(error.message),
+  })
 
-  function enqueue(item: OutboxItem) { setOutbox((current) => [...current, item]) }
+  function enqueue(item: OutboxItem) { setOutbox((current) => [...current, { ...item, epoch: item.epoch ?? epochRef.current }]) }
   function record(kind: PlayKind, points?: number, teamId?: string) {
     if (!view) return
     const team = teamId ?? selected?.teamId
@@ -167,21 +191,22 @@ function Console({ gameId }: { gameId: string }) {
     else enqueue({ type: 'void', eventId: play.id })
   }
   function setClock(nextRunning: boolean, remainingMs = Math.round(remaining)) {
-    enqueue({ type: 'clock', running: nextRunning, remainingMs, at: new Date().toISOString() })
-    setNow(Date.now())
+    const at = clockServerTimestamp(serverOffset)
+    enqueue({ type: 'clock', running: nextRunning, remainingMs, at })
+    setNow(Date.parse(at) - serverOffset)
   }
 
   useEffect(() => {
-    if (!isScorer || boxOpen || dialog !== null) return
+    if (!isScorer || queueBlocked || boxOpen || dialog !== null) return
     const onKey = (event: KeyboardEvent) => {
       if (event.code !== 'Space' || (event.target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'BUTTON'].includes(event.target.tagName))) return
       event.preventDefault()
       const current = clockRef.current
-      setOutbox((items) => [...items, { type: 'clock', running: !current.running, remainingMs: Math.round(current.remaining), at: new Date().toISOString() }])
+      setOutbox((items) => [...items, { type: 'clock', running: !current.running, remainingMs: Math.round(current.remaining), at: clockServerTimestamp(offsetRef.current), epoch: epochRef.current }])
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isScorer, boxOpen, dialog])
+  }, [isScorer, queueBlocked, boxOpen, dialog])
 
   if (live.isError && !saved) return <main className="mx-auto w-full max-w-3xl p-6"><Alert variant="destructive"><AlertTitle>Couldn’t load this game</AlertTitle><AlertDescription><p>{live.error.message}</p><div className="mt-3 flex gap-2"><Button variant="outline" size="sm" onClick={() => void live.refetch()}>Try again</Button><Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/scorekeeping" />}>Back to games</Button></div></AlertDescription></Alert></main>
   if (!view || !saved) return <ConsoleSkeleton />
@@ -202,18 +227,18 @@ function Console({ gameId }: { gameId: string }) {
         {!online ? <CloudOffIcon aria-hidden="true" className="size-3.5" /> : outbox.length ? <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" /> : null}{syncLabel}
       </span>}
     </header>
-    {syncProblem && online && <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{syncProblem}</p>}
+    {syncProblem && online && <div role="alert" className="text-sm text-amber-700 dark:text-amber-300"><p>{syncProblem}</p>{queueBlocked && <><p>{outbox.length} unsent changes are still on this device. Review the game before continuing.</p><div className="mt-2 flex flex-wrap gap-2">{isScorer && saved.shotClock?.scorerEpoch && outbox.some((item) => item.type === 'play') && <Button variant="outline" size="sm" onClick={() => { setOutbox((items) => items.filter((item) => item.type === 'play').map((item) => ({ ...item, epoch: saved.shotClock!.scorerEpoch }))); setSyncProblem('') }}>Resend unsent plays; discard clock and undo changes</Button>}<Button variant="outline" size="sm" onClick={() => { setOutbox([]); setSyncProblem(''); void live.refetch() }}>Discard all unsent changes</Button></div></>}</div>}
 
     {view.status === 'scheduled' && <StartGame view={view} pending={direct.isPending} onStart={(format) => direct.mutate({ action: 'start', body: format })} />}
 
-    {view.status === 'live' && !isScorer && <Alert><TimerIcon /><AlertTitle>{view.scorer ? `${view.scorer.name ?? 'Someone'} is scoring this game on another device` : 'No device is scoring this game'}</AlertTitle><AlertDescription><p>Take over to record plays here. The other device will stop saving plays.{outbox.length ? ` ${outbox.length} unsaved ${outbox.length === 1 ? 'change' : 'changes'} on this device will be sent after you take over.` : ''}</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" onClick={() => setDialog('claim')}>Take over scoring</Button>{outbox.length > 0 && <Button size="sm" variant="ghost" onClick={() => setOutbox([])}>Discard unsaved changes</Button>}</div></AlertDescription></Alert>}
+    {view.status === 'live' && !isScorer && <Alert><TimerIcon /><AlertTitle>{view.scorer ? `${view.scorer.name ?? 'Someone'} is scoring this game on another device` : 'No device is scoring this game'}</AlertTitle><AlertDescription><p>Take over to record plays here. The other device will stop saving plays.{outbox.length ? ` ${outbox.length} unsaved ${outbox.length === 1 ? 'change' : 'changes'} on this device ${view.shotClock ? 'will need review after you take over.' : 'will be sent after you take over.'}` : ''}</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" onClick={() => setDialog('claim')}>Take over scoring</Button>{outbox.length > 0 && <Button size="sm" variant="ghost" onClick={() => setOutbox([])}>Discard unsaved changes</Button>}</div></AlertDescription></Alert>}
 
     {view.status === 'live' && compact && <div className="fixed inset-x-0 top-0 z-30 bg-zinc-950 px-3 py-2 text-white shadow-md" aria-label="Compact scoreboard">
       <div className="mx-auto flex max-w-6xl items-center gap-2 text-sm">
         <span className="flex min-w-0 flex-1 items-center gap-1"><span className="min-w-0 truncate" title={view.home.name}>{view.home.name}</span><strong className="tabular-nums">{view.home.score}</strong></span>
         <span className="shrink-0 font-mono tabular-nums">{label} {formatClock(remaining)}</span>
         <span className="flex min-w-0 flex-1 items-center justify-end gap-1"><strong className="tabular-nums">{view.away.score}</strong><span className="min-w-0 truncate" title={view.away.name}>{view.away.name}</span></span>
-        {isScorer && <Button size="sm" onClick={() => setClock(!running)} disabled={remaining === 0 && !running}>{running ? 'Stop' : 'Start'}</Button>}
+        {isScorer && <Button size="sm" onClick={() => setClock(!running)} disabled={queueBlocked || (remaining === 0 && !running)}>{running ? 'Stop' : 'Start'}</Button>}
         <Button size="sm" variant="outline" onClick={() => setBoxOpen(true)}>Box score</Button>
       </div>
     </div>}
@@ -224,8 +249,8 @@ function Console({ gameId }: { gameId: string }) {
         {view.status === 'live' && <>
           <span aria-live="off" className={cn('font-mono text-4xl font-semibold tabular-nums sm:text-5xl', remaining === 0 && 'text-destructive')}>{formatClock(remaining)}</span>
           {isScorer && <div className="flex gap-1.5">
-            <Button size="sm" variant={running ? 'secondary' : 'default'} onClick={() => setClock(!running)} disabled={remaining === 0 && !running}>{running ? <><PauseIcon data-icon="inline-start" />Stop</> : <><PlayIcon data-icon="inline-start" />Start</>}</Button>
-            <Button size="icon-sm" variant="outline" aria-label="Adjust clock" disabled={running} onClick={() => setDialog('clock')}><PencilIcon /></Button>
+            <Button size="sm" variant={running ? 'secondary' : 'default'} onClick={() => setClock(!running)} disabled={queueBlocked || (remaining === 0 && !running)}>{running ? <><PauseIcon data-icon="inline-start" />Stop</> : <><PlayIcon data-icon="inline-start" />Start</>}</Button>
+            <Button size="icon-sm" variant="outline" aria-label="Adjust clock" disabled={running || queueBlocked} onClick={() => setDialog('clock')}><PencilIcon /></Button>
           </div>}
         </>}
       </div>
@@ -239,15 +264,33 @@ function Console({ gameId }: { gameId: string }) {
       </div>}
     </section>}
 
+    {view.status === 'live' && view.shotClock && <section className="space-y-3" aria-label="Shot clock">
+      {view.shotClock.mode === 'single' && <ShotClockControls
+        remainingMs={clockRemaining(view.shotClock, Date.parse(view.shotClock.serverTime) - serverOffset, now)}
+        running={view.shotClock.running}
+        gameRunning={running}
+        visible={view.shotClock.visible}
+        fullSeconds={view.shotClock.fullSeconds}
+        shortSeconds={view.shotClock.shortSeconds}
+        disabled={!isScorer || queueBlocked}
+        onChange={(change) => enqueue({ type: 'shot-clock', commandId: crypto.randomUUID(), epoch: view.shotClock!.epoch, ...change, at: clockServerTimestamp(serverOffset) })}
+      />}
+      {view.shotClock.mode === 'dual' && <p className="text-sm text-muted-foreground">Shot-clock operator: {view.shotClock.operator?.name ?? 'Not assigned'} · {view.shotClock.visible ? formatClock(clockRemaining(view.shotClock, Date.parse(view.shotClock.serverTime) - serverOffset, now)) : 'Hidden'}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        {isScorer && <Button variant="outline" size="sm" disabled={busy || clockMode.isPending} onClick={() => clockMode.mutate(view.shotClock!.mode === 'single' ? 'dual' : 'single')}>{view.shotClock.mode === 'single' ? 'Use a second operator' : 'Control on this device'}</Button>}
+        {view.shotClock.mode === 'dual' && <Button variant="outline" size="sm" nativeButton={false} render={<Link href={`/scorekeeping/games/${gameId}/shot-clock`} />}>Open shot-clock screen</Button>}
+      </div>
+    </section>}
+
     {view.status === 'live' && <div className="grid gap-4 md:grid-cols-2">
-      <TeamPanel team={view.home} selected={selected} disabled={!isScorer} onSelect={setSelected} onTimeout={() => record('timeout', undefined, view.home.seasonTeamId!)} />
-      <TeamPanel team={view.away} selected={selected} disabled={!isScorer} onSelect={setSelected} onTimeout={() => record('timeout', undefined, view.away.seasonTeamId!)} />
+      <TeamPanel team={view.home} selected={selected} disabled={!isScorer || queueBlocked} onSelect={setSelected} onTimeout={() => record('timeout', undefined, view.home.seasonTeamId!)} />
+      <TeamPanel team={view.away} selected={selected} disabled={!isScorer || queueBlocked} onSelect={setSelected} onTimeout={() => record('timeout', undefined, view.away.seasonTeamId!)} />
     </div>}
 
-    {view.status === 'live' && <RecentPlays view={view} canUndo={isScorer} onUndo={undo} />}
+    {view.status === 'live' && <RecentPlays view={view} canUndo={isScorer && !queueBlocked} onUndo={undo} />}
     {view.status === 'completed' && <FinalBoxScore view={view} />}
 
-    {view.status === 'live' && isScorer && <ActionPad selected={selected} view={view} lastPlay={view.plays.find((play) => play.id === lastPlayId) ?? null} lastUndone={lastUndone} onUndo={undo} onAction={(kind, points) => record(kind, points)} onClear={() => setSelected(null)} />}
+    {view.status === 'live' && isScorer && !queueBlocked && <ActionPad selected={selected} view={view} lastPlay={view.plays.find((play) => play.id === lastPlayId) ?? null} lastUndone={lastUndone} onUndo={undo} onAction={(kind, points) => record(kind, points)} onClear={() => setSelected(null)} />}
 
     <LiveBoxScore view={view} open={boxOpen && view.status === 'live'} onOpenChange={setBoxOpen} />
     <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !direct.isPending) setDialog(null) }}>
@@ -328,15 +371,18 @@ function RecentPlays({ view, canUndo, onUndo }: { view: LiveState; canUndo: bool
   </Card>
 }
 
-function StartGame({ view, pending, onStart }: { view: LiveState; pending: boolean; onStart: (format: LiveState['format']) => void }) {
+function StartGame({ view, pending, onStart }: { view: LiveState; pending: boolean; onStart: (format: StartFormat) => void }) {
   const [format, setFormat] = useState(view.format)
+  const [shotClockEnabled, setShotClockEnabled] = useState(false)
+  const [shotClockFullSeconds, setShotClockFullSeconds] = useState(24)
+  const [shotClockShortSeconds, setShotClockShortSeconds] = useState(14)
   const teamsKnown = !!view.home.seasonTeamId && !!view.away.seasonTeamId
   const field = (name: keyof LiveState['format'], label: string, min: number, max: number, description?: string) => <Field className="gap-2">
     <FieldLabel htmlFor={`format-${name}`}>{label}</FieldLabel>
     <Input id={`format-${name}`} type="number" inputMode="numeric" min={min} max={max} value={format[name]} aria-describedby={description ? `format-${name}-description` : undefined} onChange={(event) => setFormat((current) => ({ ...current, [name]: Math.min(max, Math.max(min, Number(event.target.value) || min)) }))} className="h-11 bg-background tabular-nums" />
     {description && <FieldDescription id={`format-${name}-description`}>{description}</FieldDescription>}
   </Field>
-  function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); onStart(format) }
+  function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); onStart({ ...format, shotClockEnabled, shotClockFullSeconds, shotClockShortSeconds }) }
   return <Card className="mx-auto w-full max-w-2xl gap-0 py-0">
     <div className="bg-zinc-950 px-5 py-6 text-white sm:px-8 sm:py-7 dark:bg-zinc-900">
       <h1 className="text-lg font-semibold">Game setup</h1>
@@ -359,6 +405,13 @@ function StartGame({ view, pending, onStart }: { view: LiveState; pending: boole
             {field('overtimeMinutes', 'Overtime minutes', 1, 15)}
             {field('bonusFouls', 'Bonus after team fouls', 1, 10, 'A team is in the bonus once the other team reaches this many fouls in a period.')}
           </FieldGroup>
+          <div className="space-y-3 border-t pt-5">
+            <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={shotClockEnabled} onChange={(event) => setShotClockEnabled(event.target.checked)} /> Use shot clock</label>
+            {shotClockEnabled && <div className="grid gap-4 sm:grid-cols-2">
+              <Field><FieldLabel htmlFor="shot-full">Full reset (seconds)</FieldLabel><Input id="shot-full" type="number" min={1} max={120} value={shotClockFullSeconds} onChange={(event) => setShotClockFullSeconds(Math.min(120, Math.max(1, Number(event.target.value) || 1)))} /></Field>
+              <Field><FieldLabel htmlFor="shot-short">Short reset (seconds)</FieldLabel><Input id="shot-short" type="number" min={1} max={120} value={shotClockShortSeconds} onChange={(event) => setShotClockShortSeconds(Math.min(120, Math.max(1, Number(event.target.value) || 1)))} /></Field>
+            </div>}
+          </div>
           <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="flex items-center gap-2 text-sm text-muted-foreground"><TimerIcon aria-hidden="true" className="size-4 shrink-0" />The clock starts stopped.</p>
             <Button type="submit" size="lg" disabled={pending} className="w-full sm:w-auto sm:min-w-36">{pending ? 'Starting…' : 'Start game'}</Button>

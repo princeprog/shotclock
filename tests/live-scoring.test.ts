@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { clockRemaining, deviceId, formatClock, nextBatch, periodLabel, readOutbox, saveOutbox, withPending, type LiveState, type OutboxItem } from '../lib/live-scoring.ts'
+import { clockRemaining, clockServerOffset, deviceId, formatClock, nextBatch, periodLabel, readOutbox, saveOutbox, withPending, type LiveState, type OutboxItem } from '../lib/live-scoring.ts'
 
 function memoryStorage() {
   const values = new Map<string, string>()
@@ -49,12 +49,36 @@ test('the latest queued clock change wins', () => {
   assert.equal(clockRemaining(state.clock, 0, 99999), 300000)
 })
 
+test('queued shot clock stops at the game clock stop and stays stopped on restart', () => {
+  const current = { ...state, shotClock: { mode: 'single' as const, fullSeconds: 24, shortSeconds: 14, remainingMs: 20000, running: true, visible: true, epoch: 1, operator: null, serverTime: '2026-11-22T00:00:00.000Z' } }
+  const view = withPending(current, [
+    { type: 'clock', running: false, remainingMs: 290000, at: '2026-11-22T00:00:03.000Z' },
+    { type: 'clock', running: true, remainingMs: 290000, at: '2026-11-22T00:00:04.000Z' },
+  ])
+  assert.equal(view.shotClock?.remainingMs, 17000)
+  assert.equal(view.shotClock?.running, false)
+})
+
+test('clock readings use the response receipt time even when the device clock is fast', () => {
+  const clock = { remainingMs: 24000, running: true, serverTime: '2026-11-22T00:00:00.000Z' }
+  const received = Date.parse(clock.serverTime) + 5000
+  const offset = clockServerOffset(clock, received)
+  assert.equal(offset, -5000)
+  assert.equal(clockRemaining(clock, Date.parse(clock.serverTime) - offset, received + 1000), 23000)
+})
+
 test('plays are sent together until an undo or clock change', () => {
   const items: OutboxItem[] = [play('1', 'foul', 'h', 'h1'), play('2', 'foul', 'h', 'h1'), { type: 'void', eventId: '1' }, play('3', 'foul', 'h', 'h1')]
   assert.deepEqual(nextBatch(items)?.items.map((item) => item.type), ['play', 'play'])
   assert.deepEqual(nextBatch(items.slice(2))?.items.map((item) => item.type), ['void'])
   assert.equal(nextBatch([]), null)
   assert.equal(nextBatch(Array.from({ length: 150 }, (_, index) => play(String(index), 'foul', 'h', 'h1')))?.items.length, 100)
+})
+
+test('play batches do not mix ownership epochs', () => {
+  const first = { ...play('1', 'foul', 'h', 'h1'), epoch: 1 } as OutboxItem
+  const second = { ...play('2', 'foul', 'h', 'h1'), epoch: 2 } as OutboxItem
+  assert.equal(nextBatch([first, second])?.items.length, 1)
 })
 
 test('the queue and device ID survive a reload', () => {
