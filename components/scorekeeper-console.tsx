@@ -296,25 +296,37 @@ function RecentPlays({ view, canUndo, onUndo }: { view: LiveState; canUndo: bool
 function StartGame({ view, pending, onStart }: { view: LiveState; pending: boolean; onStart: (format: LiveState['format']) => void }) {
   const [format, setFormat] = useState(view.format)
   const teamsKnown = !!view.home.seasonTeamId && !!view.away.seasonTeamId
-  const field = (name: keyof LiveState['format'], label: string, min: number, max: number, description?: string) => <Field>
+  const field = (name: keyof LiveState['format'], label: string, min: number, max: number, description?: string) => <Field className="gap-2">
     <FieldLabel htmlFor={`format-${name}`}>{label}</FieldLabel>
-    <Input id={`format-${name}`} type="number" inputMode="numeric" min={min} max={max} value={format[name]} onChange={(event) => setFormat((current) => ({ ...current, [name]: Math.min(max, Math.max(min, Number(event.target.value) || min)) }))} />
-    {description && <FieldDescription>{description}</FieldDescription>}
+    <Input id={`format-${name}`} type="number" inputMode="numeric" min={min} max={max} value={format[name]} aria-describedby={description ? `format-${name}-description` : undefined} onChange={(event) => setFormat((current) => ({ ...current, [name]: Math.min(max, Math.max(min, Number(event.target.value) || min)) }))} className="h-11 bg-background tabular-nums" />
+    {description && <FieldDescription id={`format-${name}-description`}>{description}</FieldDescription>}
   </Field>
   function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); onStart(format) }
-  return <Card className="mx-auto w-full max-w-xl">
-    <CardHeader><CardTitle><h1 className="text-xl font-semibold">{view.home.name} vs {view.away.name}</h1></CardTitle><CardDescription>Check the game format, then start. The clock starts stopped.</CardDescription></CardHeader>
-    <CardContent>
+  return <Card className="mx-auto w-full max-w-2xl gap-0 py-0">
+    <div className="bg-zinc-950 px-5 py-6 text-white sm:px-8 sm:py-7 dark:bg-zinc-900">
+      <h1 className="text-lg font-semibold">Game setup</h1>
+      <p className="mt-1 text-sm text-zinc-300">Check the matchup and game format before starting.</p>
+      <div className="mt-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 sm:gap-6">
+        <div className="min-w-0"><p className="text-xs font-medium text-zinc-300">Home</p><p className="mt-1 break-words text-lg font-semibold sm:text-xl">{view.home.name}</p></div>
+        <span className="text-xs font-medium text-zinc-400">VS</span>
+        <div className="min-w-0 text-right"><p className="text-xs font-medium text-zinc-300">Away</p><p className="mt-1 break-words text-lg font-semibold sm:text-xl">{view.away.name}</p></div>
+      </div>
+    </div>
+    <CardContent className="px-5 py-6 sm:px-8 sm:py-7">
       {view.seasonStatus !== 'active' ? <Alert><AlertTitle>The season hasn’t started</AlertTitle><AlertDescription>The league owner needs to start the season before games can be scored.</AlertDescription></Alert>
         : !teamsKnown ? <Alert><AlertTitle>Teams aren’t set yet</AlertTitle><AlertDescription>This playoff game gets its teams when the earlier results are recorded.</AlertDescription></Alert>
         : <form onSubmit={submit} className="flex flex-col gap-6">
-          <FieldGroup className="grid gap-4 sm:grid-cols-2">
+          <div><h2 className="text-base font-semibold">Game format</h2><p className="mt-1 text-sm text-muted-foreground">Review the settings for this game.</p></div>
+          <FieldGroup className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
             {field('periodCount', 'Periods', 1, 8, 'For example, 4 quarters or 2 halves.')}
             {field('periodMinutes', 'Minutes per period', 1, 30)}
             {field('overtimeMinutes', 'Overtime minutes', 1, 15)}
             {field('bonusFouls', 'Bonus after team fouls', 1, 10, 'A team is in the bonus once the other team reaches this many fouls in a period.')}
           </FieldGroup>
-          <Button type="submit" size="lg" disabled={pending}>{pending ? 'Starting…' : 'Start game'}</Button>
+          <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="flex items-center gap-2 text-sm text-muted-foreground"><TimerIcon aria-hidden="true" className="size-4 shrink-0" />The clock starts stopped.</p>
+            <Button type="submit" size="lg" disabled={pending} className="w-full sm:w-auto sm:min-w-36">{pending ? 'Starting…' : 'Start game'}</Button>
+          </div>
         </form>}
     </CardContent>
   </Card>
