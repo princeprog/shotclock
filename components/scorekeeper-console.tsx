@@ -3,10 +3,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, CloudOffIcon, LoaderCircleIcon, CheckIcon, Clock3Icon, TimerIcon, Undo2Icon } from 'lucide-react'
+import { ArrowLeftIcon, CloudOffIcon, LoaderCircleIcon, CheckIcon, ChevronRightIcon, ListOrderedIcon, PauseIcon, PlayIcon, TimerIcon, Undo2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
 import { FinalBoxScore } from '@/components/final-box-score'
+import { ShotclockLogo } from '@/components/shotclock-logo'
 import { LiveBoxScore } from '@/components/live-box-score'
 import { deskClock, LatestPlay, ScoringWorkspace, TeamScore, type PlayerSelection } from '@/components/scoring-workspace'
 import styles from './scorekeeper-console.module.css'
@@ -213,18 +214,23 @@ function Console({ gameId }: { gameId: string }) {
     : label
 
   return <main className={isLive ? styles.desk : 'mx-auto w-full max-w-6xl p-3 sm:p-6'}>
-    {isLive && <header className="border-b bg-card"><div className="mx-auto flex min-h-14 max-w-[100rem] items-center justify-between gap-4 px-4 sm:px-[3%] xl:min-h-16">
-      <span className="flex items-center gap-3 text-2xl font-bold tracking-tight xl:gap-4 xl:text-[2rem]"><Clock3Icon aria-hidden="true" className="size-7 xl:size-10" />Shotclock</span>
-      {isScorer && <span role="status" className={cn('flex items-center gap-2 font-semibold xl:text-xl', online && !outbox.length && !syncProblem ? 'text-green-700 dark:text-green-400' : 'text-muted-foreground')}>
-        {!online ? <CloudOffIcon aria-hidden="true" /> : outbox.length && !syncProblem ? <LoaderCircleIcon aria-hidden="true" className="animate-spin" /> : !syncProblem && <CheckIcon aria-hidden="true" />}{syncLabel}
-      </span>}
-    </div></header>}
-    <div className={isLive ? 'mx-auto flex w-full max-w-[100rem] flex-col gap-4 px-3 py-4 sm:px-[2.5%] xl:gap-7 xl:py-6' : 'flex flex-col gap-4'}>
-    {isLive ? <header className="flex items-end justify-between gap-3 px-1 xl:-mb-1.5 xl:px-2">
-      <div className="min-w-0"><Link href="/scorekeeping" className="inline-flex items-center gap-2 font-semibold text-primary hover:underline xl:text-xl"><ArrowLeftIcon aria-hidden="true" className="size-5" />Games</Link>
-        <h1 className="mt-2 text-3xl leading-tight font-bold tracking-tight xl:text-[2.625rem]">Live scoring</h1><p className="text-sm font-medium text-muted-foreground sm:text-base xl:text-[1.375rem]">{context}</p>
+    {isLive && <header className="border-b bg-card">
+      <div className="mx-auto flex min-h-14 max-w-[88rem] items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+        <nav aria-label="Scorekeeping navigation" className="flex min-w-0 items-center gap-2.5">
+          <ShotclockLogo /><ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+          <Link href="/scorekeeping" className="inline-flex min-h-11 items-center text-sm font-medium text-muted-foreground hover:text-foreground">Games</Link>
+        </nav>
+        {isScorer && <span role="status" className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold', online && !outbox.length && !syncProblem ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-muted text-muted-foreground')}>
+          {!online ? <CloudOffIcon aria-hidden="true" className="size-3.5" /> : outbox.length && !syncProblem ? <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" /> : !syncProblem && <CheckIcon aria-hidden="true" className="size-3.5" />}{syncLabel}
+        </span>}
       </div>
-      <Button variant="outline" className="mb-1 h-10 px-4 xl:mb-3 xl:h-[3.25rem] xl:px-7 xl:text-xl" onClick={() => setBoxOpen(true)}>Box score</Button>
+    </header>}
+    <div className={isLive ? 'mx-auto flex w-full max-w-[88rem] flex-col gap-4 px-3 py-4 sm:px-6 lg:gap-5 lg:px-8 lg:py-6' : 'flex flex-col gap-4'}>
+    {isLive ? <header className="flex items-center justify-between gap-4">
+      <div className="min-w-0"><h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">Live scoring</h1>
+        <p className="mt-1 text-sm text-muted-foreground sm:text-base">{context}</p>
+      </div>
+      <Button variant="outline" className="min-h-11 px-3" onClick={() => setBoxOpen(true)}><ListOrderedIcon aria-hidden="true" data-icon="inline-start" />Box score</Button>
     </header> : <header className="flex items-center gap-2">
       <Button variant="ghost" size="icon-sm" aria-label="Back to games" nativeButton={false} render={<Link href="/scorekeeping" />}><ArrowLeftIcon /></Button>
       <div className="flex min-w-0 flex-col"><span className="truncate text-sm font-medium">{view.home.name} vs {view.away.name}</span><span className="truncate text-xs text-muted-foreground">{context}</span></div>
@@ -246,16 +252,16 @@ function Console({ gameId }: { gameId: string }) {
     </div>}
     {isLive && <>
       <section ref={scoreboardRef} aria-label="Scoreboard">
-        <Card className="gap-0 rounded-[10px] border px-3 py-0 shadow-none ring-0 sm:px-5">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b px-1 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(7rem,1.15fr)_minmax(0,1fr)] sm:px-4 xl:px-7 xl:py-[1.15rem]">
-            <TeamScore team={view.home} /><p className="text-center font-medium text-muted-foreground xl:text-xl">{periodName}</p><TeamScore team={view.away} away />
+        <Card className="gap-0 rounded-xl border py-0 shadow-xs ring-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-4 py-4 sm:gap-8 sm:px-6 lg:gap-12 lg:px-8 lg:py-5">
+            <TeamScore team={view.home} /><p className="rounded-full border bg-muted/40 px-2.5 py-1 text-center text-xs font-semibold whitespace-nowrap sm:px-4 sm:text-sm"><span className="sm:hidden" aria-hidden="true">{label}</span><span className="sr-only sm:not-sr-only">{periodName}</span></p><TeamScore team={view.away} away />
           </div>
-          <div className={cn('grid gap-4 px-1 py-4 sm:px-4 xl:px-5 xl:py-4', shot && 'md:grid-cols-[0.94fr_1fr] md:gap-7 xl:gap-[4.5%]')}>
+          <div className={cn('grid gap-3 border-t bg-muted/30 px-4 py-3 sm:px-6 lg:px-8', shot && 'md:grid-cols-[0.9fr_1.1fr] md:gap-5')}>
             <section aria-label="Game clock controls" className={cn('min-w-0', shot && 'border-b pb-3 md:border-r md:border-b-0 md:pr-4 md:pb-0')}>
-              <p className="font-medium text-muted-foreground xl:text-xl">Game clock</p>
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 xl:gap-x-[4.5rem]">
-                <strong className={cn('text-4xl leading-tight font-bold tabular-nums xl:text-[3.5rem]', remaining === 0 && 'text-destructive')}>{deskClock(remaining)}</strong>
-                {isScorer && <Button className="h-11 px-4 font-semibold xl:h-[3.2rem] xl:px-9 xl:text-[1.375rem]" onClick={() => setClock(!running)} disabled={queueBlocked || (!running && remaining === 0)}>{running ? 'Pause game clock' : 'Start game clock'}</Button>}
+              <p className="text-sm font-medium text-muted-foreground">Game clock</p>
+              <div className="flex flex-wrap items-center justify-between gap-2 md:pr-3">
+                <strong className={cn('text-3xl leading-tight font-bold tracking-tight tabular-nums lg:text-4xl', remaining === 0 && 'text-destructive')}>{deskClock(remaining)}</strong>
+                {isScorer && <Button aria-label={running ? 'Pause game clock' : 'Start game clock'} className="min-h-11 px-4 font-semibold" onClick={() => setClock(!running)} disabled={queueBlocked || (!running && remaining === 0)}>{running ? <PauseIcon data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}{running ? 'Pause' : 'Start'}<span className="hidden sm:inline">game clock</span></Button>}
               </div>
             </section>
             {shot?.mode === 'single' && <ShotClockControls inline remainingMs={shotMs} running={shot.running} gameRunning={running} visible={shot.visible}

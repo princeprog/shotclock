@@ -1,17 +1,24 @@
 .desk {
   --radius: 0.6rem;
-  --primary: #006bc9;
+  --primary: #145ec1;
   --primary-foreground: white;
-  --accent: #d8ebfc;
-  --border: #cbd5df;
+  --accent: #e4eefc;
+  --border: #d5dee8;
   --ring: #167ad2;
   --muted-foreground: #566170;
   min-height: 100svh;
-  background-color: #edf2f7;
+  background-color: #f3f6fa;
 }
 
-.desk :global(.border-border)[data-slot="button"] {
-  border-color: #9ba6b2;
+@media (pointer: coarse) {
+  .desk :is(button, summary, a) {
+    min-block-size: 44px;
+    min-inline-size: 44px;
+  }
+}
+
+.desk :is(button, summary, a) {
+  scroll-margin-block-start: calc(4rem + env(safe-area-inset-top, 0px));
 }
 
 :global(.dark) .desk {
