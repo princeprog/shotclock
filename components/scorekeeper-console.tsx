@@ -31,6 +31,20 @@ const subscribeOnline = (callback: () => void) => {
   window.addEventListener('offline', callback)
   return () => { window.removeEventListener('online', callback); window.removeEventListener('offline', callback) }
 }
+type Side = 'home' | 'away'
+type Tone = 'score' | 'stat' | 'turnover' | 'foul'
+const sideAccent: Record<Side, string> = { home: 'bg-[#E67145]', away: 'bg-slate-500' }
+const toneChip: Record<Tone, string> = {
+  score: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
+  stat: 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300',
+  turnover: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
+  foul: 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+}
+const actions: { kind: PlayKind; points?: number; label: string; tone: Tone }[] = [
+  { kind: 'points', points: 1, label: '+1', tone: 'score' }, { kind: 'points', points: 2, label: '+2', tone: 'score' }, { kind: 'points', points: 3, label: '+3', tone: 'score' },
+  { kind: 'rebound', label: 'REB', tone: 'stat' }, { kind: 'assist', label: 'AST', tone: 'stat' }, { kind: 'steal', label: 'STL', tone: 'stat' }, { kind: 'block', label: 'BLK', tone: 'stat' },
+  { kind: 'turnover', label: 'TO', tone: 'turnover' }, { kind: 'foul', label: 'FOUL', tone: 'foul' },
+]
 // The browser keeps the device ID and the queue of unsent plays, so the console renders only after hydration.
 export function ScorekeeperConsole({ gameId }: { gameId: string }) {
   const hydrated = useSyncExternalStore(noSubscription, () => true, () => false)
@@ -179,6 +193,7 @@ function Console({ gameId }: { gameId: string }) {
     if (!view) return
     const team = teamId ?? selected?.teamId
     if (!team) return
+    // The player stays selected, so several plays in a row for the same player need one tap each.
     const id = crypto.randomUUID()
     setFreshPlayId(id)
     enqueue({ type: 'play', play: { id, kind, ...(points ? { points } : {}), seasonTeamId: team, ...(kind !== 'timeout' && selected ? { rosterId: selected.rosterId } : {}), period: view.period, clockMs: Math.round(remaining), recordedAt: new Date().toISOString() } })
@@ -334,17 +349,33 @@ function Console({ gameId }: { gameId: string }) {
   </main>
 }
 
+// The short label and colour of a recorded play, matching the action buttons.
+function playChip(play: LivePlay) {
+  const action = actions.find((item) => item.kind === play.kind && (play.kind !== 'points' || item.points === play.points))
+  return { label: action?.label ?? (play.kind === 'points' ? `+${play.points}` : 'TIMEOUT'), tone: action?.tone }
+}
+
 function RecentPlays({ view, canUndo, onUndo }: { view: LiveState; canUndo: boolean; onUndo: (play: LivePlay) => void }) {
-  const teamName = (id: string | null) => id === view.home.seasonTeamId ? view.home.name : id === view.away.seasonTeamId ? view.away.name : ''
+  const sideOf = (id: string | null): Side | null => id === view.home.seasonTeamId ? 'home' : id === view.away.seasonTeamId ? 'away' : null
   const plays = view.plays.slice(0, 12)
   return <Card className="gap-0 py-0">
     <CardHeader className="border-b py-3 [.border-b]:pb-3"><CardTitle><h2 className="text-base font-semibold">Recent plays</h2></CardTitle></CardHeader>
-    {plays.length ? <ul className="divide-y">{plays.map((play) => <li key={play.id} className={cn('flex items-center gap-3 px-4 py-2.5 text-sm', play.voided && 'text-muted-foreground line-through')}>
-      <span className="w-20 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{periodLabel(play.period, view.format.periodCount)} {play.clockMs !== null ? formatClock(play.clockMs) : ''}</span>
-      <span className="min-w-0 flex-1 truncate">{play.kind === 'period_end' ? `End of ${periodLabel(play.period, view.format.periodCount)}` : <>{describePlay(play)} <span className="text-muted-foreground">· {teamName(play.seasonTeamId)}</span></>}</span>
-      {play.pending && <span className="text-xs text-muted-foreground no-underline">Waiting</span>}
-      {canUndo && !play.voided && play.kind !== 'period_end' && <Button variant="ghost" size="icon-xs" aria-label={`Undo ${describePlay(play)}`} onClick={() => onUndo(play)}><Undo2Icon /></Button>}
-    </li>)}</ul> : <p className="px-4 py-6 text-center text-sm text-muted-foreground">Plays appear here as you record them.</p>}
+    {plays.length ? <ul className="divide-y">{plays.map((play) => {
+      const side = sideOf(play.seasonTeamId)
+      const chip = playChip(play)
+      return <li key={play.id} className={cn('flex items-center gap-3 px-4 py-2.5 text-sm', play.voided && 'text-muted-foreground')}>
+        <span className="w-20 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{periodLabel(play.period, view.format.periodCount)} {play.clockMs !== null ? formatClock(play.clockMs) : ''}</span>
+        {play.kind === 'period_end' ? <span className="min-w-0 flex-1 truncate font-medium text-muted-foreground">End of {periodLabel(play.period, view.format.periodCount)}</span> : <>
+          <span className={cn('w-16 shrink-0 rounded-md px-1.5 py-0.5 text-center text-[11px] font-semibold tabular-nums', play.voided || !chip.tone ? 'bg-muted text-muted-foreground' : toneChip[chip.tone])}>{chip.label}</span>
+          <span className={cn('flex min-w-0 flex-1 items-center gap-2', play.voided && 'line-through')}>
+            <span className="truncate">{play.player ?? 'Team timeout'}</span>
+            {side && <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground"><span aria-hidden="true" className={cn('size-1.5 rounded-full', sideAccent[side])} />{(side === 'home' ? view.home : view.away).name}</span>}
+          </span>
+        </>}
+        {play.pending && <span className="text-xs text-muted-foreground">Waiting</span>}
+        {canUndo && !play.voided && play.kind !== 'period_end' && <Button variant="ghost" size="icon-xs" aria-label={`Undo ${describePlay(play)}`} onClick={() => onUndo(play)}><Undo2Icon /></Button>}
+      </li>
+    })}</ul> : <p className="px-4 py-6 text-center text-sm text-muted-foreground">Plays appear here as you record them.</p>}
   </Card>
 }
 
@@ -371,5 +402,3 @@ function ClockForm({ remaining, max, onSave, onCancel }: { remaining: number; ma
     <DialogFooter><Button type="button" variant="outline" onClick={onCancel}>Cancel</Button><Button type="submit" disabled={invalid}>Set clock</Button></DialogFooter>
   </form>
 }
-
-
