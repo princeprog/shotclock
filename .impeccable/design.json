@@ -1,0 +1,880 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-25T06:40:00Z",
+  "title": "Design System: Shotclock",
+  "extensions": {
+    "colorMeta": {
+      "shotclock-orange": {
+        "role": "primary",
+        "displayName": "Shotclock Orange",
+        "canonical": "oklch(67.8% 0.157 40.56)",
+        "tonalRamp": [
+          "oklch(24.0% 0.071 40.56)",
+          "oklch(34.0% 0.102 40.56)",
+          "oklch(44.0% 0.133 40.56)",
+          "oklch(54.0% 0.157 40.56)",
+          "oklch(67.8% 0.157 40.56)",
+          "oklch(80.0% 0.118 40.56)",
+          "oklch(90.0% 0.063 40.56)",
+          "oklch(96.0% 0.024 40.56)"
+        ]
+      },
+      "orange-ink": {
+        "role": "primary",
+        "displayName": "Orange Ink",
+        "canonical": "oklch(51.1% 0.139 38.89)",
+        "tonalRamp": [
+          "oklch(24.0% 0.071 40.56)",
+          "oklch(34.0% 0.102 40.56)",
+          "oklch(44.0% 0.133 40.56)",
+          "oklch(54.0% 0.157 40.56)",
+          "oklch(67.8% 0.157 40.56)",
+          "oklch(80.0% 0.118 40.56)",
+          "oklch(90.0% 0.063 40.56)",
+          "oklch(96.0% 0.024 40.56)"
+        ]
+      },
+      "orange-ink-dark": {
+        "role": "primary",
+        "displayName": "Orange Ink (dark theme)",
+        "canonical": "oklch(82.0% 0.108 45.91)",
+        "tonalRamp": [
+          "oklch(24.0% 0.071 40.56)",
+          "oklch(34.0% 0.102 40.56)",
+          "oklch(44.0% 0.133 40.56)",
+          "oklch(54.0% 0.157 40.56)",
+          "oklch(67.8% 0.157 40.56)",
+          "oklch(80.0% 0.118 40.56)",
+          "oklch(90.0% 0.063 40.56)",
+          "oklch(96.0% 0.024 40.56)"
+        ]
+      },
+      "selection-wash": {
+        "role": "primary",
+        "displayName": "Selection Wash",
+        "canonical": "oklch(96.4% 0.016 46.57)",
+        "tonalRamp": [
+          "oklch(24.0% 0.071 40.56)",
+          "oklch(34.0% 0.102 40.56)",
+          "oklch(44.0% 0.133 40.56)",
+          "oklch(54.0% 0.157 40.56)",
+          "oklch(67.8% 0.157 40.56)",
+          "oklch(80.0% 0.118 40.56)",
+          "oklch(90.0% 0.063 40.56)",
+          "oklch(96.0% 0.024 40.56)"
+        ]
+      },
+      "selection-wash-dark": {
+        "role": "primary",
+        "displayName": "Selection Wash (dark theme)",
+        "canonical": "oklch(28.2% 0.040 46.20)",
+        "tonalRamp": [
+          "oklch(24.0% 0.071 40.56)",
+          "oklch(34.0% 0.102 40.56)",
+          "oklch(44.0% 0.133 40.56)",
+          "oklch(54.0% 0.157 40.56)",
+          "oklch(67.8% 0.157 40.56)",
+          "oklch(80.0% 0.118 40.56)",
+          "oklch(90.0% 0.063 40.56)",
+          "oklch(96.0% 0.024 40.56)"
+        ]
+      },
+      "focus-orange": {
+        "role": "primary",
+        "displayName": "Focus Orange",
+        "canonical": "oklch(55.3% 0.174 38.40)",
+        "tonalRamp": [
+          "oklch(40.8% 0.123 38.172)",
+          "oklch(47% 0.157 37.304)",
+          "oklch(55.3% 0.195 38.402)",
+          "oklch(64.6% 0.222 41.116)",
+          "oklch(70.5% 0.213 47.604)",
+          "oklch(75% 0.183 55.934)",
+          "oklch(90.1% 0.076 70.697)",
+          "oklch(95.4% 0.038 75.164)"
+        ]
+      },
+      "focus-orange-dark": {
+        "role": "primary",
+        "displayName": "Focus Orange (dark theme)",
+        "canonical": "oklch(75.8% 0.159 55.93)",
+        "tonalRamp": [
+          "oklch(40.8% 0.123 38.172)",
+          "oklch(47% 0.157 37.304)",
+          "oklch(55.3% 0.195 38.402)",
+          "oklch(64.6% 0.222 41.116)",
+          "oklch(70.5% 0.213 47.604)",
+          "oklch(75% 0.183 55.934)",
+          "oklch(90.1% 0.076 70.697)",
+          "oklch(95.4% 0.038 75.164)"
+        ]
+      },
+      "text-selection": {
+        "role": "primary",
+        "displayName": "Text Selection Tint",
+        "canonical": "oklch(89.4% 0.047 44.73)",
+        "tonalRamp": [
+          "oklch(24.0% 0.071 40.56)",
+          "oklch(34.0% 0.102 40.56)",
+          "oklch(44.0% 0.133 40.56)",
+          "oklch(54.0% 0.157 40.56)",
+          "oklch(67.8% 0.157 40.56)",
+          "oklch(80.0% 0.118 40.56)",
+          "oklch(90.0% 0.063 40.56)",
+          "oklch(96.0% 0.024 40.56)"
+        ]
+      },
+      "text-selection-dark": {
+        "role": "primary",
+        "displayName": "Text Selection Tint (dark theme)",
+        "canonical": "oklch(42.7% 0.097 41.80)",
+        "tonalRamp": [
+          "oklch(24.0% 0.071 40.56)",
+          "oklch(34.0% 0.102 40.56)",
+          "oklch(44.0% 0.133 40.56)",
+          "oklch(54.0% 0.157 40.56)",
+          "oklch(67.8% 0.157 40.56)",
+          "oklch(80.0% 0.118 40.56)",
+          "oklch(90.0% 0.063 40.56)",
+          "oklch(96.0% 0.024 40.56)"
+        ]
+      },
+      "away-slate": {
+        "role": "secondary",
+        "displayName": "Away Slate",
+        "canonical": "oklch(55.4% 0.041 257.42)",
+        "tonalRamp": [
+          "oklch(20.8% 0.042 265.755)",
+          "oklch(27.9% 0.041 260.031)",
+          "oklch(37.2% 0.044 257.287)",
+          "oklch(44.6% 0.043 257.281)",
+          "oklch(55.4% 0.046 257.417)",
+          "oklch(70.4% 0.04 256.788)",
+          "oklch(92.9% 0.013 255.508)",
+          "oklch(96.8% 0.007 247.896)"
+        ]
+      },
+      "away-slate-dark": {
+        "role": "secondary",
+        "displayName": "Away Slate (dark theme)",
+        "canonical": "oklch(71.1% 0.035 256.79)",
+        "tonalRamp": [
+          "oklch(20.8% 0.042 265.755)",
+          "oklch(27.9% 0.041 260.031)",
+          "oklch(37.2% 0.044 257.287)",
+          "oklch(44.6% 0.043 257.281)",
+          "oklch(55.4% 0.046 257.417)",
+          "oklch(70.4% 0.04 256.788)",
+          "oklch(92.9% 0.013 255.508)",
+          "oklch(96.8% 0.007 247.896)"
+        ]
+      },
+      "caution-amber": {
+        "role": "tertiary",
+        "displayName": "Caution Amber",
+        "canonical": "oklch(55.5% 0.163 48.998)",
+        "tonalRamp": [
+          "oklch(41.4% 0.112 45.904)",
+          "oklch(47.3% 0.137 46.201)",
+          "oklch(55.5% 0.163 48.998)",
+          "oklch(66.6% 0.179 58.318)",
+          "oklch(76.9% 0.188 70.08)",
+          "oklch(82.8% 0.189 84.429)",
+          "oklch(92.4% 0.12 95.746)",
+          "oklch(96.2% 0.059 95.617)"
+        ]
+      },
+      "caution-amber-dark": {
+        "role": "tertiary",
+        "displayName": "Caution Amber (dark theme)",
+        "canonical": "oklch(82.8% 0.189 84.429)",
+        "tonalRamp": [
+          "oklch(41.4% 0.112 45.904)",
+          "oklch(47.3% 0.137 46.201)",
+          "oklch(55.5% 0.163 48.998)",
+          "oklch(66.6% 0.179 58.318)",
+          "oklch(76.9% 0.188 70.08)",
+          "oklch(82.8% 0.189 84.429)",
+          "oklch(92.4% 0.12 95.746)",
+          "oklch(96.2% 0.059 95.617)"
+        ]
+      },
+      "destructive": {
+        "role": "tertiary",
+        "displayName": "Destructive Red",
+        "canonical": "oklch(0.577 0.245 27.325)",
+        "tonalRamp": [
+          "oklch(39.6% 0.141 25.723)",
+          "oklch(44.4% 0.177 26.899)",
+          "oklch(50.5% 0.213 27.518)",
+          "oklch(57.7% 0.245 27.325)",
+          "oklch(63.7% 0.237 25.331)",
+          "oklch(70.4% 0.191 22.216)",
+          "oklch(88.5% 0.062 18.334)",
+          "oklch(93.6% 0.032 17.717)"
+        ]
+      },
+      "dark-destructive": {
+        "role": "tertiary",
+        "displayName": "Destructive Red (dark theme)",
+        "canonical": "oklch(0.704 0.191 22.216)",
+        "tonalRamp": [
+          "oklch(39.6% 0.141 25.723)",
+          "oklch(44.4% 0.177 26.899)",
+          "oklch(50.5% 0.213 27.518)",
+          "oklch(57.7% 0.245 27.325)",
+          "oklch(63.7% 0.237 25.331)",
+          "oklch(70.4% 0.191 22.216)",
+          "oklch(88.5% 0.062 18.334)",
+          "oklch(93.6% 0.032 17.717)"
+        ]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "oklch(1 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "foreground": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(0.145 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Paper (card)",
+        "canonical": "oklch(1 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "primary": {
+        "role": "neutral",
+        "displayName": "Near-Black",
+        "canonical": "oklch(0.205 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "primary-foreground": {
+        "role": "neutral",
+        "displayName": "Near-White",
+        "canonical": "oklch(0.985 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Mist",
+        "canonical": "oklch(0.97 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "muted-foreground": {
+        "role": "neutral",
+        "displayName": "Quiet Gray",
+        "canonical": "oklch(0.556 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(0.922 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "ring": {
+        "role": "neutral",
+        "displayName": "Neutral Ring",
+        "canonical": "oklch(0.708 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "desk-floor": {
+        "role": "neutral",
+        "displayName": "Desk Floor",
+        "canonical": "oklch(96.7% 0.001 0)",
+        "tonalRamp": [
+          "oklch(21% 0.006 285.885)",
+          "oklch(27.4% 0.006 286.033)",
+          "oklch(37% 0.013 285.805)",
+          "oklch(44.2% 0.017 285.786)",
+          "oklch(55.2% 0.016 285.938)",
+          "oklch(70.5% 0.015 286.067)",
+          "oklch(92% 0.004 286.32)",
+          "oklch(96.7% 0.001 286.375)"
+        ]
+      },
+      "desk-floor-dark": {
+        "role": "neutral",
+        "displayName": "Desk Floor (dark theme)",
+        "canonical": "oklch(16.9% 0.004 285.95)",
+        "tonalRamp": [
+          "oklch(21% 0.006 285.885)",
+          "oklch(27.4% 0.006 286.033)",
+          "oklch(37% 0.013 285.805)",
+          "oklch(44.2% 0.017 285.786)",
+          "oklch(55.2% 0.016 285.938)",
+          "oklch(70.5% 0.015 286.067)",
+          "oklch(92% 0.004 286.32)",
+          "oklch(96.7% 0.001 286.375)"
+        ]
+      },
+      "desk-ink": {
+        "role": "neutral",
+        "displayName": "Desk Ink",
+        "canonical": "oklch(21.0% 0.006 285.89)",
+        "tonalRamp": [
+          "oklch(21% 0.006 285.885)",
+          "oklch(27.4% 0.006 286.033)",
+          "oklch(37% 0.013 285.805)",
+          "oklch(44.2% 0.017 285.786)",
+          "oklch(55.2% 0.016 285.938)",
+          "oklch(70.5% 0.015 286.067)",
+          "oklch(92% 0.004 286.32)",
+          "oklch(96.7% 0.001 286.375)"
+        ]
+      },
+      "desk-ink-dark": {
+        "role": "neutral",
+        "displayName": "Desk Ink (dark theme)",
+        "canonical": "oklch(98.5% 0.000 0)",
+        "tonalRamp": [
+          "oklch(21% 0.006 285.885)",
+          "oklch(27.4% 0.006 286.033)",
+          "oklch(37% 0.013 285.805)",
+          "oklch(44.2% 0.017 285.786)",
+          "oklch(55.2% 0.016 285.938)",
+          "oklch(70.5% 0.015 286.067)",
+          "oklch(92% 0.004 286.32)",
+          "oklch(96.7% 0.001 286.375)"
+        ]
+      },
+      "desk-muted-ink": {
+        "role": "neutral",
+        "displayName": "Desk Gray Text",
+        "canonical": "oklch(47.8% 0.016 285.78)",
+        "tonalRamp": [
+          "oklch(21% 0.006 285.885)",
+          "oklch(27.4% 0.006 286.033)",
+          "oklch(37% 0.013 285.805)",
+          "oklch(44.2% 0.017 285.786)",
+          "oklch(55.2% 0.016 285.938)",
+          "oklch(70.5% 0.015 286.067)",
+          "oklch(92% 0.004 286.32)",
+          "oklch(96.7% 0.001 286.375)"
+        ]
+      },
+      "desk-muted-ink-dark": {
+        "role": "neutral",
+        "displayName": "Desk Gray Text (dark theme)",
+        "canonical": "oklch(71.2% 0.013 286.07)",
+        "tonalRamp": [
+          "oklch(21% 0.006 285.885)",
+          "oklch(27.4% 0.006 286.033)",
+          "oklch(37% 0.013 285.805)",
+          "oklch(44.2% 0.017 285.786)",
+          "oklch(55.2% 0.016 285.938)",
+          "oklch(70.5% 0.015 286.067)",
+          "oklch(92% 0.004 286.32)",
+          "oklch(96.7% 0.001 286.375)"
+        ]
+      },
+      "dark-background": {
+        "role": "neutral",
+        "displayName": "Ink (dark theme background)",
+        "canonical": "oklch(0.145 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-foreground": {
+        "role": "neutral",
+        "displayName": "Near-White (dark theme text)",
+        "canonical": "oklch(0.985 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-card": {
+        "role": "neutral",
+        "displayName": "Card (dark theme)",
+        "canonical": "oklch(0.205 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-primary": {
+        "role": "neutral",
+        "displayName": "Primary (dark theme)",
+        "canonical": "oklch(0.922 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-primary-foreground": {
+        "role": "neutral",
+        "displayName": "Primary label (dark theme)",
+        "canonical": "oklch(0.205 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-muted": {
+        "role": "neutral",
+        "displayName": "Mist (dark theme)",
+        "canonical": "oklch(0.269 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-muted-foreground": {
+        "role": "neutral",
+        "displayName": "Quiet Gray (dark theme)",
+        "canonical": "oklch(0.708 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-border": {
+        "role": "neutral",
+        "displayName": "Hairline (dark theme)",
+        "canonical": "oklch(1 0 0 / 10%)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-input": {
+        "role": "neutral",
+        "displayName": "Input stroke (dark theme)",
+        "canonical": "oklch(1 0 0 / 15%)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      },
+      "dark-ring": {
+        "role": "neutral",
+        "displayName": "Neutral Ring (dark theme)",
+        "canonical": "oklch(0.556 0 0)",
+        "tonalRamp": [
+          "oklch(0.145 0 0)",
+          "oklch(0.205 0 0)",
+          "oklch(0.269 0 0)",
+          "oklch(0.371 0 0)",
+          "oklch(0.556 0 0)",
+          "oklch(0.708 0 0)",
+          "oklch(0.922 0 0)",
+          "oklch(0.97 0 0)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Team scores on the scoreboard; 3rem below 1024px."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Game clock and shot clock in the clock strip; 1.875rem below 1024px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Team names on the scoreboard; 1.25rem below 1024px."
+      },
+      "title-sm": {
+        "displayName": "Title Small",
+        "purpose": "Panel headings such as Record play and roster team names."
+      },
+      "action": {
+        "displayName": "Action",
+        "purpose": "The +1, +2 and +3 labels on the score buttons."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Roster rows and player names."
+      },
+      "body-sm": {
+        "displayName": "Body Small",
+        "purpose": "shadcn default text for cards, descriptions, meta lines and the play receipt."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "Button labels."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Table column heads and the sync pill; play chips use 11px at the same weight."
+      }
+    },
+    "shadows": [
+      {
+        "name": "rest",
+        "value": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+        "purpose": "Tailwind shadow-xs on cards, console panels, outline buttons and inputs."
+      },
+      {
+        "name": "pinned",
+        "value": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+        "purpose": "Tailwind shadow-sm, only on the compact scoreboard bar that floats over scrolled content."
+      },
+      {
+        "name": "card-edge",
+        "value": "0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent)",
+        "purpose": "shadcn card edge ring; console panels swap it for a 1px Hairline border."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent)",
+        "purpose": "Focus ring on buttons and inputs, paired with a ring-colored border. On the console --ring is Focus Orange."
+      },
+      {
+        "name": "roster-row-focus",
+        "value": "inset 0 0 0 2px var(--ring)",
+        "purpose": "Inset focus ring drawn around a whole roster row on the console."
+      }
+    ],
+    "motion": [
+      {
+        "name": "confirm-wash",
+        "value": "1.4s cubic-bezier(0.16, 1, 0.3, 1); from background color-mix(in oklab, #e67145 22%, transparent) and border #e67145",
+        "purpose": "Confirms a play just recorded on the play receipt, then settles. Removed under reduced motion."
+      },
+      {
+        "name": "ease-out-expo",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Settling curve shared by the confirmation wash and the session-restore fade-in (360ms after a 200ms delay)."
+      },
+      {
+        "name": "line-score-grow",
+        "value": "height 500ms cubic-bezier(0, 0, 0.2, 1)",
+        "purpose": "Line-score bars grow as a period scores; only when motion is allowed."
+      },
+      {
+        "name": "control-transition",
+        "value": "all 150ms cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Default shadcn button and input state transitions; buttons press down 1px on click."
+      },
+      {
+        "name": "sidebar-logo",
+        "value": "200ms cubic-bezier(0.22, 1, 0.36, 1)",
+        "purpose": "Logo mark resize when the app sidebar collapses to icons."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "coarse-pointer",
+        "value": "(pointer: coarse)"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Near-black shadcn default button for the main action, such as starting or pausing the game clock.",
+      "html": "<button class=\"ds-btn-primary\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"/></svg>Start game clock</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.43; white-space: nowrap; cursor: pointer; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); height: 36px; padding: 0 10px 0 8px; border-radius: calc(var(--radius, 0.45rem) * 0.8); background: var(--primary, oklch(0.205 0 0)); color: var(--primary-foreground, oklch(0.985 0 0)); } .ds-btn-primary svg { width: 16px; height: 16px; } .ds-btn-primary:hover { background: color-mix(in oklab, var(--primary, oklch(0.205 0 0)) 80%, transparent); } .ds-btn-primary:focus-visible { outline: none; border-color: var(--ring, oklch(0.708 0 0)); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, oklch(0.708 0 0)) 50%, transparent); } .ds-btn-primary:active { transform: translateY(1px); } .ds-btn-primary:disabled { opacity: 0.5; pointer-events: none; }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Paper button with a hairline border; the console uses it for Timeout, Undo, resets, End period and stat buttons.",
+      "html": "<button class=\"ds-btn-outline\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><line x1=\"10\" x2=\"14\" y1=\"2\" y2=\"2\"/><line x1=\"12\" x2=\"15\" y1=\"14\" y2=\"11\"/><circle cx=\"12\" cy=\"14\" r=\"8\"/></svg>Timeout</button>",
+      "css": ".ds-btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.43; white-space: nowrap; cursor: pointer; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); height: 36px; padding: 0 10px 0 8px; border-color: var(--border, oklch(0.922 0 0)); border-radius: calc(var(--radius, 0.45rem) * 0.8); background: var(--background, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-btn-outline svg { width: 16px; height: 16px; } .ds-btn-outline:hover { background: var(--muted, oklch(0.97 0 0)); } .ds-btn-outline:focus-visible { outline: none; border-color: var(--ring, oklch(0.708 0 0)); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, oklch(0.708 0 0)) 50%, transparent); } .ds-btn-outline:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Transparent button that fills with Mist on hover; used for Clear and small icon actions.",
+      "html": "<button class=\"ds-btn-ghost\">Clear</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid transparent; font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; font-weight: 500; line-height: 1.43; white-space: nowrap; cursor: pointer; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); height: 36px; padding: 0 10px; border-radius: calc(var(--radius, 0.45rem) * 0.8); background: transparent; color: var(--foreground, oklch(0.145 0 0)); } .ds-btn-ghost:hover { background: var(--muted, oklch(0.97 0 0)); } .ds-btn-ghost:focus-visible { outline: none; border-color: var(--ring, oklch(0.708 0 0)); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, oklch(0.708 0 0)) 50%, transparent); } .ds-btn-ghost:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "shadcn input with a label, as used for clock and game-format fields.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Minutes per period</span><input class=\"ds-input\" type=\"number\" value=\"10\" inputmode=\"numeric\"></label>",
+      "css": ".ds-field { display: grid; gap: 8px; width: 220px; font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; } .ds-field-label { font-size: 0.875rem; font-weight: 500; color: var(--foreground, oklch(0.145 0 0)); } .ds-input { height: 36px; width: 100%; padding: 4px 10px; border: 1px solid var(--input, oklch(0.922 0 0)); border-radius: calc(var(--radius, 0.45rem) * 0.8); background: transparent; color: var(--foreground, oklch(0.145 0 0)); font: inherit; font-size: 0.875rem; font-variant-numeric: tabular-nums; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); outline: none; transition: color 150ms, box-shadow 150ms; } .ds-input:focus-visible { border-color: var(--ring, oklch(0.708 0 0)); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring, oklch(0.708 0 0)) 50%, transparent); } .ds-input[aria-invalid=\"true\"] { border-color: oklch(0.577 0.245 27.325); box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.577 0.245 27.325) 20%, transparent); }"
+    },
+    {
+      "name": "Console App Bar",
+      "kind": "nav",
+      "refersTo": "sync-pill",
+      "description": "Slim breadcrumb bar on the live console: logo, Games link, game title and the sync pill.",
+      "html": "<header class=\"ds-appbar\"><nav class=\"ds-crumbs\" aria-label=\"Scorekeeping navigation\"><span class=\"ds-logo\"><svg viewBox=\"0 0 64 64\" fill=\"none\" aria-hidden=\"true\"><rect width=\"64\" height=\"64\" rx=\"18\" fill=\"#E67145\"/><path d=\"M25 10.5h14\" stroke=\"#181310\" stroke-width=\"3.5\" stroke-linecap=\"round\"/><circle cx=\"32\" cy=\"35\" r=\"20\" stroke=\"#181310\" stroke-width=\"3.5\"/><path d=\"M12.5 35h39M32 15.5v39M18.5 21.5c7.5 5.5 10.5 17.5 0 27M45.5 21.5c-7.5 5.5-10.5 17.5 0 27\" stroke=\"#181310\" stroke-width=\"2.5\" stroke-linecap=\"round\"/><path d=\"M32 35l8-9\" stroke=\"#FFF5E9\" stroke-width=\"3.5\" stroke-linecap=\"round\"/><circle cx=\"32\" cy=\"35\" r=\"2.5\" fill=\"#FFF5E9\"/></svg><span class=\"ds-wordmark\">Shotclock<span class=\"ds-wordmark-dot\">.</span></span></span><svg class=\"ds-crumb-sep\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"/></svg><a class=\"ds-crumb-link\" href=\"#\">Games</a><svg class=\"ds-crumb-sep\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"/></svg></nav><div class=\"ds-appbar-title\"><h1>Busay vs Lanao</h1><p>Christmas League · 25 Under · Moalboal Gym</p></div><span class=\"ds-sync-pill\" role=\"status\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"/></svg>Synced</span></header>",
+      "css": ".ds-appbar { --home: #e67145; --away: #64748b; --accent: #fdf0ea; --accent-foreground: #18181b; --desk-muted: #5c5c66; --desk-ring: #c2410c; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 64px; padding: 8px 32px; background: var(--card, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); border-bottom: 1px solid var(--border, oklch(0.922 0 0)); font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; } .ds-crumbs { display: flex; align-items: center; gap: 10px; } .ds-logo { display: inline-flex; align-items: center; gap: 10px; } .ds-logo svg { width: 36px; height: 36px; } .ds-wordmark { font-size: 1rem; font-weight: 600; letter-spacing: -0.025em; } .ds-wordmark-dot { color: #E67145; } .ds-crumb-sep { width: 16px; height: 16px; color: var(--desk-muted); } .ds-crumb-link { display: inline-flex; align-items: center; min-height: 44px; font-size: 0.875rem; font-weight: 500; color: var(--desk-muted); text-decoration: none; transition: color 150ms; } .ds-crumb-link:hover { color: var(--foreground, oklch(0.145 0 0)); } .ds-crumb-link:focus-visible { outline: 2px solid color-mix(in oklab, var(--desk-ring) 50%, transparent); outline-offset: 2px; } .ds-appbar-title { flex: 1; min-width: 0; } .ds-appbar-title h1 { margin: 0; font-size: 1rem; font-weight: 600; line-height: 1.25; letter-spacing: -0.025em; } .ds-appbar-title p { margin: 0; font-size: 0.875rem; color: var(--desk-muted); } .ds-sync-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 9999px; background: oklch(97.9% 0.021 166.113); color: oklch(43.2% 0.095 166.913); font-size: 0.75rem; font-weight: 600; } .ds-sync-pill svg { width: 14px; height: 14px; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "App-wide shadcn card: Paper surface, 10% foreground ring, shadow-xs, 24px padding.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-head\"><h2>Game format</h2><p>Review the settings for this game.</p></div><p class=\"ds-card-body\">4 quarters · 10 minutes · bonus after 5 team fouls</p></div>",
+      "css": ".ds-card { display: flex; flex-direction: column; gap: 24px; width: 320px; padding: 24px 0; border-radius: calc(var(--radius, 0.45rem) * 1.4); background: var(--card, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05), 0 0 0 1px color-mix(in oklab, var(--foreground, oklch(0.145 0 0)) 10%, transparent); font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; } .ds-card-head, .ds-card-body { padding: 0 24px; margin: 0; } .ds-card-head h2 { margin: 0; font-size: 1rem; font-weight: 600; } .ds-card-head p { margin: 4px 0 0; color: var(--muted-foreground, oklch(0.556 0 0)); }"
+    },
+    {
+      "name": "Scoreboard",
+      "kind": "custom",
+      "refersTo": "line-score-bar-home",
+      "description": "Signature console card: both teams and scores flanking the paired line-score bars, home orange beside away slate.",
+      "html": "<section class=\"ds-scoreboard\" aria-label=\"Scoreboard\"><div class=\"ds-team\"><div><h2><span class=\"ds-dot ds-dot-home\"></span>Busay</h2><p>Home · 3 fouls <strong class=\"ds-bonus\">Bonus</strong></p></div><strong class=\"ds-score\">42</strong></div><figure class=\"ds-linescore\" role=\"img\" aria-label=\"Line score\"><div class=\"ds-period\"><div class=\"ds-bars\"><span class=\"ds-bar ds-bar-home\" style=\"height:75%\"></span><span class=\"ds-bar ds-bar-away\" style=\"height:62.5%\"></span></div><span class=\"ds-period-label\">Q1</span><span class=\"ds-period-total\">12–10</span></div><div class=\"ds-period\"><div class=\"ds-bars\"><span class=\"ds-bar ds-bar-home\" style=\"height:100%\"></span><span class=\"ds-bar ds-bar-away\" style=\"height:87.5%\"></span></div><span class=\"ds-period-label\">Q2</span><span class=\"ds-period-total\">16–14</span></div><div class=\"ds-period ds-period-current\"><div class=\"ds-bars\"><span class=\"ds-bar ds-bar-home\" style=\"height:87.5%\"></span><span class=\"ds-bar ds-bar-away\" style=\"height:87.5%\"></span></div><span class=\"ds-period-label\">Q3</span><span class=\"ds-period-total\">14–14</span></div><div class=\"ds-period\"><div class=\"ds-bars\"></div><span class=\"ds-period-label\">Q4</span><span class=\"ds-period-total\">–</span></div></figure><div class=\"ds-team ds-team-away\"><div><h2><span class=\"ds-dot ds-dot-away\"></span>Lanao</h2><p>Away · 5 fouls</p></div><strong class=\"ds-score\">38</strong></div></section>",
+      "css": ".ds-scoreboard { --home: #e67145; --away: #64748b; --accent: #fdf0ea; --accent-foreground: #18181b; --desk-muted: #5c5c66; --desk-ring: #c2410c; display: grid; grid-template-columns: minmax(0,1fr) minmax(14rem,26rem) minmax(0,1fr); align-items: center; gap: 16px 40px; padding: 16px 32px; border: 1px solid var(--border, oklch(0.922 0 0)); border-radius: 0.84rem; background: var(--card, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; } .ds-team { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; } .ds-team-away { flex-direction: row-reverse; text-align: right; } .ds-team h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 1.5rem; font-weight: 600; line-height: 1.25; letter-spacing: -0.025em; } .ds-team-away h2 { flex-direction: row-reverse; } .ds-team p { margin: 4px 0 0; font-size: 0.875rem; color: var(--desk-muted); } .ds-bonus { margin-left: 6px; font-weight: 600; color: oklch(55.5% 0.163 48.998); } .ds-score { font-size: 3.75rem; font-weight: 700; line-height: 1; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; } .ds-dot { width: 10px; height: 10px; flex-shrink: 0; border-radius: 9999px; } .ds-dot-home { background: var(--home); } .ds-dot-away { background: var(--away); } .ds-linescore { display: flex; align-items: flex-end; justify-content: center; gap: 16px; height: 112px; margin: 0; } .ds-period { display: flex; flex: 1 1 3.5rem; flex-direction: column; align-items: center; gap: 4px; min-width: 36px; max-width: 64px; height: 100%; padding: 4px 4px 0; border-radius: 0.48rem; } .ds-period-current { background: color-mix(in oklab, var(--muted, oklch(0.97 0 0)) 70%, transparent); } .ds-bars { display: flex; flex: 1; align-items: flex-end; justify-content: center; gap: 4px; width: 100%; border-bottom: 1px solid var(--border, oklch(0.922 0 0)); } .ds-bar { width: 33%; max-width: 20px; border-radius: 0.36rem 0.36rem 0 0; transition: height 500ms cubic-bezier(0, 0, 0.2, 1); } .ds-bar-home { background: var(--home); } .ds-bar-away { background: var(--away); } .ds-period-label, .ds-period-total { font-size: 0.75rem; line-height: 1.333; color: var(--desk-muted); font-variant-numeric: tabular-nums; } .ds-period-current .ds-period-label { font-weight: 600; color: var(--foreground, oklch(0.145 0 0)); } @media (prefers-reduced-motion: reduce) { .ds-bar { transition: none; } }"
+    },
+    {
+      "name": "Roster Table",
+      "kind": "custom",
+      "refersTo": "roster-row-selected",
+      "description": "Console panel holding one team roster; the selected row takes Selection Wash and an orange check, PF warns in amber at four and red at five.",
+      "html": "<section class=\"ds-panel\"><header class=\"ds-panel-head\"><div><h3><span class=\"ds-dot ds-dot-home\"></span>Busay</h3><p>Home · 1 timeout used</p></div><button class=\"ds-panel-btn\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><line x1=\"10\" x2=\"14\" y1=\"2\" y2=\"2\"/><line x1=\"12\" x2=\"15\" y1=\"14\" y2=\"11\"/><circle cx=\"12\" cy=\"14\" r=\"8\"/></svg>Timeout</button></header><table class=\"ds-roster\"><thead><tr><th><span class=\"ds-sr\">Selected</span></th><th>No.</th><th>Player</th><th class=\"ds-num\">PTS</th><th class=\"ds-num\">PF</th></tr></thead><tbody><tr class=\"ds-row-selected\"><td class=\"ds-check\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 6 9 17l-5-5\"/></svg></td><td class=\"ds-jersey\">7</td><td><button class=\"ds-player\" aria-pressed=\"true\">Nico Reyes</button></td><td class=\"ds-num ds-pts\">12</td><td class=\"ds-num\">1</td></tr><tr><td></td><td class=\"ds-jersey\">5</td><td><button class=\"ds-player\" aria-pressed=\"false\">Paolo Diaz</button></td><td class=\"ds-num ds-pts\">0</td><td class=\"ds-num ds-pf-warn\">4</td></tr><tr><td></td><td class=\"ds-jersey\">8</td><td><button class=\"ds-player\" aria-pressed=\"false\">Rico Tan</button></td><td class=\"ds-num ds-pts\">0</td><td class=\"ds-num ds-pf-out\">5<span>Out</span></td></tr></tbody></table></section>",
+      "css": ".ds-panel { --home: #e67145; --away: #64748b; --accent: #fdf0ea; --accent-foreground: #18181b; --desk-muted: #5c5c66; --desk-ring: #c2410c; width: 360px; overflow: hidden; border: 1px solid var(--border, oklch(0.922 0 0)); border-radius: 0.84rem; background: var(--card, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; font-size: 0.875rem; } .ds-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border, oklch(0.922 0 0)); } .ds-panel-head h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 1.125rem; font-weight: 600; line-height: 1.25; } .ds-panel-head p { margin: 4px 0 0; color: var(--desk-muted); } .ds-dot { width: 10px; height: 10px; border-radius: 9999px; } .ds-dot-home { background: var(--home); } .ds-panel-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border, oklch(0.922 0 0)); border-radius: 0.48rem; background: var(--background, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); font: inherit; font-weight: 500; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); cursor: pointer; transition: all 150ms; } .ds-panel-btn svg { width: 16px; height: 16px; } .ds-panel-btn:hover { background: var(--muted, oklch(0.97 0 0)); } .ds-panel-btn:focus-visible { outline: none; border-color: var(--desk-ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--desk-ring) 50%, transparent); } .ds-roster { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 1rem; } .ds-roster th { height: 36px; padding: 0 8px; font-size: 0.75rem; font-weight: 600; color: var(--desk-muted); text-align: left; border-bottom: 1px solid var(--border, oklch(0.922 0 0)); } .ds-roster th:first-child { width: 32px; } .ds-roster th:nth-child(2) { width: 48px; } .ds-roster th.ds-num { width: 56px; } .ds-roster tr { position: relative; transition: background-color 150ms; } .ds-roster tbody tr { height: 48px; border-bottom: 1px solid var(--border, oklch(0.922 0 0)); } .ds-roster tbody tr:last-child { border-bottom: 0; } .ds-roster tbody tr:hover { background: color-mix(in oklab, var(--muted, oklch(0.97 0 0)) 50%, transparent); } .ds-roster td { padding: 0 8px; } .ds-roster .ds-row-selected, .ds-roster .ds-row-selected:hover { background: var(--accent); color: var(--accent-foreground); } .ds-check { padding-left: 12px; color: oklch(55.3% 0.195 38.402); } .ds-check svg { width: 20px; height: 20px; display: block; } .ds-jersey { font-weight: 500; color: var(--desk-muted); font-variant-numeric: tabular-nums; } .ds-num { text-align: center; font-variant-numeric: tabular-nums; } .ds-pts { font-weight: 600; } .ds-player { min-height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 500; text-align: left; cursor: pointer; } .ds-player[aria-pressed=\"true\"] { font-weight: 600; } .ds-player::after { content: \"\"; position: absolute; inset: 0; } .ds-player:focus-visible { outline: none; } .ds-player:focus-visible::after { box-shadow: inset 0 0 0 2px var(--desk-ring); } .ds-pf-warn { font-weight: 600; color: oklch(55.5% 0.163 48.998); } .ds-pf-out { font-weight: 700; color: oklch(0.577 0.245 27.325); } .ds-pf-out span { display: block; font-size: 0.75rem; } .ds-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }"
+    },
+    {
+      "name": "Action Pad",
+      "kind": "custom",
+      "refersTo": "button-score",
+      "description": "Signature console pad: jersey tile, solid +1/+2/+3, six outlined stat buttons and the play receipt with its orange confirmation wash.",
+      "html": "<section class=\"ds-pad\"><div class=\"ds-pad-player\"><span class=\"ds-tile\">7</span><div><p class=\"ds-pad-name\">Nico Reyes</p><p class=\"ds-pad-meta\">Busay · 12 PTS · 1 PF</p></div></div><div class=\"ds-pad-grid\"><button class=\"ds-pad-score\">+1</button><button class=\"ds-pad-score\">+2</button><button class=\"ds-pad-score\">+3</button><button class=\"ds-pad-stat\">Rebound</button><button class=\"ds-pad-stat\">Assist</button><button class=\"ds-pad-stat\">Steal</button><button class=\"ds-pad-stat\">Block</button><button class=\"ds-pad-stat\">Turnover</button><button class=\"ds-pad-stat\">Foul</button></div><div class=\"ds-receipt ds-confirm\" aria-live=\"polite\"><p><span class=\"ds-receipt-time\">Q3 06:48 · </span><strong>Nico Reyes +2</strong> · Busay 42–38 Lanao</p><button class=\"ds-receipt-undo\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 14 4 9l5-5\"/><path d=\"M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11\"/></svg>Undo</button></div></section>",
+      "css": ".ds-pad { --home: #e67145; --away: #64748b; --accent: #fdf0ea; --accent-foreground: #18181b; --desk-muted: #5c5c66; --desk-ring: #c2410c; display: grid; gap: 16px; width: 340px; padding: 16px; border: 1px solid var(--border, oklch(0.922 0 0)); border-radius: 0.84rem; background: var(--card, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; } .ds-pad-player { display: flex; align-items: center; gap: 12px; min-height: 56px; } .ds-tile { display: grid; place-items: center; width: 56px; height: 56px; flex-shrink: 0; border-radius: 0.6rem; background: var(--home); color: #fff; font-size: 1.25rem; font-weight: 700; font-variant-numeric: tabular-nums; } .ds-pad-name { margin: 0; font-size: 1.25rem; font-weight: 600; line-height: 1.25; } .ds-pad-meta { margin: 4px 0 0; font-size: 0.875rem; color: var(--desk-muted); } .ds-pad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; } .ds-pad-score, .ds-pad-stat { border: 1px solid transparent; border-radius: 0.48rem; font-family: inherit; cursor: pointer; transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-pad-score { height: 56px; margin-bottom: 4px; background: var(--primary, oklch(0.205 0 0)); color: var(--primary-foreground, oklch(0.985 0 0)); font-size: 1.5rem; font-weight: 600; } .ds-pad-score:hover { background: color-mix(in oklab, var(--primary, oklch(0.205 0 0)) 80%, transparent); } .ds-pad-stat { height: 48px; padding: 0 4px; border-color: var(--border, oklch(0.922 0 0)); background: var(--background, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); font-size: 0.875rem; font-weight: 500; box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05); } .ds-pad-stat:hover { background: var(--muted, oklch(0.97 0 0)); } .ds-pad-score:focus-visible, .ds-pad-stat:focus-visible, .ds-receipt-undo:focus-visible { outline: none; border-color: var(--desk-ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--desk-ring) 50%, transparent); } .ds-pad-score:active, .ds-pad-stat:active { transform: translateY(1px); } .ds-receipt { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 6px 6px 12px; border: 1px solid var(--border, oklch(0.922 0 0)); border-radius: 0.6rem; background: color-mix(in oklab, var(--muted, oklch(0.97 0 0)) 40%, transparent); font-size: 0.875rem; } .ds-receipt p { flex: 1; min-width: 0; margin: 0; } .ds-receipt strong { font-weight: 500; } .ds-receipt-time { color: var(--desk-muted); font-variant-numeric: tabular-nums; } .ds-receipt-undo { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border, oklch(0.922 0 0)); border-radius: 0.48rem; background: var(--background, oklch(1 0 0)); color: var(--foreground, oklch(0.145 0 0)); font: inherit; font-weight: 500; cursor: pointer; } .ds-receipt-undo svg { width: 16px; height: 16px; } .ds-receipt-undo:hover { background: var(--muted, oklch(0.97 0 0)); } .ds-confirm { animation: ds-confirm 1.4s cubic-bezier(0.16, 1, 0.3, 1) both; } @keyframes ds-confirm { from { background-color: color-mix(in oklab, var(--home) 22%, transparent); border-color: var(--home); } } @media (prefers-reduced-motion: reduce) { .ds-confirm { animation: none; } }"
+    },
+    {
+      "name": "Play Chips",
+      "kind": "chip",
+      "refersTo": "play-chip-score",
+      "description": "Play-type labels in the play history: score, stat, turnover and foul tints, plus the muted undone state.",
+      "html": "<div class=\"ds-chips\"><span class=\"ds-chip ds-chip-score\">+2</span><span class=\"ds-chip ds-chip-stat\">REB</span><span class=\"ds-chip ds-chip-turnover\">TO</span><span class=\"ds-chip ds-chip-foul\">FOUL</span><span class=\"ds-chip ds-chip-void\">+3</span></div>",
+      "css": ".ds-chips { display: flex; flex-wrap: wrap; gap: 8px; font-family: Inter, 'Inter Fallback', ui-sans-serif, system-ui, sans-serif; } .ds-chip { width: 64px; padding: 2px 6px; border-radius: 0.48rem; font-size: 11px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums; } .ds-chip-score { background: oklch(95% 0.052 163.051); color: oklch(43.2% 0.095 166.913); } .ds-chip-stat { background: oklch(95.1% 0.026 236.824); color: oklch(44.3% 0.11 240.79); } .ds-chip-turnover { background: oklch(96.2% 0.059 95.617); color: oklch(47.3% 0.137 46.201); } .ds-chip-foul { background: oklch(93.6% 0.032 17.717); color: oklch(50.5% 0.213 27.518); } .ds-chip-void { background: var(--muted, oklch(0.97 0 0)); color: var(--muted-foreground, oklch(0.556 0 0)); text-decoration: line-through; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Scorer's Table",
+    "overview": "Shotclock is the table where a league gets run: a clean, neutral work surface with the orange of the Shotclock mark set down only where something belongs to the brand or needs the eye. Every screen is built from the project's shadcn components (base-vega on Base UI) over the stock neutral palette: white cards, near-black primary buttons, quiet gray meta text and hairline borders. It reads as a professional tool first; the basketball comes through the mark, the orange and the numbers.\n\nThe live scoring console is the same table at courtside. It keeps the app's look and tightens it for a tablet read at arm's length: a zinc floor under white panels, large tabular numerals for scores and clocks, 44px touch targets, and a strict color grammar. Orange is the home side, the player you selected, the focus ring and the play you just recorded; slate is the away side; amber warns; red marks a limit. Apart from those and the play-type chips in the history list, the console stays neutral.\n\nDensity follows the job. App pages keep shadcn's default sizing (36px controls, 14px text). The console enlarges what a scorekeeper reads in a glance or taps under pressure and leaves the rest at app scale. Light and dark themes both exist, switched by the .dark class, and each token below has a dark counterpart.",
+    "keyCharacteristics": [
+      "Neutral shadcn surfaces (zero-chroma OKLCH grays) with one brand hue, Shotclock orange.",
+      "Near-black primary actions; orange marks and fills, it does not color buttons.",
+      "Inter throughout, with tabular numerals on every number that changes during a game.",
+      "Flat surfaces separated by hairlines and tonal steps; resting shadows stay at extra-small.",
+      "Gently rounded corners driven by one radius variable, scaled up slightly on the console.",
+      "Home orange against away slate, repeated in dots, line-score bars and jersey tiles."
+    ],
+    "rules": [
+      {
+        "name": "The Two Sides Rule",
+        "body": "Home is Shotclock orange and away is slate everywhere a team appears on the console: the dot beside its name, its line-score bars, its jersey tile, its marker in play history. Team identity comes from nothing else.",
+        "section": "colors"
+      },
+      {
+        "name": "The Orange Has Four Jobs Rule",
+        "body": "On the console, orange marks the brand, the home side, the current selection (wash, check and focus ring) and the play just recorded. Primary buttons stay near-black.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fill, Then Ink Rule",
+        "body": "Shotclock orange (#E67145) is a fill: tiles, dots, bars, rings. Orange text that has to be read uses Orange Ink on a 10% orange tint. The wordmark's period is the one place #E67145 is set as text.",
+        "section": "colors"
+      },
+      {
+        "name": "The Warn, Then Stop Rule",
+        "body": "As a text color, amber comes one step before a limit and red marks the limit. Each state also carries a word (\"Bonus\", \"Out\") or the number itself, so color is never the only signal.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number that changes during a game uses tabular numerals so digits hold their place as they tick: scores, both clocks, jersey numbers, PTS and PF, line-score totals, play timestamps and the compact bar.",
+        "section": "typography"
+      },
+      {
+        "name": "The Weight Ladder Rule",
+        "body": "Weight 700 belongs to game numbers: scores, clocks, the jersey tile and a fouled-out count. Names and headings stop at 600, controls at 500.",
+        "section": "typography"
+      },
+      {
+        "name": "The Arm's-Length Rule",
+        "body": "Every console control is at least 44px tall, and on coarse pointers every button, summary and link inside the console is at least 44 × 44px. Score buttons are 56px and stat buttons 48px.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Desk Rule",
+        "body": "Resting surfaces sit at shadow-xs or below. The only lift on the console is the compact bar, because it physically covers content.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Quiet Pad Rule",
+        "body": "The +1, +2 and +3 buttons stay outlined until a player is selected, then turn solid near-black, so the resting pad does not shout.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "**Do** build every surface from the shared shadcn components in components/ui (Button, Card, Table, Dialog, Popover, Alert, Collapsible) and their variants.",
+      "**Do** mark home with Shotclock orange (#E67145) and away with slate (#64748b; #94a3b8 in dark) everywhere a team appears on the console.",
+      "**Do** keep primary actions Near-Black (oklch(0.205 0 0)) with Near-White labels.",
+      "**Do** set scores, clocks, jersey numbers and stat counts in Inter with tabular numerals.",
+      "**Do** use amber (amber-700; amber-400 in dark) one step before a limit and destructive red at the limit, each paired with a word or number.",
+      "**Do** give every console control at least 44px of height (56px for +1/+2/+3, 48px for stat buttons).",
+      "**Do** confirm a recorded play with the 1.4s orange wash on the play receipt, and drop the wash under reduced motion.",
+      "**Do** keep console overrides (radius 0.6rem, home, away, accent, ring, muted text, floor) scoped to the console; app pages keep the stock tokens.",
+      "**Do** use the ShotclockLogo component or public/shotclock-mark.svg for the brand mark."
+    ],
+    "donts": [
+      "**Don't** fill buttons with Shotclock orange; it belongs to the mark, team markers, the selection and the confirmation.",
+      "**Don't** set #E67145 as running text; readable orange text uses Orange Ink (#A64320; #FFAE88 in dark) on a 10% orange tint.",
+      "**Don't** signal a team, a foul state or a clock state with color alone; pair it with the team name, \"Bonus\", \"Out\" or the number.",
+      "**Don't** put white text smaller than the jersey tile's 20px bold on Shotclock orange; white on #E67145 measures about 3.1:1, which passes only at large sizes.",
+      "**Don't** raise resting surfaces above shadow-xs; shadow-sm belongs to the pinned compact bar.",
+      "**Don't** recolor, redraw or crop the Shotclock mark.",
+      "**Don't** make the idle pad loud: +1/+2/+3 stay outlined until a player is selected."
+    ]
+  }
+}

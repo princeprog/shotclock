@@ -27,6 +27,12 @@ test('queued plays update the score, fouls, bonus and recent plays', () => {
   assert.deepEqual(view.plays.slice(0, 3).map((item) => [item.id, item.pending]), [['q3', true], ['q2', true], ['q1', true]])
 })
 
+test('queued baskets and their undo update the line score', () => {
+  const lines = { ...state, periodScores: [{ period: 1, home: 7, away: 8 }, { period: 2, home: 3, away: 0 }] }
+  const view = withPending(lines, [play('q1', 'points', 'a', 'a1', 2), { type: 'void', eventId: 'p1' }])
+  assert.deepEqual(view.periodScores, [{ period: 1, home: 7, away: 8 }, { period: 2, home: 0, away: 2 }])
+})
+
 test('a queued undo reverses a saved play once', () => {
   const view = withPending(state, [{ type: 'void', eventId: 'p1' }, { type: 'void', eventId: 'p1' }])
   assert.equal(view.home.score, 7)

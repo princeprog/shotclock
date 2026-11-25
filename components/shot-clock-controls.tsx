@@ -106,7 +106,7 @@ export function ShotClockControls({ inline = false, remainingMs, running, gameRu
       {soundError && <span role="alert" className="text-sm text-destructive">Sound unavailable. Watch the clock for zero.</span>}
     </div>
   </>
-  const controls = <div className={inline ? 'grid grid-cols-3 gap-1.5 [&>button]:min-h-11 [&>button]:px-2 lg:[&>button]:px-4' : 'flex flex-wrap gap-2'}>
+  const controls = <div className={inline ? 'flex flex-wrap gap-2 [&>button]:min-h-11 [&>button]:px-3' : 'flex flex-wrap gap-2'}>
     <Button type="button" variant={inline ? 'outline' : 'default'} disabled={disabled || (!running && (!gameRunning || atZero))}
       aria-label={inline ? (running ? 'Pause shot clock' : 'Start shot clock') : undefined} onClick={() => onChange({ running: !running, remainingMs, visible })}>
       {!inline && (running ? <PauseIcon data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />)}
@@ -117,13 +117,16 @@ export function ShotClockControls({ inline = false, remainingMs, running, gameRu
   </div>
   const status = atZero ? 'Shot clock at zero' : running ? 'Running' : 'Stopped'
 
-  if (inline) return <section aria-label="Shot clock controls" className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-2 gap-y-1 md:grid-cols-[minmax(0,1fr)_auto]">
-    <p className="text-sm font-medium text-muted-foreground">Shot clock{!visible && ' · Hidden'}</p>
-    <strong aria-live="off" className={`text-3xl leading-tight font-bold tracking-tight tabular-nums md:col-start-1 md:row-start-2 lg:text-4xl ${atZero ? 'text-destructive' : ''}`}>{seconds}</strong>
-    <Popover><PopoverTrigger render={<Button variant="ghost" size="icon-xs" className="justify-self-end md:col-start-2 md:row-start-1" aria-label="Shot clock settings" />}><MoreHorizontalIcon /></PopoverTrigger>
+  if (inline) return <section aria-label="Shot clock controls" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+    <div>
+      <p className="flex min-h-6 items-center gap-1 text-sm text-muted-foreground">Shot clock{!visible && ' · Hidden'}
+        <Popover><PopoverTrigger render={<Button variant="ghost" size="icon-xs" aria-label="Shot clock settings" />}><MoreHorizontalIcon /></PopoverTrigger>
       <PopoverContent><PopoverTitle>Shot clock settings</PopoverTitle>{visibilityButton}{settings}</PopoverContent>
     </Popover>
-    <div className="col-span-full md:col-span-1 md:col-start-2 md:row-start-2">{controls}</div>
+      </p>
+      <strong aria-live="off" className={`text-3xl leading-tight font-bold tracking-tight tabular-nums lg:text-4xl ${atZero ? 'text-destructive' : seconds <= 5 ? 'text-amber-700 dark:text-amber-400' : ''}`}>{seconds}</strong>
+    </div>
+    {controls}
     <span role="status" className="sr-only">{status}</span>
   </section>
 

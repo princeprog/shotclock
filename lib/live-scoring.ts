@@ -100,6 +100,14 @@ export function withPending(state: LiveState, outbox: OutboxItem[]): LiveState {
   let plays = state.plays
   let clock = state.clock
   let shotClock = state.shotClock
+  let periodScores = state.periodScores
+  // A queued basket, or its undo, shows in that period's line score straight away.
+  const addPeriodPoints = (play: PendingPlay, sign: 1 | -1) => {
+    if (play.kind !== 'points' || !play.points) return
+    const points = play.points * sign
+    const forHome = play.seasonTeamId === state.home.seasonTeamId
+    periodScores = periodScores.map((line) => line.period !== play.period ? line : forHome ? { ...line, home: line.home + points } : { ...line, away: line.away + points })
+  }
   const playerName = (rosterId?: string) => [...state.home.players, ...state.away.players].find((player) => player.rosterId === rosterId)?.name ?? null
   for (const item of outbox) {
     if (item.type === 'clock') {
@@ -114,6 +122,7 @@ export function withPending(state: LiveState, outbox: OutboxItem[]): LiveState {
     if (item.type === 'play') {
       if (item.play.seasonTeamId === home.seasonTeamId) home = addPlay(home, item.play, state.period, 1)
       else away = addPlay(away, item.play, state.period, 1)
+      addPeriodPoints(item.play, 1)
       plays = [{ id: item.play.id, sequence: 0, kind: item.play.kind, points: item.play.points ?? null, seasonTeamId: item.play.seasonTeamId, rosterId: item.play.rosterId ?? null, player: playerName(item.play.rosterId), period: item.play.period, clockMs: item.play.clockMs, voided: false, pending: true }, ...plays]
       continue
     }
@@ -122,10 +131,11 @@ export function withPending(state: LiveState, outbox: OutboxItem[]): LiveState {
     const reversed: PendingPlay = { id: target.id, kind: target.kind, points: target.points ?? undefined, seasonTeamId: target.seasonTeamId, rosterId: target.rosterId ?? undefined, period: target.period, clockMs: target.clockMs ?? 0, recordedAt: '' }
     if (target.seasonTeamId === home.seasonTeamId) home = addPlay(home, reversed, state.period, -1)
     else away = addPlay(away, reversed, state.period, -1)
+    addPeriodPoints(reversed, -1)
     plays = plays.map((play) => play.id === item.eventId ? { ...play, voided: true } : play)
   }
   const bonus = state.format.bonusFouls
-  return { ...state, clock, shotClock, plays, home: { ...home, inBonus: away.teamFouls >= bonus }, away: { ...away, inBonus: home.teamFouls >= bonus } }
+  return { ...state, clock, shotClock, plays, periodScores, home: { ...home, inBonus: away.teamFouls >= bonus }, away: { ...away, inBonus: home.teamFouls >= bonus } }
 }
 
 // Time left on the clock now. A running clock counts down from the moment its reading was taken.

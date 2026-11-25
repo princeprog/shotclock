@@ -1,13 +1,50 @@
 .desk {
   --radius: 0.6rem;
-  --primary: #145ec1;
-  --primary-foreground: white;
-  --accent: #e4eefc;
-  --border: #d5dee8;
-  --ring: #167ad2;
-  --muted-foreground: #566170;
+  --home: #e67145;
+  --away: #64748b;
+  --accent: #fdf0ea;
+  --accent-foreground: #18181b;
+  --muted-foreground: #5c5c66;
+  --ring: #c2410c;
   min-height: 100svh;
-  background-color: #f3f6fa;
+  background-color: #f4f4f5;
+}
+
+.desk ::selection {
+  background-color: #f8d3c3;
+  color: #18181b;
+}
+
+:global(.dark) .desk {
+  --away: #94a3b8;
+  --accent: #3a2318;
+  --accent-foreground: #fafafa;
+  --muted-foreground: #a1a1aa;
+  --ring: #fb923c;
+  background-color: #0f0f11;
+}
+
+:global(.dark) .desk ::selection {
+  background-color: #7a3a20;
+  color: #fafafa;
+}
+
+/* A fresh play arrives with a brief orange wash on its receipt, then settles. */
+.confirm {
+  animation: confirm 1.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes confirm {
+  from {
+    background-color: color-mix(in oklab, var(--home) 22%, transparent);
+    border-color: var(--home);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm {
+    animation: none;
+  }
 }
 
 @media (pointer: coarse) {
@@ -19,14 +56,4 @@
 
 .desk :is(button, summary, a) {
   scroll-margin-block-start: calc(4rem + env(safe-area-inset-top, 0px));
-}
-
-:global(.dark) .desk {
-  --primary: #76b7ff;
-  --primary-foreground: #071b30;
-  --accent: #213d58;
-  --border: #364353;
-  --ring: #84bdff;
-  --muted-foreground: #b0bdca;
-  background-color: #121a24;
 }

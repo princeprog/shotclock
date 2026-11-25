@@ -3,21 +3,23 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, CloudOffIcon, LoaderCircleIcon, CheckIcon, ChevronRightIcon, ListOrderedIcon, PauseIcon, PlayIcon, TimerIcon, Undo2Icon } from 'lucide-react'
+import { ArrowLeftIcon, CloudOffIcon, LoaderCircleIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ListOrderedIcon, PauseIcon, PencilIcon, PlayIcon, TimerIcon, Undo2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
 import { FinalBoxScore } from '@/components/final-box-score'
 import { ShotclockLogo } from '@/components/shotclock-logo'
 import { LiveBoxScore } from '@/components/live-box-score'
-import { deskClock, LatestPlay, ScoringWorkspace, TeamScore, type PlayerSelection } from '@/components/scoring-workspace'
+import { deskClock, GameFlowBoard, ScoringWorkspace, type PlayerSelection } from '@/components/scoring-workspace'
 import styles from './scorekeeper-console.module.css'
 import { ShotClockControls } from '@/components/shot-clock-controls'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { leagueRequest } from '@/lib/league-client'
 import { clockRemaining, clockServerOffset, clockServerTimestamp, describePlay, deviceId, formatClock, nextBatch, periodLabel, readOutbox, saveOutbox, SCORER_MOVED, withPending, type LivePlay, type LiveState, type LiveTeam, type OutboxItem, type PlayKind } from '@/lib/live-scoring'
@@ -46,13 +48,14 @@ function Console({ gameId }: { gameId: string }) {
   const [device] = useState(() => deviceId())
   const [outbox, setOutbox] = useState<OutboxItem[]>(() => readOutbox(gameId))
   const [selected, setSelected] = useState<PlayerSelection>(null)
+  const [freshPlayId, setFreshPlayId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<'period' | 'finish' | 'claim' | 'clock' | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const [retry, setRetry] = useState(0)
   const [syncProblem, setSyncProblem] = useState('')
   const [boxOpen, setBoxOpen] = useState(false)
   const [compact, setCompact] = useState(false)
-  const scoreboardRef = useRef<HTMLElement>(null)
+  const clockStripRef = useRef<HTMLDivElement>(null)
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true)
   const inFlight = useRef(0)
   const retryDelay = useRef(3000)
@@ -77,12 +80,19 @@ function Console({ gameId }: { gameId: string }) {
   const offsetRef = useRef(serverOffset)
 
   useEffect(() => {
-    const node = scoreboardRef.current
+    // The compact bar appears once the clock strip scrolls away, so both clocks stay in reach.
+    const node = clockStripRef.current
     if (!node || saved?.status !== 'live') return
-    const observer = new IntersectionObserver(([entry]) => setCompact(!entry.isIntersecting && entry.boundingClientRect.bottom <= 0))
+    const observer = new IntersectionObserver(([entry]) => setCompact(entry.intersectionRatio < 1 && entry.boundingClientRect.top < 0), { threshold: 1 })
     observer.observe(node)
     return () => observer.disconnect()
   }, [saved?.status])
+  // The receipt's orange wash confirms a play this device just recorded, once.
+  useEffect(() => {
+    if (!freshPlayId) return
+    const timer = window.setTimeout(() => setFreshPlayId(null), 1400)
+    return () => window.clearTimeout(timer)
+  }, [freshPlayId])
   useEffect(() => { saveOutbox(gameId, outbox) }, [gameId, outbox])
   useEffect(() => { clockRef.current = { running, remaining }; epochRef.current = saved?.shotClock?.scorerEpoch; offsetRef.current = serverOffset })
 
@@ -170,6 +180,7 @@ function Console({ gameId }: { gameId: string }) {
     const team = teamId ?? selected?.teamId
     if (!team) return
     const id = crypto.randomUUID()
+    setFreshPlayId(id)
     enqueue({ type: 'play', play: { id, kind, ...(points ? { points } : {}), seasonTeamId: team, ...(kind !== 'timeout' && selected ? { rosterId: selected.rosterId } : {}), period: view.period, clockMs: Math.round(remaining), recordedAt: new Date().toISOString() } })
   }
   // An unsent play is simply removed from the queue; a sent one is undone on the server.
@@ -209,29 +220,33 @@ function Console({ gameId }: { gameId: string }) {
   const context = [view.leagueName, view.divisionName, view.venueName].filter(Boolean).join(' · ')
   const shot = view.shotClock
   const shotMs = shot ? clockRemaining(shot, Date.parse(shot.serverTime) - serverOffset, now) : 0
+  const changeShot = (change: { running: boolean; remainingMs: number; visible: boolean }) => {
+    if (shot) enqueue({ type: 'shot-clock', commandId: crypto.randomUUID(), epoch: shot.epoch, ...change, at: clockServerTimestamp(serverOffset) })
+  }
   const periodName = view.period <= view.format.periodCount && [2, 4].includes(view.format.periodCount)
     ? `${['1st', '2nd', '3rd', '4th'][view.period - 1]} ${view.format.periodCount === 2 ? 'half' : 'quarter'}`
     : label
 
   return <main className={isLive ? styles.desk : 'mx-auto w-full max-w-6xl p-3 sm:p-6'}>
     {isLive && <header className="border-b bg-card">
-      <div className="mx-auto flex min-h-14 max-w-[88rem] items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-        <nav aria-label="Scorekeeping navigation" className="flex min-w-0 items-center gap-2.5">
+      <div className="mx-auto flex min-h-16 max-w-[88rem] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 sm:px-6 lg:px-8">
+        <nav aria-label="Scorekeeping navigation" className="flex items-center gap-2.5">
           <ShotclockLogo /><ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
           <Link href="/scorekeeping" className="inline-flex min-h-11 items-center text-sm font-medium text-muted-foreground hover:text-foreground">Games</Link>
+          <ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
         </nav>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-base leading-tight font-semibold tracking-tight break-words">{view.home.name} vs {view.away.name}</h1>
+          <p className="hidden text-sm text-muted-foreground md:block">{context}</p>
+        </div>
         {isScorer && <span role="status" className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold', online && !outbox.length && !syncProblem ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-muted text-muted-foreground')}>
           {!online ? <CloudOffIcon aria-hidden="true" className="size-3.5" /> : outbox.length && !syncProblem ? <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" /> : !syncProblem && <CheckIcon aria-hidden="true" className="size-3.5" />}{syncLabel}
         </span>}
+        <Button variant="outline" className="min-h-11 px-3" onClick={() => setBoxOpen(true)}><ListOrderedIcon aria-hidden="true" data-icon="inline-start" />Box score</Button>
       </div>
     </header>}
-    <div className={isLive ? 'mx-auto flex w-full max-w-[88rem] flex-col gap-4 px-3 py-4 sm:px-6 lg:gap-5 lg:px-8 lg:py-6' : 'flex flex-col gap-4'}>
-    {isLive ? <header className="flex items-center justify-between gap-4">
-      <div className="min-w-0"><h1 className="text-2xl leading-tight font-semibold tracking-tight sm:text-3xl">Live scoring</h1>
-        <p className="mt-1 text-sm text-muted-foreground sm:text-base">{context}</p>
-      </div>
-      <Button variant="outline" className="min-h-11 px-3" onClick={() => setBoxOpen(true)}><ListOrderedIcon aria-hidden="true" data-icon="inline-start" />Box score</Button>
-    </header> : <header className="flex items-center gap-2">
+    <div className={isLive ? 'mx-auto flex w-full max-w-[88rem] flex-col gap-4 px-3 py-4 sm:px-6 lg:gap-5 lg:px-8 lg:py-5' : 'flex flex-col gap-4'}>
+    {!isLive && <header className="flex items-center gap-2">
       <Button variant="ghost" size="icon-sm" aria-label="Back to games" nativeButton={false} render={<Link href="/scorekeeping" />}><ArrowLeftIcon /></Button>
       <div className="flex min-w-0 flex-col"><span className="truncate text-sm font-medium">{view.home.name} vs {view.away.name}</span><span className="truncate text-xs text-muted-foreground">{context}</span></div>
     </header>}
@@ -241,60 +256,72 @@ function Console({ gameId }: { gameId: string }) {
 
     {view.status === 'live' && !isScorer && <Alert><TimerIcon /><AlertTitle>{view.scorer ? `${view.scorer.name ?? 'Someone'} is scoring this game on another device` : 'No device is scoring this game'}</AlertTitle><AlertDescription><p>Take over to record plays here. The other device will stop saving plays.{outbox.length ? ` ${outbox.length} unsaved ${outbox.length === 1 ? 'change' : 'changes'} on this device ${view.shotClock ? 'will need review after you take over.' : 'will be sent after you take over.'}` : ''}</p><div className="mt-3 flex flex-wrap gap-2"><Button size="sm" onClick={() => setDialog('claim')}>Take over scoring</Button>{outbox.length > 0 && <Button size="sm" variant="ghost" onClick={() => setOutbox([])}>Discard unsaved changes</Button>}</div></AlertDescription></Alert>}
 
-    {view.status === 'live' && compact && <div className="fixed inset-x-0 top-0 z-30 border-b bg-card px-3 py-2 text-card-foreground shadow-sm" aria-label="Compact scoreboard">
-      <div className="mx-auto flex max-w-6xl items-center gap-2 text-sm">
-        <span className="flex min-w-0 flex-1 items-center gap-1"><span className="min-w-0 truncate" title={view.home.name}>{view.home.name}</span><strong className="tabular-nums">{view.home.score}</strong></span>
-        <span className="shrink-0 font-mono tabular-nums">{label} {formatClock(remaining)}</span>
-        <span className="flex min-w-0 flex-1 items-center justify-end gap-1"><strong className="tabular-nums">{view.away.score}</strong><span className="min-w-0 truncate" title={view.away.name}>{view.away.name}</span></span>
-        {isScorer && <Button size="sm" onClick={() => setClock(!running)} disabled={queueBlocked || (remaining === 0 && !running)}>{running ? 'Stop' : 'Start'}</Button>}
-        <Button size="sm" variant="outline" onClick={() => setBoxOpen(true)}>Box score</Button>
+    {isLive && compact && <div className="fixed inset-x-0 top-0 z-30 border-b bg-card px-3 py-1.5 text-card-foreground shadow-sm sm:px-6 lg:px-8" aria-label="Compact scoreboard">
+      <div className="mx-auto flex max-w-[88rem] flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-4">
+        <p className="flex min-w-0 items-center gap-2 font-semibold tabular-nums">
+          <span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-(--home)" /><span className="truncate">{view.home.name}</span><span className="text-xl">{view.home.score}</span>
+          <span className="text-muted-foreground">–</span>
+          <span className="text-xl">{view.away.score}</span><span className="truncate">{view.away.name}</span><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-(--away)" />
+        </p>
+        <p className="font-semibold tabular-nums"><span className="font-normal text-muted-foreground">{label}</span> {deskClock(remaining)}</p>
+        {isScorer && <Button className="min-h-11" onClick={() => setClock(!running)} disabled={queueBlocked || (!running && remaining === 0)}>{running ? <PauseIcon data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}<span className="sr-only sm:not-sr-only">{running ? 'Pause game clock' : 'Start game clock'}</span></Button>}
+        {shot?.mode === 'single' && <div className="flex flex-wrap items-center gap-2">
+          <p className="font-semibold tabular-nums"><span className="font-normal text-muted-foreground">Shot<span className="hidden sm:inline"> clock</span></span> {Math.ceil(shotMs / 1000)}</p>
+          {isScorer && <>
+            <Button variant="outline" className="min-h-11" disabled={!canRecord || (!shot.running && (!running || shotMs <= 0))} onClick={() => changeShot({ running: !shot.running, remainingMs: shotMs, visible: shot.visible })}>{shot.running ? 'Pause' : 'Start'}</Button>
+            <Button variant="outline" className="min-h-11" disabled={!canRecord} onClick={() => changeShot({ running: shot.running, remainingMs: shot.fullSeconds * 1000, visible: shot.visible })}>Reset {shot.fullSeconds}s</Button>
+            <Button variant="outline" className="min-h-11" disabled={!canRecord} onClick={() => changeShot({ running: shot.running, remainingMs: shot.shortSeconds * 1000, visible: shot.visible })}>Reset {shot.shortSeconds}s</Button>
+          </>}
+        </div>}
+        <Button variant="outline" className="hidden min-h-11 sm:inline-flex lg:ml-auto" onClick={() => setBoxOpen(true)}>Box score</Button>
       </div>
     </div>}
     {isLive && <>
-      <section ref={scoreboardRef} aria-label="Scoreboard">
-        <Card className="gap-0 rounded-xl border py-0 shadow-xs ring-0">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 px-4 py-4 sm:gap-8 sm:px-6 lg:gap-12 lg:px-8 lg:py-5">
-            <TeamScore team={view.home} /><p className="rounded-full border bg-muted/40 px-2.5 py-1 text-center text-xs font-semibold whitespace-nowrap sm:px-4 sm:text-sm"><span className="sm:hidden" aria-hidden="true">{label}</span><span className="sr-only sm:not-sr-only">{periodName}</span></p><TeamScore team={view.away} away />
-          </div>
-          <div className={cn('grid gap-3 border-t bg-muted/30 px-4 py-3 sm:px-6 lg:px-8', shot && 'md:grid-cols-[0.9fr_1.1fr] md:gap-5')}>
-            <section aria-label="Game clock controls" className={cn('min-w-0', shot && 'border-b pb-3 md:border-r md:border-b-0 md:pr-4 md:pb-0')}>
-              <p className="text-sm font-medium text-muted-foreground">Game clock</p>
-              <div className="flex flex-wrap items-center justify-between gap-2 md:pr-3">
+      <section aria-label="Scoreboard">
+        <GameFlowBoard view={view}>
+          <div ref={clockStripRef} className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t bg-muted/40 px-4 py-3 sm:px-6 lg:px-8">
+            <section aria-label="Game clock controls" className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div>
+                <p className="flex min-h-6 items-center gap-1 text-sm text-muted-foreground">Game clock · {periodName}
+                  {isScorer && <Button variant="ghost" size="icon-xs" aria-label="Adjust game clock" disabled={running || queueBlocked} onClick={() => setDialog('clock')}><PencilIcon /></Button>}
+                </p>
                 <strong className={cn('text-3xl leading-tight font-bold tracking-tight tabular-nums lg:text-4xl', remaining === 0 && 'text-destructive')}>{deskClock(remaining)}</strong>
-                {isScorer && <Button aria-label={running ? 'Pause game clock' : 'Start game clock'} className="min-h-11 px-4 font-semibold" onClick={() => setClock(!running)} disabled={queueBlocked || (!running && remaining === 0)}>{running ? <PauseIcon data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}{running ? 'Pause' : 'Start'}<span className="hidden sm:inline">game clock</span></Button>}
               </div>
+              {isScorer && <Button className="min-h-11 px-4 font-semibold" onClick={() => setClock(!running)} disabled={queueBlocked || (!running && remaining === 0)}>{running ? <PauseIcon data-icon="inline-start" /> : <PlayIcon data-icon="inline-start" />}{running ? 'Pause game clock' : 'Start game clock'}</Button>}
             </section>
+            {shot && <Separator orientation="vertical" className="hidden lg:block" />}
             {shot?.mode === 'single' && <ShotClockControls inline remainingMs={shotMs} running={shot.running} gameRunning={running} visible={shot.visible}
-              fullSeconds={shot.fullSeconds} shortSeconds={shot.shortSeconds} disabled={!canRecord}
-              onChange={(change) => enqueue({ type: 'shot-clock', commandId: crypto.randomUUID(), epoch: shot.epoch, ...change, at: clockServerTimestamp(serverOffset) })} />}
-            {shot?.mode === 'dual' && <section aria-label="Shot clock"><p className="font-medium text-muted-foreground">Shot clock · {shot.operator?.name ?? 'Not assigned'}</p>
-              <p className="text-4xl font-bold tabular-nums">{shot.visible ? Math.ceil(shotMs / 1000) : 'Hidden'}</p>
-              <Link className="text-sm font-medium text-primary hover:underline" href={`/scorekeeping/games/${gameId}/shot-clock`}>Open shot-clock screen</Link>
+              fullSeconds={shot.fullSeconds} shortSeconds={shot.shortSeconds} disabled={!canRecord} onChange={changeShot} />}
+            {shot?.mode === 'dual' && <section aria-label="Shot clock" className="min-w-0">
+              <p className="min-h-6 text-sm text-muted-foreground">Shot clock · {shot.operator?.name ?? 'No operator yet'}</p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <strong className="text-3xl leading-tight font-bold tracking-tight tabular-nums lg:text-4xl">{shot.visible ? Math.ceil(shotMs / 1000) : 'Hidden'}</strong>
+                <Link className="inline-flex min-h-11 items-center text-sm font-medium underline underline-offset-4" href={`/scorekeeping/games/${gameId}/shot-clock`}>Open shot-clock screen</Link>
+              </div>
             </section>}
+            {isScorer && <div className="flex flex-col items-start gap-1 lg:ml-auto lg:items-end">
+              {!regulationDone || tied
+                ? <Button variant="outline" className="min-h-11" disabled={running || busy} onClick={() => setDialog('period')}>{regulationDone ? 'Start overtime' : `End ${label}`}</Button>
+                : <Button variant="outline" className="min-h-11" disabled={running || busy} onClick={() => setDialog('finish')}>End game</Button>}
+              {(running || busy) && <span className="text-xs text-muted-foreground">{running ? 'Pause the clock first' : !online ? 'Reconnect first' : 'Saving changes…'}</span>}
+            </div>}
           </div>
-        </Card>
+        </GameFlowBoard>
       </section>
-      <ScoringWorkspace view={view} selected={selected} onSelect={setSelected} onPlay={record} disabled={!canRecord} />
-      <LatestPlay view={view} canUndo={canRecord} onUndo={undo} />
-      <details className="rounded-lg border bg-card px-4">
-        <summary className="cursor-pointer py-3 font-medium">Game controls and play history</summary>
-        <div className="grid gap-4 border-t py-4">
-          <div className="flex flex-wrap gap-4">
-            {[view.home, view.away].map((team) => <div key={team.seasonTeamId} className="flex flex-wrap items-center gap-3">
-              <p className="text-sm"><strong>{team.name}</strong> · {team.teamFouls} team fouls · {team.timeouts} timeouts used</p>
-              {isScorer && <Button variant="outline" size="sm" disabled={!canRecord || !team.seasonTeamId} aria-label={`Timeout for ${team.name}`} onClick={() => record('timeout', undefined, team.seasonTeamId!)}>Timeout</Button>}
-            </div>)}
-          </div>
-          {isScorer && <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" disabled={running || queueBlocked} onClick={() => setDialog('clock')}>Adjust game clock</Button>
-            {shot && <Button variant="outline" disabled={busy || clockMode.isPending} onClick={() => clockMode.mutate(shot.mode === 'single' ? 'dual' : 'single')}>{shot.mode === 'single' ? 'Use a second operator' : 'Control on this device'}</Button>}
-            {!regulationDone || tied ? <Button variant="outline" disabled={running || busy} onClick={() => setDialog('period')}>{regulationDone ? 'Start overtime' : `End ${label}`}</Button>
-              : <Button variant="outline" disabled={running || busy} onClick={() => setDialog('finish')}>End game</Button>}
-            {(running || busy) && <span className="text-xs text-muted-foreground">{running ? 'Pause the game clock to end the period.' : !online ? 'Reconnect to continue.' : 'Saving changes…'}</span>}
+      <ScoringWorkspace view={view} selected={selected} disabled={!canRecord} readOnly={!isScorer} canUndo={canRecord} freshPlayId={freshPlayId} onSelect={setSelected} onPlay={record} onUndo={undo}
+        onTimeout={isScorer ? (teamId) => record('timeout', undefined, teamId) : undefined} />
+      <Collapsible className="rounded-xl border bg-card">
+        <CollapsibleTrigger render={<Button variant="ghost" className="group/history min-h-12 w-full justify-between rounded-xl px-4 text-base font-medium" />}>
+          Play history and settings<ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[panel-open]/history:rotate-180" />
+        </CollapsibleTrigger>
+        <CollapsibleContent className="grid gap-4 border-t p-4">
+          {isScorer && shot && <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm text-muted-foreground">{shot.mode === 'single' ? 'This device runs the shot clock.' : 'A second device runs the shot clock.'}</p>
+            <Button variant="outline" disabled={busy || clockMode.isPending} onClick={() => clockMode.mutate(shot.mode === 'single' ? 'dual' : 'single')}>{shot.mode === 'single' ? 'Use a second operator' : 'Control on this device'}</Button>
           </div>}
           <RecentPlays view={view} canUndo={canRecord} onUndo={undo} />
-        </div>
-      </details>
+        </CollapsibleContent>
+      </Collapsible>
     </>}
     {view.status === 'completed' && <FinalBoxScore view={view} />}
     </div>
