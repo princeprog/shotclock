@@ -10,12 +10,12 @@ import { describePlay, formatClock, periodLabel, type LivePlay, type LivePlayer,
 import styles from './scorekeeper-console.module.css'
 
 export type PlayerSelection = { teamId: string; rosterId: string } | null
-type Side = 'home' | 'away'
+export type Side = 'home' | 'away'
 type RecordPlay = (kind: PlayKind, points?: number) => void
 
 // Shotclock orange marks the home side, slate the away side, in the scoreboard, the line score and the rosters.
 // The fallbacks keep the jersey badge readable if the console stylesheet has not loaded yet.
-const sideColor: Record<Side, string> = { home: 'bg-(--home,#e67145)', away: 'bg-(--away,#64748b)' }
+export const sideColor: Record<Side, string> = { home: 'bg-(--home,#e67145)', away: 'bg-(--away,#64748b)' }
 const scores = [1, 2, 3] as const
 const statistics = [
   ['rebound', 'Rebound'], ['assist', 'Assist'], ['steal', 'Steal'],

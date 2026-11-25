@@ -326,7 +326,7 @@ function Console({ gameId }: { gameId: string }) {
     {view.status === 'completed' && <FinalBoxScore view={view} />}
     </div>
 
-    <LiveBoxScore view={view} open={boxOpen && view.status === 'live'} onOpenChange={setBoxOpen} />
+    <LiveBoxScore view={view} clock={deskClock(remaining)} open={boxOpen && view.status === 'live'} onOpenChange={setBoxOpen} />
     <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !direct.isPending) setDialog(null) }}>
       <DialogContent className="sm:max-w-md">
         {dialog === 'period' && <Confirm title={regulationDone ? 'Start overtime?' : `End ${label}?`} body={regulationDone ? `The score is tied, so the game goes to overtime with a ${view.format.overtimeMinutes}-minute clock.` : `The clock resets for ${periodLabel(view.period + 1, view.format.periodCount)} and team fouls start again.`} action={regulationDone ? 'Start overtime' : 'End period'} pending={direct.isPending} onConfirm={() => direct.mutate({ action: 'period', body: {} })} onCancel={() => setDialog(null)} />}
