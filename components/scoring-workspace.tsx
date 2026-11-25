@@ -14,7 +14,8 @@ type Side = 'home' | 'away'
 type RecordPlay = (kind: PlayKind, points?: number) => void
 
 // Shotclock orange marks the home side, slate the away side, in the scoreboard, the line score and the rosters.
-const sideColor: Record<Side, string> = { home: 'bg-(--home)', away: 'bg-(--away)' }
+// The fallbacks keep the jersey badge readable if the console stylesheet has not loaded yet.
+const sideColor: Record<Side, string> = { home: 'bg-(--home,#e67145)', away: 'bg-(--away,#64748b)' }
 const scores = [1, 2, 3] as const
 const statistics = [
   ['rebound', 'Rebound'], ['assist', 'Assist'], ['steal', 'Steal'],
