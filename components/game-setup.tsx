@@ -17,6 +17,7 @@ import { Switch } from '@/components/ui/switch'
 import { formatGameDateTime } from '@/lib/league-time'
 import type { LiveState, LiveTeam } from '@/lib/live-scoring'
 import { stageLabel } from '@/lib/season-overview'
+import styles from './game-setup.module.css'
 
 export type StartFormat = LiveState['format'] & { shotClockEnabled: boolean; shotClockFullSeconds: number; shotClockShortSeconds: number }
 const sides = ['home', 'away'] as const
@@ -96,9 +97,9 @@ function RosterGroup({ team, side }: { team: LiveTeam; side: Side }) {
           </span>
         </span>
       </span>
-      <ChevronDownIcon data-icon="inline-end" className="transition-transform group-data-[panel-open]/roster:rotate-180" />
+      <ChevronDownIcon data-icon="inline-end" className="transition-transform duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] group-data-[panel-open]/roster:rotate-180 motion-reduce:transition-none" />
     </CollapsibleTrigger>
-    <CollapsibleContent>
+    <CollapsibleContent className={styles.panel}>
       {team.players.length > 0 && <ul className="mx-5 mb-3 divide-y border-t">{team.players.map((player) => <li key={player.rosterId} className="flex min-h-11 items-center gap-4 text-sm">
         <span className={cn('w-7 text-right tabular-nums', player.jersey === null ? 'font-semibold text-amber-700 dark:text-amber-400' : 'text-muted-foreground')}>
           {player.jersey ?? '–'}{player.jersey === null && <span className="sr-only">No jersey number</span>}
