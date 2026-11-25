@@ -26,3 +26,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Impeccable working files (screenshots, sketches, decision page payloads)
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/decision-payload.json
+.impeccable/config.local.json

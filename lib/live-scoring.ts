@@ -4,11 +4,12 @@ export type LivePlayer = { rosterId: string; name: string; jersey: number | null
 export type LiveTeam = { seasonTeamId: string | null; name: string; score: number; teamFouls: number; timeouts: number; inBonus: boolean; players: LivePlayer[] }
 export type LivePlay = { id: string; sequence: number; kind: PlayKind | 'period_end'; points: number | null; seasonTeamId: string | null; rosterId: string | null; player: string | null; period: number; clockMs: number | null; voided: boolean; pending?: boolean }
 export type LiveClock = { remainingMs: number; running: boolean; serverTime: string }
+export type ShotClock = LiveClock & { mode: 'single' | 'dual'; fullSeconds: number; shortSeconds: number; visible: boolean; epoch: number; scorerEpoch?: number; operator: { deviceId: string; name: string | null } | null; connectivity?: { scorerConnected: boolean; operatorConnected: boolean; leaseMs: number } }
 export type LiveState = {
   gameId: string
   status: 'scheduled' | 'live' | 'completed'
   version: number
-  stage: 'preliminary' | 'semifinal' | 'final' | 'third_place'
+  stage: 'preliminary' | 'quarterfinal' | 'semifinal' | 'final' | 'third_place'
   scheduledAt: string | null
   leagueName: string
   seasonName: string
@@ -19,6 +20,7 @@ export type LiveState = {
   format: { periodCount: number; periodMinutes: number; overtimeMinutes: number; bonusFouls: number }
   period: number
   clock: LiveClock | null
+  shotClock?: ShotClock | null
   home: LiveTeam
   away: LiveTeam
   periodScores: { period: number; home: number; away: number }[]
@@ -29,7 +31,7 @@ export type LiveState = {
   live: boolean
 }
 export type PendingPlay = { id: string; kind: PlayKind; points?: number; seasonTeamId: string; rosterId?: string; period: number; clockMs: number; recordedAt: string }
-export type OutboxItem = { type: 'play'; play: PendingPlay } | { type: 'void'; eventId: string } | { type: 'clock'; running: boolean; remainingMs: number; at: string }
+export type OutboxItem = ({ type: 'play'; play: PendingPlay } | { type: 'void'; eventId: string } | { type: 'clock'; running: boolean; remainingMs: number; at: string } | { type: 'shot-clock'; commandId: string; running: boolean; remainingMs: number; visible: boolean; at: string }) & { epoch?: number }
 
 // Matches the API's conflict message when another device has taken over the game.
 export const SCORER_MOVED = 'This game is being scored on another device.'
@@ -72,7 +74,7 @@ export function nextBatch(outbox: OutboxItem[]) {
   const first = outbox[0]
   if (!first) return null
   if (first.type !== 'play') return { items: [first] }
-  const end = outbox.findIndex((item) => item.type !== 'play')
+  const end = outbox.findIndex((item) => item.type !== 'play' || item.epoch !== first.epoch)
   return { items: outbox.slice(0, Math.min(end === -1 ? outbox.length : end, 100)) }
 }
 
@@ -97,12 +99,30 @@ export function withPending(state: LiveState, outbox: OutboxItem[]): LiveState {
   let away = state.away
   let plays = state.plays
   let clock = state.clock
+  let shotClock = state.shotClock
+  let periodScores = state.periodScores
+  // A queued basket, or its undo, shows in that period's line score straight away.
+  const addPeriodPoints = (play: PendingPlay, sign: 1 | -1) => {
+    if (play.kind !== 'points' || !play.points) return
+    const points = play.points * sign
+    const forHome = play.seasonTeamId === state.home.seasonTeamId
+    periodScores = periodScores.map((line) => line.period !== play.period ? line : forHome ? { ...line, home: line.home + points } : { ...line, away: line.away + points })
+  }
   const playerName = (rosterId?: string) => [...state.home.players, ...state.away.players].find((player) => player.rosterId === rosterId)?.name ?? null
   for (const item of outbox) {
-    if (item.type === 'clock') { clock = { remainingMs: item.remainingMs, running: item.running, serverTime: item.at }; continue }
+    if (item.type === 'clock') {
+      clock = { remainingMs: item.remainingMs, running: item.running, serverTime: item.at }
+      if (!item.running && shotClock?.running) shotClock = { ...shotClock, remainingMs: clockRemaining(shotClock, Date.parse(shotClock.serverTime), Date.parse(item.at)), running: false, serverTime: item.at }
+      continue
+    }
+    if (item.type === 'shot-clock') {
+      if (shotClock) shotClock = { ...shotClock, remainingMs: item.remainingMs, running: item.running, visible: item.visible, serverTime: item.at }
+      continue
+    }
     if (item.type === 'play') {
       if (item.play.seasonTeamId === home.seasonTeamId) home = addPlay(home, item.play, state.period, 1)
       else away = addPlay(away, item.play, state.period, 1)
+      addPeriodPoints(item.play, 1)
       plays = [{ id: item.play.id, sequence: 0, kind: item.play.kind, points: item.play.points ?? null, seasonTeamId: item.play.seasonTeamId, rosterId: item.play.rosterId ?? null, player: playerName(item.play.rosterId), period: item.play.period, clockMs: item.play.clockMs, voided: false, pending: true }, ...plays]
       continue
     }
@@ -111,16 +131,26 @@ export function withPending(state: LiveState, outbox: OutboxItem[]): LiveState {
     const reversed: PendingPlay = { id: target.id, kind: target.kind, points: target.points ?? undefined, seasonTeamId: target.seasonTeamId, rosterId: target.rosterId ?? undefined, period: target.period, clockMs: target.clockMs ?? 0, recordedAt: '' }
     if (target.seasonTeamId === home.seasonTeamId) home = addPlay(home, reversed, state.period, -1)
     else away = addPlay(away, reversed, state.period, -1)
+    addPeriodPoints(reversed, -1)
     plays = plays.map((play) => play.id === item.eventId ? { ...play, voided: true } : play)
   }
   const bonus = state.format.bonusFouls
-  return { ...state, clock, plays, home: { ...home, inBonus: away.teamFouls >= bonus }, away: { ...away, inBonus: home.teamFouls >= bonus } }
+  return { ...state, clock, shotClock, plays, periodScores, home: { ...home, inBonus: away.teamFouls >= bonus }, away: { ...away, inBonus: home.teamFouls >= bonus } }
 }
 
 // Time left on the clock now. A running clock counts down from the moment its reading was taken.
 export function clockRemaining(clock: LiveClock | null, readAt: number, now: number) {
   if (!clock) return 0
   return clock.running ? Math.max(0, clock.remainingMs - (now - readAt)) : clock.remainingMs
+}
+
+// Map server timestamps to the local clock at the time the snapshot arrived.
+export function clockServerOffset(clock: LiveClock | null, receivedAt: number) {
+  return clock ? Date.parse(clock.serverTime) - receivedAt : 0
+}
+
+export function clockServerTimestamp(offset: number) {
+  return new Date(Date.now() + offset).toISOString()
 }
 
 // Minutes and seconds, with tenths in the last minute like a game clock.

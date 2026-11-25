@@ -24,6 +24,15 @@ async function request(method, path, body, headers = {}) {
   return route[method](value, { params: Promise.resolve({ path: path.split('?')[0].split('/') }) })
 }
 
+test('shot-clock routes are allowlisted and retain mutation checks', async () => {
+  for (const suffix of ['', '/claim', '/mode', '/heartbeat']) {
+    const path = `games/${id}/live/shot-clock${suffix}`
+    assert.equal((await request('POST', path, '{}')).status, 200)
+    assert.equal((await request('POST', path, '{}', { origin: 'https://evil.test' })).status, 403)
+  }
+  assert.equal((await request('POST', `games/${id}/live/shot-clock/other`, '{}')).status, 404)
+})
+
 test('schedule routes and game deletion are allowlisted while other routes remain blocked', async () => {
   for (const [method, path] of [['GET', `divisions/${id}/schedule/status`], ['POST', `divisions/${id}/schedule/preview`], ['POST', `divisions/${id}/schedule`], ['POST', `divisions/${id}/playoffs/preview`], ['POST', `divisions/${id}/playoffs`], ['DELETE', `games/${id}`]]) {
     assert.equal((await request(method, path, method === 'POST' ? '{}' : undefined)).status, 200, `${method} ${path}`)

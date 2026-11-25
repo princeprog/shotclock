@@ -1,0 +1,59 @@
+.desk {
+  --radius: 0.6rem;
+  --home: #e67145;
+  --away: #64748b;
+  --accent: #fdf0ea;
+  --accent-foreground: #18181b;
+  --muted-foreground: #5c5c66;
+  --ring: #c2410c;
+  min-height: 100svh;
+  background-color: #f4f4f5;
+}
+
+.desk ::selection {
+  background-color: #f8d3c3;
+  color: #18181b;
+}
+
+:global(.dark) .desk {
+  --away: #94a3b8;
+  --accent: #3a2318;
+  --accent-foreground: #fafafa;
+  --muted-foreground: #a1a1aa;
+  --ring: #fb923c;
+  background-color: #0f0f11;
+}
+
+:global(.dark) .desk ::selection {
+  background-color: #7a3a20;
+  color: #fafafa;
+}
+
+/* A fresh play arrives with a brief orange wash on its receipt, then settles. */
+.confirm {
+  animation: confirm 1.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes confirm {
+  from {
+    background-color: color-mix(in oklab, var(--home) 22%, transparent);
+    border-color: var(--home);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confirm {
+    animation: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .desk :is(button, summary, a) {
+    min-block-size: 44px;
+    min-inline-size: 44px;
+  }
+}
+
+.desk :is(button, summary, a) {
+  scroll-margin-block-start: calc(4rem + env(safe-area-inset-top, 0px));
+}

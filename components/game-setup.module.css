@@ -1,0 +1,35 @@
+/* The roster list opens over 220ms and closes faster, its rows fading with it. */
+.panel {
+  height: var(--collapsible-panel-height);
+  overflow: hidden;
+  transition: height 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.panel[data-starting-style],
+.panel[data-ending-style] {
+  height: 0;
+}
+
+.panel[data-ending-style] {
+  transition-duration: 160ms;
+}
+
+.panel > * {
+  transition: opacity 220ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.panel[data-starting-style] > *,
+.panel[data-ending-style] > * {
+  opacity: 0;
+}
+
+/* Reduced motion keeps the fade and drops the height change. */
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    transition: none;
+  }
+
+  .panel > * {
+    transition-duration: 150ms;
+  }
+}

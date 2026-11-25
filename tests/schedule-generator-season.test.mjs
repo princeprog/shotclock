@@ -102,7 +102,9 @@ test('the round robin and playoffs are requested together, with playoff dates af
   await h.preview()
   const [path, , , body] = h.calls[0]
   assert.equal(path, 'seasons/s1/schedule/preview')
-  assert.deepEqual(Object.keys(body).sort(), ['availability', 'format', 'playoffDates', 'playoffs', 'thirdPlace'])
+  assert.deepEqual(Object.keys(body).sort(), ['availability', 'format', 'playoffDates', 'playoffTeams', 'playoffs', 'thirdPlace'])
+  // Divisions of four teams cannot have a top-eight bracket, so the request stays at the top four.
+  assert.equal(body.playoffTeams, 4)
   assert.deepEqual(JSON.parse(JSON.stringify(body.playoffDates)), { startDate: '2026-02-02', endDate: '2026-02-08' })
   assert.equal(body.availability.endDate, '2026-02-01')
   // A playoff date inside the round robin is rejected before any request.
@@ -116,6 +118,25 @@ test('the round robin and playoffs are requested together, with playoff dates af
   await h.preview()
   assert.deepEqual(Object.keys(h.calls[1][3]).sort(), ['availability', 'format', 'playoffs'])
   assert.equal(h.calls[1][3].playoffs, false)
+})
+
+test('a division with eight teams can bracket the top eight, and smaller divisions keep the top four', async () => {
+  const statusDivisions = [{ ...readyDivisions[0], teamCount: 8 }, { ...readyDivisions[0], id: 'a', name: 'Adults', teamCount: 5 }]
+  const h = harness(response, { statusDivisions })
+  let tree = h.render()
+  tree.find((n) => n.type === 'ToggleGroup' && String(n.props['aria-label']).startsWith('Playing days')).props.onValueChange(['1'])
+  tree = h.render()
+  tree.find((n) => n.type === 'label' && nodes(n).includes('Court')).props.children[0].props.onCheckedChange(true)
+  tree = h.render()
+  const size = tree.find((n) => n.type === 'ToggleGroup' && n.props['aria-label'] === 'Teams in the playoffs')
+  assert.deepEqual(Array.from(size.props.value), ['4'])
+  size.props.onValueChange(['8'])
+  tree = h.render()
+  assert.match(textOf(tree), /Quarterfinals 1 vs 8, 4 vs 5, 2 vs 7 and 3 vs 6/)
+  assert.match(textOf(tree), /Boys\s+Round robin and playoffs · top 8/)
+  assert.match(textOf(tree), /Adults\s+Round robin and playoffs · top 4/)
+  await h.preview()
+  assert.equal(h.calls[0][3].playoffTeams, 8)
 })
 
 test('a division with its round robin already scheduled gets only playoffs, after its last game in the league time zone', async () => {

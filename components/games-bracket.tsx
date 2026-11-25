@@ -15,7 +15,7 @@ import { formatGameDateTime } from '@/lib/league-time'
 
 export type BracketRow = {
   id: string
-  stage?: 'preliminary' | 'semifinal' | 'final' | 'third_place'
+  stage?: 'preliminary' | 'quarterfinal' | 'semifinal' | 'final' | 'third_place'
   status: string
   scheduled_at: string | null
   venue_name: string | null
@@ -25,6 +25,7 @@ export type BracketRow = {
   away_season_team_id: string | null
   home_seed?: number | null
   away_seed?: number | null
+  home_source_game_id?: string | null
   home_score: number | null
   away_score: number | null
 }
@@ -39,6 +40,8 @@ type Props<T extends BracketRow> = {
 }
 
 const slotFormat: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+// Seeds in bracket order, matching the API: 1 vs 8, 4 vs 5, 2 vs 7 and 3 vs 6 (and 1 vs 4, 2 vs 3 for four teams).
+const bracketOrder = [1, 8, 4, 5, 2, 7, 3, 6]
 
 // Saved playoff games for each division, drawn as a bracket that fills in as results are recorded.
 export function GamesBracket<T extends BracketRow>({ seasonId, divisions, divisionId, timeZone, renderActions }: Props<T>) {
@@ -58,7 +61,7 @@ export function GamesBracket<T extends BracketRow>({ seasonId, divisions, divisi
 
   const toBracket = (game: T): BracketGame => {
     const final = game.status === 'completed'
-    const seeds = game.stage === 'semifinal'
+    const seeds = game.stage === 'quarterfinal' || game.stage === 'semifinal'
     return { key: game.id, stage: game.stage as BracketGame['stage'], final, venue: game.venue_name,
       when: game.scheduled_at ? formatGameDateTime(game.scheduled_at, timeZone, slotFormat) : 'Date not scheduled',
       home: { name: game.home_name, seed: seeds ? game.home_seed : null, score: final ? game.home_score : null, waiting: !game.home_season_team_id },
@@ -68,9 +71,15 @@ export function GamesBracket<T extends BracketRow>({ seasonId, divisions, divisi
         <DropdownMenuContent align="end" className="w-56">{renderActions(game)}</DropdownMenuContent>
       </DropdownMenu> }
   }
-  // Semifinal 1 is seeds 1 and 4; brackets saved before seeds were recorded keep their time order.
-  const order = (game: T) => [game.stage === 'semifinal' ? game.home_seed ?? 9 : 0, game.scheduled_at ?? ''].join(':')
+  // A game's place in the bracket comes from its home seed, or from the game its home side waits for. Semifinal 1 holds seed 1.
+  // Brackets saved before seeds were recorded keep their time order.
+  const position = (game: T, games: T[]): number => {
+    if (game.home_seed) return bracketOrder.indexOf(game.home_seed)
+    const source = games.find((item) => item.id === game.home_source_game_id)
+    return source ? position(source, games) : bracketOrder.length
+  }
+  const ordered = (games: T[]) => [...games].sort((a, b) => position(a, games) - position(b, games) || (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''))
   return <PlayoffBracketBoard key={divisionId} initialDivisionId={divisionId || undefined}
-    divisions={brackets.map(({ division, games }) => ({ id: division.id, name: division.name, games: [...games].sort((a, b) => order(a).localeCompare(order(b))).map(toBracket) }))} />
+    divisions={brackets.map(({ division, games }) => ({ id: division.id, name: division.name, games: ordered(games).map(toBracket) }))} />
 }
 

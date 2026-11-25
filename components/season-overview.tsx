@@ -227,7 +227,7 @@ function SeasonResults({ data }: { data: SeasonOverviewData }) {
   </Card>
 }
 
-// A side waiting for the standings or a semifinal has no team yet, so its placeholder name is muted.
+// A side waiting for the standings or an earlier playoff game has no team yet, so its placeholder name is muted.
 function TeamName({ name, teamId, bold = false }: { name: string; teamId: string | null; bold?: boolean }) {
   return <span className={cn(!teamId && 'text-muted-foreground', bold && 'font-semibold')}>{name}</span>
 }
@@ -360,7 +360,7 @@ function DivisionsTable({ divisions }: { divisions: OverviewDivision[] }) {
   </Card>
 }
 
-const playoffStageLabel = { waiting: 'After round robin', semifinals: 'Semifinals', final: 'Championship', complete: 'Champion decided' }
+const playoffStageLabel = { waiting: 'After round robin', quarterfinals: 'Quarterfinals', semifinals: 'Semifinals', final: 'Championship', complete: 'Champion decided' }
 
 // One compact card per division with playoffs: its stage and next playoff game, or the champion.
 function PlayoffsSection({ divisions, timeZone }: { divisions: OverviewDivision[]; timeZone?: string | null }) {
