@@ -32,7 +32,7 @@ export type ScorekeepingGame = {
   scheduled_at: string | null
   venue_name: string | null
   status: 'scheduled' | 'live' | 'completed'
-  stage: 'preliminary' | 'semifinal' | 'final' | 'third_place'
+  stage: 'preliminary' | 'quarterfinal' | 'semifinal' | 'final' | 'third_place'
   time_zone: string | null
   live_home_score: number | null
   live_away_score: number | null

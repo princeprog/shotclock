@@ -32,7 +32,7 @@ type ScheduleGame = {
   homeName: string
   awayName: string
   round: number
-  stage: 'preliminary' | 'semifinal' | 'final' | 'third_place'
+  stage: 'preliminary' | 'quarterfinal' | 'semifinal' | 'final' | 'third_place'
   scheduledAt: string
   venueId: string
   durationMinutes: number
@@ -53,15 +53,15 @@ type Availability = {
 }
 type Pace = 'weekly' | 'spread' | 'compact'
 type TeamUnavailabilityDraft = { id: number; teamId: string; dates: string[] }
-type StatusDivision = { id: string; name: string; teamCount: number; hasSchedule: boolean; canGeneratePreliminary: boolean; preliminaryReason?: string | null; playoffStage: 'semifinal' | 'final' | null; playoffReason?: string | null; teams?: { id: string; name: string }[] }
+type StatusDivision = { id: string; name: string; teamCount: number; hasSchedule: boolean; canGeneratePreliminary: boolean; preliminaryReason?: string | null; playoffStage: 'quarterfinal' | 'semifinal' | 'final' | null; playoffReason?: string | null; teams?: { id: string; name: string }[] }
 type PlayingWindow = {
   weekdays: number[]
   startTime: string
   endTime: string
 }
 type WindowDraft = PlayingWindow & { id: number }
-type ScheduleInput = { availability: Availability; format: 'single' | 'double'; playoffs: boolean; thirdPlace?: boolean; playoffDates?: { startDate: string; endDate: string } }
-type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; roundRobin?: boolean; playoffs?: boolean; notice?: string; gameCount?: number; gamesPerTeam?: number }
+type ScheduleInput = { availability: Availability; format: 'single' | 'double'; playoffs: boolean; playoffTeams?: 4 | 8; thirdPlace?: boolean; playoffDates?: { startDate: string; endDate: string } }
+type DivisionPreview = { id: string; name: string; teamCount: number; reason?: string; roundRobin?: boolean; playoffs?: boolean; playoffTeams?: number; notice?: string; gameCount?: number; gamesPerTeam?: number }
 type Unplaced = Pick<ScheduleGame, 'divisionId' | 'divisionName' | 'homeTeamId' | 'awayTeamId' | 'homeName' | 'awayName' | 'round' | 'stage'> & { reason: string; reasonCode?: string }
 type Preview = { games: ScheduleGame[]; warnings: string[]; divisions: DivisionPreview[]; unplaced?: Unplaced[] }
 type Slot = { scheduledAt: string; venueId: string }
@@ -206,14 +206,14 @@ const unplacedReasons: Record<string, string> = {
   rest: 'Minimum rest leaves no open slot', limits: 'Pacing or team limits leave no open date', round_order: 'No open slot after the previous round',
   spread: 'Later dates are full', teams_busy: 'Teams are busy at every open slot', venues_busy: 'Courts are booked at every open slot', mixed: 'No slot fits every rule',
 }
-// Playoff sides that wait for a semifinal result have ids like "<semifinal>:winner".
+// Playoff sides that wait for an earlier playoff result have ids like "<game>:winner".
 const waitingSide = (teamId: string) => teamId.includes(':') ? 'font-normal text-muted-foreground' : undefined
-// A side waiting for the standings or a semifinal has an id like "<division>:seed-1" or "<division>:semifinal-1:winner".
+// A side waiting for the standings or an earlier playoff game has an id like "<division>:seed-1" or "<division>:quarterfinal-1:winner".
 function draftSide(teamId: string, name: string): BracketSide {
   const seed = /:seed-(\d)$/.exec(teamId)
   return { name, seed: seed ? Number(seed[1]) : null, waiting: teamId.includes(':') }
 }
-const stageLabels: Record<ScheduleGame['stage'], string> = { preliminary: 'Preliminary', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }
+const stageLabels: Record<ScheduleGame['stage'], string> = { preliminary: 'Preliminary', quarterfinal: 'Quarterfinal', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }
 const paces: { value: Pace; label: string; description: string }[] = [
   { value: 'weekly', label: 'Weekly', description: 'Each team’s games are at least 7 days apart.' },
   { value: 'spread', label: 'Spread across dates', description: 'Rounds are spaced evenly from the start date to the end date.' },
@@ -321,8 +321,9 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const [duration, setDuration] = useState('60')
   const [rest, setRest] = useState('0')
   const [format, setFormat] = useState<'single' | 'double'>('single')
-  // Playoffs bracket the top four teams of each division with at least four teams, on their own dates after the round robin.
+  // Playoffs bracket the top four or top eight teams of each division, on their own dates after the round robin.
   const [includePlayoffs, setIncludePlayoffs] = useState(true)
+  const [chosenPlayoffTeams, setChosenPlayoffTeams] = useState<4 | 8>(4)
   const [thirdPlace, setThirdPlace] = useState(true)
   const [editedPlayoffStart, setEditedPlayoffStart] = useState<string>()
   const [editedPlayoffEnd, setEditedPlayoffEnd] = useState<string>()
@@ -350,6 +351,9 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   const needsRoundRobin = statusDivisions.some((division) => division.canGeneratePreliminary)
   const playoffsAvailable = statusDivisions.some((division) => (division.canGeneratePreliminary && division.teamCount >= 4) || !!division.playoffStage)
   const playoffs = includePlayoffs && playoffsAvailable
+  // A top-eight bracket needs a division with eight teams whose bracket is not started yet; smaller divisions use the top four.
+  const eightTeamsAvailable = statusDivisions.some((division) => division.teamCount >= 8 && (division.canGeneratePreliminary || division.playoffStage === 'quarterfinal' || division.playoffStage === 'semifinal'))
+  const playoffTeams = eightTeamsAvailable ? chosenPlayoffTeams : 4
   const nothingToGenerate = !!status.data && !needsRoundRobin && !playoffs
   const startDate = editedStart ?? seasonStart?.slice(0, 10) ?? ''
   const endDate = editedEnd ?? seasonEnd?.slice(0, 10) ?? ''
@@ -380,7 +384,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
       const availability: Availability = { startDate: needsRoundRobin ? startDate : playoffStart, endDate: needsRoundRobin ? endDate : playoffEnd, windows: windows.map(({ weekdays, startTime, endTime }) => ({ weekdays: [...weekdays].sort(), startTime, endTime })), timeZone, venueIds, durationMinutes: Number(duration), restMinutes: Number(rest),
         pace, maxGamesPerTeamPerDay: Number(maxPerDay), changeoverMinutes: Number(changeover), blackoutDates: blackoutDates.filter((date) => date >= scheduleStart && date <= scheduleEnd),
         teamUnavailability: [...unavailable].map(([teamId, dates]) => ({ teamId, dates: [...dates].sort() })) }
-      settingsKey = JSON.stringify(playoffs ? { availability, format, playoffs, thirdPlace, playoffDates: { startDate: playoffStart, endDate: playoffEnd } } : { availability, format, playoffs })
+      settingsKey = JSON.stringify(playoffs ? { availability, format, playoffs, playoffTeams, thirdPlace, playoffDates: { startDate: playoffStart, endDate: playoffEnd } } : { availability, format, playoffs })
     } catch { /* Wait until the time zone is valid. */ }
   }
   const estimate = useQuery({ queryKey: ['schedule-estimate', path, settingsKey], enabled: false, retry: false,
@@ -644,7 +648,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
   </div>
   // What generating does for each division with the current settings.
   const divisionPlan = (division: StatusDivision) => division.canGeneratePreliminary
-    ? playoffs ? division.teamCount >= 4 ? 'Round robin and playoffs' : 'Round robin only · fewer than four teams' : 'Round robin'
+    ? playoffs ? division.teamCount >= 4 ? `Round robin and playoffs · top ${playoffTeams === 8 && division.teamCount >= 8 ? 8 : 4}` : 'Round robin only · fewer than four teams' : 'Round robin'
     : playoffs && division.playoffStage ? 'Playoffs' : (playoffs && division.hasSchedule ? division.playoffReason : division.preliminaryReason) ?? 'Not included'
   const panel = (fallback: string) => presentation === 'page' ? 'flex flex-col gap-5 rounded-xl border bg-card p-5' : fallback
   const panelHeading = (id: string, title: string, meta?: ReactNode) => <div className="flex min-h-7 items-center justify-between gap-3"><h3 id={id} className="text-base font-semibold">{title}</h3>{meta}</div>
@@ -687,8 +691,15 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
 
         <section className={panel('flex flex-col gap-4 border-t pt-6')} aria-labelledby="schedule-playoffs-heading">
           {panelHeading('schedule-playoffs-heading', 'Playoffs')}
-          <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-0.5" checked={playoffs} disabled={pending || !playoffsAvailable} onCheckedChange={(checked) => { setIncludePlayoffs(checked); changed() }} /><span className="flex flex-col gap-0.5"><span className="font-medium">Schedule playoffs</span><span className="text-muted-foreground">{!status.data || playoffsAvailable ? 'The top four teams in each division play semifinals (1 vs 4, 2 vs 3), then the championship. Seeds fill in from the final standings.' : 'Playoffs need a division with at least four teams.'}</span></span></label>
+          <label className="flex items-start gap-3 text-sm"><Checkbox className="mt-0.5" checked={playoffs} disabled={pending || !playoffsAvailable} onCheckedChange={(checked) => { setIncludePlayoffs(checked); changed() }} /><span className="flex flex-col gap-0.5"><span className="font-medium">Schedule playoffs</span><span className="text-muted-foreground">{!status.data || playoffsAvailable ? 'The top teams in each division play a bracket after the round robin. Seeds fill in from the final standings.' : 'Playoffs need a division with at least four teams.'}</span></span></label>
           {playoffs && <>
+            {eightTeamsAvailable && <FieldSet className="gap-2 border-t pt-4"><FieldLegend variant="label" className="mb-0">Teams in the playoffs</FieldLegend>
+              <ToggleGroup variant="outline" size="sm" spacing={0} disabled={pending} aria-label="Teams in the playoffs" value={[String(playoffTeams)]} onValueChange={(values) => { if (values[0] === '4' || values[0] === '8') { setChosenPlayoffTeams(Number(values[0]) as 4 | 8); changed() } }}>
+                <ToggleGroupItem value="4" className="px-4 aria-pressed:bg-muted aria-pressed:text-foreground">Top 4</ToggleGroupItem>
+                <ToggleGroupItem value="8" className="px-4 aria-pressed:bg-muted aria-pressed:text-foreground">Top 8</ToggleGroupItem>
+              </ToggleGroup>
+              <FieldDescription>{playoffTeams === 8 ? 'Quarterfinals 1 vs 8, 4 vs 5, 2 vs 7 and 3 vs 6, then semifinals and the championship. Divisions with fewer than eight teams use the top four.' : 'Semifinals 1 vs 4 and 2 vs 3, then the championship.'}</FieldDescription>
+            </FieldSet>}
             {playoffDateControls}
             {firstPlayoffDate && <p className="-mt-2 text-xs text-muted-foreground">Playoffs can start on {formatDate(parseISO(firstPlayoffDate), 'MMM d, yyyy')} or later. Bracket games take the earliest open slots.</p>}
             <label className="flex items-start gap-3 border-t pt-4 text-sm"><Checkbox className="mt-0.5" checked={thirdPlace} disabled={pending} onCheckedChange={(checked) => { setThirdPlace(checked); changed() }} /><span className="flex flex-col gap-0.5"><span className="font-medium">Include a third-place game</span><span className="text-muted-foreground">The semifinal losers play for third place.</span></span></label>
@@ -846,7 +857,7 @@ export function ScheduleGenerator({ seasonId, seasonName, seasonStart, seasonEnd
                   const roundGames = divisionGames.filter(({ item }) => roundKey(item.game) === round)
                   const stages = new Set(roundGames.map(({ item }) => item.game.stage))
                   return <div key={round} className="border-t first:border-t-0">
-                  <h5 className="border-b bg-muted/40 px-5 py-1.5 text-xs font-medium text-muted-foreground">{stages.has('preliminary') ? 'Round ' + (round % 1000) : stages.has('semifinal') ? 'Semifinals' : stages.has('third_place') ? 'Championship and third place' : 'Championship'}</h5>
+                  <h5 className="border-b bg-muted/40 px-5 py-1.5 text-xs font-medium text-muted-foreground">{stages.has('preliminary') ? 'Round ' + (round % 1000) : stages.has('quarterfinal') ? 'Quarterfinals' : stages.has('semifinal') ? 'Semifinals' : stages.has('third_place') ? 'Championship and third place' : 'Championship'}</h5>
                   <Accordion value={expandedGame ? [expandedGame] : []} onValueChange={(value) => setExpandedGame(value[0] ?? null)} >{roundGames.sort((a, b) => a.item.localTime.localeCompare(b.item.localTime)).map(({ item, index }) => {
                   const gameIssues = issues.filter((issue) => issue.index === index)
                   const invalid = invalidGameIndexes.includes(index)

@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 export type BracketSide = { name: string; seed?: number | null; score?: number | null; waiting?: boolean }
 export type BracketGame = {
   key: string
-  stage: 'semifinal' | 'final' | 'third_place'
+  stage: 'quarterfinal' | 'semifinal' | 'final' | 'third_place'
   home: BracketSide
   away: BracketSide
   when?: string
@@ -34,7 +34,7 @@ function MatchCard({ game, label }: { game: BracketGame; label: string }) {
   const winner = winnerOf(game)
   return <article aria-label={`${label}: ${game.home.name} vs ${game.away.name}`} className="overflow-hidden rounded-lg border bg-background shadow-xs">
     <header className="flex min-h-8 items-center justify-between gap-2 border-b pr-1 pl-3 text-xs">
-      <span className="font-medium">{label}</span>
+      <span className="shrink-0 font-medium whitespace-nowrap">{label}</span>
       <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
         {game.final && <span className="rounded-full bg-foreground/10 px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-foreground/80">Final</span>}
         <span className="truncate tabular-nums">{game.when}</span>{game.actions}
@@ -55,33 +55,41 @@ function ChampionCard({ name }: { name: string | null }) {
   </div>
 }
 
-// Rounds read left to right: semifinals (1 vs 4, 2 vs 3) feed the championship and the champion.
-// The third-place game sits under the championship. Narrow screens scroll the bracket sideways to keep its shape.
+const roundTitles = { quarterfinal: 'Quarterfinals', semifinal: 'Semifinals', final: 'Championship' }
+const gameTitles = { quarterfinal: 'Quarterfinal', semifinal: 'Semifinal', final: 'Championship' }
+
+// Rounds read left to right: quarterfinals in an eight-team bracket, then semifinals, the championship and the champion.
+// Every row of the grid holds one first-round game, so a later game spans the rows of the two games that feed it and sits
+// centred between them, and each connector joins that pair to it. The third-place game sits under the championship.
+// Narrow screens scroll the bracket sideways to keep its shape.
 export function PlayoffBracket({ games, label }: { games: BracketGame[]; label: string }) {
-  const semifinals = games.filter((game) => game.stage === 'semifinal')
   const championship = games.find((game) => game.stage === 'final')
   const thirdPlace = games.find((game) => game.stage === 'third_place')
   const champion = championship ? winnerOf(championship) : null
-  const linked = semifinals.length === 2 && !!championship
+  const rounds = (['quarterfinal', 'semifinal', 'final'] as const).map((stage) => ({ stage, games: games.filter((game) => game.stage === stage) })).filter((round) => round.games.length)
+  const firstRound = rounds[0]?.games.length ?? 1
+  // Linked when each round has half the games of the one before, ending in the championship.
+  const linked = !!championship && rounds.every((round, index) => round.games.length * 2 ** index === firstRound)
+  const rows = linked ? firstRound : Math.max(1, ...rounds.map((round) => round.games.length))
+  const span = (roundIndex: number) => linked ? 2 ** roundIndex : 1
+  const columns = [...rounds.flatMap((_, index) => [index ? '2.5rem' : '', 'minmax(13rem,1fr)']).filter(Boolean), ...(championship ? ['2.5rem', 'minmax(9rem,0.7fr)'] : [])]
+  const gameRows = `2 / span ${rows}`
   return <div className="overflow-x-auto">
-    <div role="group" aria-label={label} className="grid min-w-[46rem] grid-cols-[minmax(13rem,1fr)_2.5rem_minmax(13rem,1fr)_2.5rem_minmax(9rem,0.7fr)] gap-y-6">
-      <p className={cn(roundLabel, 'col-start-1 row-start-1 -mb-3')}>Semifinals</p>
-      {championship && <p className={cn(roundLabel, 'col-start-3 row-start-1 -mb-3')}>Championship</p>}
-      {championship && <p className={cn(roundLabel, 'col-start-5 row-start-1 -mb-3')}>Champion</p>}
-      {semifinals.map((game, index) => <div key={game.key} className={cn('col-start-1', index === 0 ? 'row-start-2' : 'row-start-3')}>
-        <MatchCard game={game} label={`Semifinal ${index + 1}`} />
-      </div>)}
-      {linked && <>
-        <div aria-hidden="true" className="relative col-start-2 row-start-2"><div className={cn('absolute top-1/2 right-1/2 -bottom-3 left-0 rounded-tr-md border-t border-r', connector)} /></div>
-        <div aria-hidden="true" className="relative col-start-2 row-start-3"><div className={cn('absolute -top-3 right-1/2 bottom-1/2 left-0 rounded-br-md border-r border-b', connector)} /></div>
-        <div aria-hidden="true" className="relative col-start-2 row-span-2 row-start-2"><div className={cn('absolute top-1/2 right-0 left-1/2 border-t', connector)} /></div>
-      </>}
+    <div role="group" aria-label={label} className="grid" style={{ gridTemplateColumns: columns.join(' '), gridTemplateRows: `auto repeat(${rows}, minmax(0, 1fr))`, minWidth: `${rounds.length * 15.5 + (championship ? 11.5 : 0)}rem` }}>
+      {rounds.map((round, roundIndex) => <p key={round.stage} className={cn(roundLabel, 'pb-1')} style={{ gridColumn: roundIndex * 2 + 1, gridRow: 1 }}>{roundTitles[round.stage]}</p>)}
+      {championship && <p className={cn(roundLabel, 'pb-1')} style={{ gridColumn: rounds.length * 2 + 1, gridRow: 1 }}>Champion</p>}
+      {rounds.map((round, roundIndex) => round.games.map((game, index) => <div key={game.key} className="self-center py-2" style={{ gridColumn: roundIndex * 2 + 1, gridRow: `${2 + index * span(roundIndex)} / span ${span(roundIndex)}` }}>
+        <MatchCard game={game} label={round.stage === 'final' ? gameTitles.final : `${gameTitles[round.stage]} ${index + 1}`} />
+      </div>))}
+      {linked && rounds.slice(1).map((round, index) => round.games.map((game, position) => <div key={game.key} aria-hidden="true" className="relative" style={{ gridColumn: index * 2 + 2, gridRow: `${2 + position * span(index + 1)} / span ${span(index + 1)}` }}>
+        <div className={cn('absolute inset-y-1/4 right-1/2 left-0 rounded-r-md border-y border-r', connector)} />
+        <div className={cn('absolute top-1/2 right-0 left-1/2 border-t', connector)} />
+      </div>))}
       {championship && <>
-        <div className="col-start-3 row-span-2 row-start-2 self-center"><MatchCard game={championship} label="Championship" /></div>
-        <div aria-hidden="true" className="relative col-start-4 row-span-2 row-start-2"><div className={cn('absolute top-1/2 inset-x-0 border-t', connector)} /></div>
-        <div className="col-start-5 row-span-2 row-start-2 self-center"><ChampionCard name={champion ? championship[champion].name : null} /></div>
+        <div aria-hidden="true" className="relative" style={{ gridColumn: rounds.length * 2, gridRow: gameRows }}><div className={cn('absolute inset-x-0 top-1/2 border-t', connector)} /></div>
+        <div className="self-center" style={{ gridColumn: rounds.length * 2 + 1, gridRow: gameRows }}><ChampionCard name={champion ? championship[champion].name : null} /></div>
       </>}
-      {thirdPlace && <div className="col-start-3 row-start-4 flex flex-col gap-2">
+      {thirdPlace && <div className="mt-4 flex flex-col gap-2" style={{ gridColumn: Math.max(1, rounds.length * 2 - 1), gridRow: rows + 2 }}>
         <p className={roundLabel}>Third place</p>
         <MatchCard game={thirdPlace} label="Third place" />
       </div>}
@@ -116,4 +124,3 @@ export function PlayoffBracketBoard({ divisions, initialDivisionId }: { division
     </div>
   </section>
 }
-

@@ -12,7 +12,7 @@ export type OverviewGame = {
   scheduled_at: string | null
   venue_name: string | null
   status: 'scheduled' | 'live' | 'completed'
-  stage: 'preliminary' | 'semifinal' | 'final' | 'third_place'
+  stage: 'preliminary' | 'quarterfinal' | 'semifinal' | 'final' | 'third_place'
   home_score: number | null
   away_score: number | null
   forfeited_by_season_team_id: string | null
@@ -20,7 +20,7 @@ export type OverviewGame = {
   live_away_score?: number | null
 }
 export type OverviewStanding = { id: string; name: string; wins: number; losses: number; pointDifference: number }
-export type PlayoffStatus = { stage: 'waiting' | 'semifinals' | 'final' | 'complete'; nextGame: OverviewGame | null; champion: string | null }
+export type PlayoffStatus = { stage: 'waiting' | 'quarterfinals' | 'semifinals' | 'final' | 'complete'; nextGame: OverviewGame | null; champion: string | null }
 export type OverviewDivision = {
   id: string
   name: string
@@ -116,6 +116,6 @@ export function seasonDay(startDate: string | null, endDate: string | null, toda
 }
 
 export function stageLabel(stage: OverviewGame['stage']) {
-  return { preliminary: null, semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[stage]
+  return { preliminary: null, quarterfinal: 'Quarterfinal', semifinal: 'Semifinal', final: 'Championship', third_place: 'Third place' }[stage]
 }
 

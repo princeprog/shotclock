@@ -9,7 +9,7 @@ export type LiveState = {
   gameId: string
   status: 'scheduled' | 'live' | 'completed'
   version: number
-  stage: 'preliminary' | 'semifinal' | 'final' | 'third_place'
+  stage: 'preliminary' | 'quarterfinal' | 'semifinal' | 'final' | 'third_place'
   scheduledAt: string | null
   leagueName: string
   seasonName: string
