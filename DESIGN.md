@@ -296,7 +296,7 @@ A zero-chroma neutral scale carries the structure and one warm orange carries th
 
 ### Primary
 - **Shotclock Orange** (#E67145): the brand hue from the mark. It fills the logo tile, sets the period in the "Shotclock." wordmark, draws the session-restore ring and the sign-in illustration, and on the console is the home side: the 10px dot beside the home team's name, home line-score bars, the home jersey tile and the start of the confirmation wash. At 10% opacity it tints initials chips across the app.
-- **Orange Ink** (#A64320; dark #FFAE88): the text color for orange that has to be read, always on the 10% orange tint (initials chips in the league workspace and games list, the home marker in the final box score).
+- **Orange Ink** (#A64320; dark #FFAE88): the text color for orange that has to be read, always on the 10% orange tint (initials chips in the league workspace and games list).
 - **Selection Wash** (#fdf0ea; dark #3a2318): the console's accent token. It fills the selected roster row, and at 40% the inline action row beneath it below 1024px, with Desk Ink (#18181b; dark #fafafa) on top. The row's check mark uses Tailwind orange-700 (orange-400 in dark).
 - **Focus Orange** (#c2410c; dark #fb923c): the console's ring token. Every focus outline on the console uses it, including the inset 2px ring around a roster row.
 - **Text Selection Tint** (#f8d3c3; dark #7a3a20): highlighted text on the console.

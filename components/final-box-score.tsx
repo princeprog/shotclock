@@ -1,168 +1,125 @@
-import type { CSSProperties } from 'react'
 import { AwardIcon } from 'lucide-react'
 import { cn } from 'cn'
+import { LineScore, PlayerTable } from '@/components/live-box-score'
+import { sideColor, type Side } from '@/components/scoring-workspace'
 import { Badge } from '@/components/ui/badge'
-import { Card } from '@/components/ui/card'
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatGameDateTime } from '@/lib/league-time'
 import { periodLabel, type LivePlayer, type LiveState, type LiveTeam } from '@/lib/live-scoring'
 import { stageLabel } from '@/lib/season-overview'
+import styles from './final-box-score.module.css'
 
-const statColumns = [
-  { key: 'points', label: 'PTS', title: 'Points' },
-  { key: 'rebounds', label: 'REB', title: 'Rebounds' },
-  { key: 'assists', label: 'AST', title: 'Assists' },
-  { key: 'steals', label: 'STL', title: 'Steals' },
-  { key: 'blocks', label: 'BLK', title: 'Blocks' },
-  { key: 'turnovers', label: 'TO', title: 'Turnovers' },
-  { key: 'fouls', label: 'PF', title: 'Personal fouls' },
-] as const satisfies readonly { key: keyof LivePlayer; label: string; title: string }[]
-type StatKey = (typeof statColumns)[number]['key']
-type Totals = Record<StatKey, number>
+type StatKey = Exclude<keyof LivePlayer, 'rosterId' | 'name' | 'jersey'>
+const sides = ['home', 'away'] as const
+const panelClass = cn('gap-4 rounded-xl border py-5 shadow-xs ring-0', styles.rise)
+const bestStats = [['points', 'PTS', 'Points'], ['rebounds', 'REB', 'Rebounds'], ['assists', 'AST', 'Assists'], ['steals', 'STL', 'Steals'], ['blocks', 'BLK', 'Blocks']] as const
+const comparisons = [['rebounds', 'Rebounds'], ['assists', 'Assists'], ['steals', 'Steals'], ['blocks', 'Blocks'], ['turnovers', 'Turnovers'], ['fouls', 'Fouls']] as const
 
-function teamTotals(team: LiveTeam) {
-  return Object.fromEntries(statColumns.map(({ key }) => [key, team.players.reduce((sum, player) => sum + player[key], 0)])) as Totals
+const total = (team: LiveTeam, key: StatKey) => team.players.reduce((sum, player) => sum + player[key], 0)
+// Cards rise in one after another, 50ms apart; reduced motion keeps only the fade.
+const stagger = (step: number) => ({ animationDelay: `${step * 50}ms` })
+
+function Dot({ side }: { side: Side }) {
+  return <span aria-hidden="true" className={cn('size-2.5 shrink-0 rounded-full', sideColor[side])} />
 }
 
-function TeamMark({ name, className }: { name: string; className?: string }) {
-  const initials = name.trim().split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0]).join('').toLocaleUpperCase()
-  return <span aria-hidden="true" className={cn('flex shrink-0 items-center justify-center rounded-lg bg-[#E67145]/10 font-semibold text-[#A64320] dark:text-[#FFAE88]', className)}>{initials}</span>
-}
-
-// A finished live-scored game: final score and line score, best player, team totals and each team's box score.
+// A finished live-scored game: the result with its line score, the best player, team stats and each team's box score.
 export function FinalBoxScore({ view }: { view: LiveState }) {
-  const homeWon = view.home.score > view.away.score
-  const home = teamTotals(view.home)
-  const away = teamTotals(view.away)
-  return <div className="flex flex-col gap-4">
-    <Scoreboard view={view} homeWon={homeWon} />
-    <div className={cn('grid gap-4', view.bestPlayer && 'lg:grid-cols-2')}>
-      {view.bestPlayer && <BestPlayer player={view.bestPlayer} />}
-      <TeamComparison view={view} home={home} away={away} />
+  const winner: Side = view.home.score > view.away.score ? 'home' : 'away'
+  return <div className="flex flex-col gap-4 lg:gap-5">
+    <Result view={view} winner={winner} />
+    <div className={cn('grid gap-4 lg:gap-5', view.bestPlayer && 'lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]')}>
+      {view.bestPlayer && <BestPlayer player={view.bestPlayer} side={view.bestPlayer.seasonTeamId === view.home.seasonTeamId ? 'home' : 'away'} />}
+      <TeamStats view={view} />
     </div>
-    <TeamBoxScore team={view.home} totals={home} won={homeWon} bestRosterId={view.bestPlayer?.rosterId} />
-    <TeamBoxScore team={view.away} totals={away} won={!homeWon} bestRosterId={view.bestPlayer?.rosterId} />
+    <div className="grid gap-4 lg:gap-5 xl:grid-cols-2 xl:items-start">
+      {sides.map((side, index) => <TeamBoxScore key={side} team={view[side]} side={side} step={3 + index} bestRosterId={view.bestPlayer?.rosterId} />)}
+    </div>
+    <p className="text-xs text-muted-foreground">Bold marks each team’s high in points, rebounds, assists, steals and blocks. Fouls turn amber at four and red at five.</p>
   </div>
 }
 
-function Scoreboard({ view, homeWon }: { view: LiveState; homeWon: boolean }) {
+function Result({ view, winner }: { view: LiveState; winner: Side }) {
   const overtime = view.period > view.format.periodCount
-  const stage = stageLabel(view.stage)
-  const sides = [['home', view.home], ['away', view.away]] as const
-  return <Card className="gap-0 py-0">
-    <section aria-label="Final score" className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-4 py-6 sm:gap-6 sm:px-8 sm:py-8">
-      <FinalTeam team={view.home} won={homeWon} />
-      <div className="flex flex-col items-center gap-1.5 text-center">
-        <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold tracking-wide uppercase">{overtime ? `Final/${periodLabel(view.period, view.format.periodCount)}` : 'Final'}</span>
-        {view.scheduledAt && <span className="text-xs text-muted-foreground">{formatGameDateTime(view.scheduledAt, view.timeZone, { month: 'short', day: 'numeric', year: 'numeric' })}</span>}
-        {stage && <span className="text-xs font-medium text-muted-foreground">{stage}</span>}
+  const played = view.scheduledAt && formatGameDateTime(view.scheduledAt, view.timeZone, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  return <Card className={cn(panelClass, 'gap-0 py-0')}>
+    <section aria-label="Final score" className="grid grid-cols-2 items-center gap-x-6 gap-y-4 px-5 py-5 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:px-8 sm:py-6">
+      <FinalTeam team={view.home} side="home" won={winner === 'home'} />
+      <div className="col-span-2 flex flex-col items-center gap-1.5 text-center sm:col-span-1 sm:col-start-2 sm:row-start-1">
+        <Badge variant="secondary" className="h-6 px-2.5 text-xs font-semibold">{overtime ? `Final/${periodLabel(view.period, view.format.periodCount)}` : 'Final'}</Badge>
+        {(played || view.venueName) && <p className="text-sm text-muted-foreground">{[played, view.venueName].filter(Boolean).join(' · ')}</p>}
+        <p className="text-sm text-muted-foreground">{[view.leagueName, view.divisionName, stageLabel(view.stage)].filter(Boolean).join(' · ')}</p>
       </div>
-      <FinalTeam team={view.away} won={!homeWon} align="end" />
+      <div className="col-start-2 row-start-1 sm:col-start-3"><FinalTeam team={view.away} side="away" won={winner === 'away'} /></div>
     </section>
-    {view.periodScores.length > 0 && <div className="border-t">
-      <Table aria-label="Score by period">
-        <TableHeader><TableRow className="hover:bg-transparent">
-          <TableHead className="pl-4 sm:pl-8">Team</TableHead>
-          {view.periodScores.map((line) => <TableHead key={line.period} className="w-12 text-center">{periodLabel(line.period, view.format.periodCount)}</TableHead>)}
-          <TableHead className="w-14 pr-4 text-center sm:pr-8"><abbr title="Total" className="no-underline">T</abbr></TableHead>
-        </TableRow></TableHeader>
-        <TableBody>{sides.map(([side, team]) => <TableRow key={side} className="hover:bg-transparent">
-          <TableCell className="max-w-0 truncate pl-4 font-medium sm:pl-8">{team.name}</TableCell>
-          {view.periodScores.map((line) => <TableCell key={line.period} className="text-center tabular-nums text-muted-foreground">{line[side]}</TableCell>)}
-          <TableCell className="pr-4 text-center font-semibold tabular-nums sm:pr-8">{team.score}</TableCell>
-        </TableRow>)}</TableBody>
-      </Table>
-    </div>}
+    {view.periodScores.length > 0 && <LineScore view={view} final className="rounded-none border-0 border-t" />}
   </Card>
 }
 
-function FinalTeam({ team, won, align = 'start' }: { team: LiveTeam; won: boolean; align?: 'start' | 'end' }) {
-  return <div className={cn('flex min-w-0 items-center gap-4', align === 'end' && 'flex-row-reverse text-right')}>
-    <TeamMark name={team.name} className="hidden size-12 text-base sm:flex" />
-    <div className={cn('flex min-w-0 flex-col gap-1', align === 'end' && 'items-end')}>
-      <span className="max-w-full truncate text-sm font-medium sm:text-base" title={team.name}>{team.name}</span>
-      <span className={cn('text-4xl leading-none font-semibold tabular-nums sm:text-6xl', !won && 'text-muted-foreground')}>{team.score}</span>
+function FinalTeam({ team, side, won }: { team: LiveTeam; side: Side; won: boolean }) {
+  const away = side === 'away'
+  return <div className={cn('flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center lg:justify-between lg:gap-6', away ? 'items-end text-right lg:flex-row-reverse' : 'items-start')}>
+    <div className="min-w-0">
+      <h2 className={cn('flex items-center gap-2 text-xl leading-tight font-semibold tracking-tight lg:text-2xl', away && 'flex-row-reverse')}><Dot side={side} /><span className="break-words">{team.name}</span></h2>
+      <p className="mt-1 text-sm text-muted-foreground">{away ? 'Away' : 'Home'}</p>
+    </div>
+    <div className={cn('flex items-center gap-3', away && 'flex-row-reverse')}>
+      <strong className={cn('text-5xl leading-none font-bold tracking-tight tabular-nums lg:text-7xl', !won && 'text-muted-foreground')}>{team.score}</strong>
+      {won && <Badge className="bg-emerald-50 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">Won</Badge>}
     </div>
   </div>
 }
 
-function BestPlayer({ player }: { player: NonNullable<LiveState['bestPlayer']> }) {
-  return <Card className="gap-0 py-0">
-    <section aria-labelledby="best-player" className="flex h-full flex-col gap-5 p-5 sm:p-6">
-      <h2 id="best-player" className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><AwardIcon aria-hidden="true" className="size-4 text-amber-600 dark:text-amber-400" />Best player</h2>
+function BestPlayer({ player, side }: { player: NonNullable<LiveState['bestPlayer']>; side: Side }) {
+  return <Card className={panelClass} style={stagger(1)}>
+    <CardHeader><CardTitle><h2 className="flex items-center gap-2 text-base font-semibold"><AwardIcon aria-hidden="true" className="size-4 text-amber-600 dark:text-amber-400" />Best player</h2></CardTitle></CardHeader>
+    <CardContent className="gap-5">
       <div className="flex min-w-0 items-center gap-4">
-        <span aria-hidden="true" className="flex size-14 shrink-0 items-center justify-center rounded-full bg-amber-100 text-lg font-semibold tabular-nums text-amber-800 dark:bg-amber-500/15 dark:text-amber-200">{player.jersey ?? '–'}</span>
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <p className="truncate text-xl font-semibold">{player.name}</p>
-          <p className="truncate text-sm text-muted-foreground">{player.teamName}{player.jersey !== null && ` · #${player.jersey}`}</p>
+        <span aria-hidden="true" className="grid size-14 shrink-0 place-items-center rounded-full bg-amber-100 text-xl font-bold text-amber-900 tabular-nums dark:bg-amber-500/15 dark:text-amber-200">{player.jersey ?? '–'}</span>
+        <div className="min-w-0">
+          <p className="text-xl leading-tight font-semibold break-words">{player.name}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground"><Dot side={side} />{player.teamName}{player.jersey !== null && ` · #${player.jersey}`}</p>
         </div>
       </div>
-      <dl className="mt-auto grid grid-cols-5 divide-x rounded-lg border">{statColumns.slice(0, 5).map(({ key, label, title }) => <div key={key} className="flex flex-col-reverse items-center gap-0.5 py-3">
+      <dl className="grid grid-cols-5 divide-x border-t pt-4">{bestStats.map(([key, label, title]) => <div key={key} className="flex flex-col-reverse items-center gap-0.5">
         <dt className="text-xs text-muted-foreground"><abbr title={title} className="no-underline">{label}</abbr></dt>
-        <dd className="text-xl font-semibold tabular-nums">{player[key]}</dd>
+        <dd className="text-2xl font-semibold tabular-nums">{player[key]}</dd>
       </div>)}</dl>
-    </section>
+    </CardContent>
   </Card>
 }
 
-// Team totals side by side. Each bar shows a team's share of that stat between the two teams.
-function TeamComparison({ view, home, away }: { view: LiveState; home: Totals; away: Totals }) {
-  const share = (value: number, total: number): CSSProperties => ({ width: total ? `${(value / total) * 100}%` : '0%' })
-  return <Card className="gap-0 py-0">
-    <section aria-labelledby="team-stats" className="flex flex-col gap-4 p-5 sm:p-6">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
-        <span className="flex min-w-0 items-center gap-2 text-sm font-medium"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-[#E67145]" /><span className="truncate">{view.home.name}</span></span>
-        <h2 id="team-stats" className="text-xs font-medium text-muted-foreground">Team stats</h2>
-        <span className="flex min-w-0 items-center justify-end gap-2 text-sm font-medium"><span className="truncate">{view.away.name}</span><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-slate-500" /></span>
-      </div>
-      <ul className="flex flex-col gap-3">{statColumns.slice(1).map(({ key, title }) => {
-        const total = home[key] + away[key]
-        return <li key={key} aria-label={`${title}: ${view.home.name} ${home[key]}, ${view.away.name} ${away[key]}`} className="grid grid-cols-[2rem_minmax(0,1fr)_6.5rem_minmax(0,1fr)_2rem] items-center gap-2 text-sm">
-          <span aria-hidden="true" className="font-medium tabular-nums">{home[key]}</span>
-          <span aria-hidden="true" className="flex h-1.5 justify-end overflow-hidden rounded-full bg-muted"><span className="h-full rounded-full bg-[#E67145]" style={share(home[key], total)} /></span>
-          <span aria-hidden="true" className="text-center text-xs text-muted-foreground">{title}</span>
-          <span aria-hidden="true" className="flex h-1.5 overflow-hidden rounded-full bg-muted"><span className="h-full rounded-full bg-slate-500" style={share(away[key], total)} /></span>
-          <span aria-hidden="true" className="text-right font-medium tabular-nums">{away[key]}</span>
+// Each pair of bars splits one stat between the teams, growing outward from the label in the middle.
+function TeamStats({ view }: { view: LiveState }) {
+  const share = (value: number, sum: number) => ({ width: sum ? `${(value / sum) * 100}%` : '0%' })
+  return <Card className={panelClass} style={stagger(2)}>
+    <CardHeader>
+      <CardTitle><h2 className="text-base font-semibold">Team stats</h2></CardTitle>
+      <CardDescription className="flex flex-wrap gap-x-4 gap-y-1">{sides.map((side) => <span key={side} className="flex items-center gap-1.5"><Dot side={side} />{view[side].name}</span>)}</CardDescription>
+    </CardHeader>
+    <CardContent>
+      <ul className="grid gap-3">{comparisons.map(([key, label]) => {
+        const home = total(view.home, key)
+        const away = total(view.away, key)
+        return <li key={key} className="grid grid-cols-[2rem_minmax(0,1fr)_5.5rem_minmax(0,1fr)_2rem] items-center gap-2 text-sm sm:gap-3">
+          <span className="sr-only">{label}: {view.home.name} {home}, {view.away.name} {away}</span>
+          <span aria-hidden="true" className={cn('tabular-nums', home > away ? 'font-semibold' : 'text-muted-foreground')}>{home}</span>
+          <span aria-hidden="true" className="flex h-2 justify-end overflow-hidden rounded-full bg-muted"><span className={cn('h-full rounded-full', sideColor.home, styles.bar, styles.fromRight)} style={share(home, home + away)} /></span>
+          <span aria-hidden="true" className="text-center text-muted-foreground">{label}</span>
+          <span aria-hidden="true" className="flex h-2 overflow-hidden rounded-full bg-muted"><span className={cn('h-full rounded-full', sideColor.away, styles.bar)} style={share(away, home + away)} /></span>
+          <span aria-hidden="true" className={cn('text-right tabular-nums', away > home ? 'font-semibold' : 'text-muted-foreground')}>{away}</span>
         </li>
       })}</ul>
-    </section>
+    </CardContent>
   </Card>
 }
 
-function TeamBoxScore({ team, totals, won, bestRosterId }: { team: LiveTeam; totals: Totals; won: boolean; bestRosterId?: string }) {
-  const headingId = `box-score-${team.seasonTeamId}`
-  return <Card className="gap-0 py-0">
-    <section aria-labelledby={headingId}>
-      <div className="flex items-center gap-3 border-b px-4 py-3.5 sm:px-6">
-        <TeamMark name={team.name} className="size-9 text-xs" />
-        <h2 id={headingId} className="min-w-0 flex-1 truncate text-base font-semibold">{team.name}</h2>
-        {won ? <Badge variant="seasonActive">Won</Badge> : <Badge className="bg-red-600 text-white">Lost</Badge>}
-        <span className="text-lg font-semibold tabular-nums">{team.score}</span>
-      </div>
-      <Table className="min-w-[36rem]">
-        <TableHeader><TableRow className="hover:bg-transparent">
-          <TableHead className="sticky left-0 z-10 bg-card pl-4 text-xs text-muted-foreground sm:pl-6">Player</TableHead>
-          {statColumns.map(({ key, label, title }) => <TableHead key={key} className="w-14 text-right text-xs text-muted-foreground last:pr-4 sm:last:pr-6"><abbr title={title} className="no-underline">{label}</abbr></TableHead>)}
-        </TableRow></TableHeader>
-        <TableBody>{team.players.map((player) => {
-          const recorded = statColumns.some(({ key }) => player[key] > 0)
-          return <TableRow key={player.rosterId} className={cn('hover:bg-transparent', !recorded && 'text-muted-foreground')}>
-            <TableCell className="sticky left-0 z-10 bg-card pl-4 sm:pl-6">
-              <span className="flex items-center gap-3">
-                <span className="w-6 shrink-0 text-right font-mono text-xs text-muted-foreground tabular-nums">{player.jersey ?? '–'}</span>
-                <span className={cn(recorded && 'font-medium')}>{player.name}</span>
-                {player.rosterId === bestRosterId && <><AwardIcon aria-hidden="true" className="size-3.5 shrink-0 text-amber-600 dark:text-amber-400" /><span className="sr-only">Best player</span></>}
-              </span>
-            </TableCell>
-            {statColumns.map(({ key }) => <TableCell key={key} className={cn('text-right tabular-nums last:pr-4 sm:last:pr-6', key === 'points' && recorded && 'font-semibold')}>{player[key]}</TableCell>)}
-          </TableRow>
-        })}</TableBody>
-        <TableFooter className="bg-transparent"><TableRow className="hover:bg-transparent">
-          <TableCell className="sticky left-0 z-10 bg-card pl-4 font-semibold sm:pl-6"><span className="flex items-center gap-3"><span className="w-6 shrink-0" />Totals</span></TableCell>
-          {statColumns.map(({ key }) => <TableCell key={key} className="text-right font-semibold tabular-nums last:pr-4 sm:last:pr-6">{totals[key]}</TableCell>)}
-        </TableRow></TableFooter>
-      </Table>
-    </section>
+function TeamBoxScore({ team, side, step, bestRosterId }: { team: LiveTeam; side: Side; step: number; bestRosterId?: string }) {
+  return <Card className={cn(panelClass, 'gap-0 py-0')} style={stagger(step)}>
+    <CardHeader className="border-b py-4 [.border-b]:pb-4">
+      <CardTitle><h2 className="flex items-center gap-2 text-lg leading-tight font-semibold"><Dot side={side} />{team.name}<span className="text-sm font-normal text-muted-foreground">{side === 'home' ? 'Home' : 'Away'}</span></h2></CardTitle>
+      <CardAction className="self-center text-2xl font-bold tabular-nums">{team.score}</CardAction>
+    </CardHeader>
+    <PlayerTable team={team} bestRosterId={bestRosterId} className="rounded-none border-0" />
   </Card>
 }
-

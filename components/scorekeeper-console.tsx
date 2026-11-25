@@ -215,6 +215,8 @@ function Console({ gameId }: { gameId: string }) {
   const tied = view.home.score === view.away.score
   const busy = direct.isPending || outbox.length > 0 || !online
   const isLive = view.status === 'live'
+  // Live and finished games share the courtside shell; a scheduled game shows the setup form.
+  const onDesk = view.status !== 'scheduled'
   const canRecord = isScorer && !queueBlocked
   const syncLabel = !online ? `Offline · ${outbox.length} waiting` : syncProblem ? 'Sync interrupted' : outbox.length ? `Syncing ${outbox.length}` : 'Synced'
   const context = [view.leagueName, view.divisionName, view.venueName].filter(Boolean).join(' · ')
@@ -227,8 +229,8 @@ function Console({ gameId }: { gameId: string }) {
     ? `${['1st', '2nd', '3rd', '4th'][view.period - 1]} ${view.format.periodCount === 2 ? 'half' : 'quarter'}`
     : label
 
-  return <main className={isLive ? styles.desk : 'mx-auto w-full max-w-6xl p-3 sm:p-6'}>
-    {isLive && <header className="border-b bg-card">
+  return <main className={onDesk ? styles.desk : 'mx-auto w-full max-w-6xl p-3 sm:p-6'}>
+    {onDesk && <header className="border-b bg-card">
       <div className="mx-auto flex min-h-16 max-w-[88rem] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 sm:px-6 lg:px-8">
         <nav aria-label="Scorekeeping navigation" className="flex items-center gap-2.5">
           <ShotclockLogo /><ChevronRightIcon aria-hidden="true" className="size-4 text-muted-foreground" />
@@ -242,11 +244,11 @@ function Console({ gameId }: { gameId: string }) {
         {isScorer && <span role="status" className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold', online && !outbox.length && !syncProblem ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' : 'bg-muted text-muted-foreground')}>
           {!online ? <CloudOffIcon aria-hidden="true" className="size-3.5" /> : outbox.length && !syncProblem ? <LoaderCircleIcon aria-hidden="true" className="size-3.5 animate-spin" /> : !syncProblem && <CheckIcon aria-hidden="true" className="size-3.5" />}{syncLabel}
         </span>}
-        <Button variant="outline" className="min-h-11 px-3" onClick={() => setBoxOpen(true)}><ListOrderedIcon aria-hidden="true" data-icon="inline-start" />Box score</Button>
+        {isLive && <Button variant="outline" className="min-h-11 px-3" onClick={() => setBoxOpen(true)}><ListOrderedIcon aria-hidden="true" data-icon="inline-start" />Box score</Button>}
       </div>
     </header>}
-    <div className={isLive ? 'mx-auto flex w-full max-w-[88rem] flex-col gap-4 px-3 py-4 sm:px-6 lg:gap-5 lg:px-8 lg:py-5' : 'flex flex-col gap-4'}>
-    {!isLive && <header className="flex items-center gap-2">
+    <div className={onDesk ? 'mx-auto flex w-full max-w-[88rem] flex-col gap-4 px-3 py-4 sm:px-6 lg:gap-5 lg:px-8 lg:py-5' : 'flex flex-col gap-4'}>
+    {!onDesk && <header className="flex items-center gap-2">
       <Button variant="ghost" size="icon-sm" aria-label="Back to games" nativeButton={false} render={<Link href="/scorekeeping" />}><ArrowLeftIcon /></Button>
       <div className="flex min-w-0 flex-col"><span className="truncate text-sm font-medium">{view.home.name} vs {view.away.name}</span><span className="truncate text-xs text-muted-foreground">{context}</span></div>
     </header>}
